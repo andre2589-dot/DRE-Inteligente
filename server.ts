@@ -13,6 +13,19 @@ const PORT = 3000;
 // Database configuration for local persistence
 const DB_FILE = path.join(process.cwd(), "app_db.json");
 
+// Clear fictional transactions on startup once to let user start fresh with real data
+try {
+  if (fs.existsSync(DB_FILE)) {
+    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    parsed.transactions = { c1: [], c2: [] };
+    fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), "utf-8");
+    console.log("Successfully cleared example transactions to prepare for real data.");
+  }
+} catch (e) {
+  console.error("Error clearing transactions:", e);
+}
+
 interface DbSchema {
   ai_conversations: {
     id: string;
@@ -31,6 +44,9 @@ interface DbSchema {
     costType: 'Fixo' | 'Variável' | 'N/A' | 'MEO';
     active: boolean;
   }[];
+  transactions?: {
+    [companyId: string]: any[];
+  };
 }
 
 const DEFAULT_PLANO_CONTAS_SEED: DbSchema['plano_contas'] = [
@@ -133,7 +149,8 @@ function getDb(): DbSchema {
     if (!fs.existsSync(DB_FILE)) {
       const initialDb: DbSchema = {
         ai_conversations: [],
-        plano_contas: DEFAULT_PLANO_CONTAS_SEED
+        plano_contas: DEFAULT_PLANO_CONTAS_SEED,
+        transactions: {}
       };
       fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2), "utf-8");
       return initialDb;
@@ -143,6 +160,7 @@ function getDb(): DbSchema {
     
     // Ensure both properties are initialized properly
     if (!parsed.ai_conversations) parsed.ai_conversations = [];
+    if (!parsed.transactions) parsed.transactions = {};
     if (!parsed.plano_contas || parsed.plano_contas.length < 30) {
       parsed.plano_contas = DEFAULT_PLANO_CONTAS_SEED;
       saveDb(parsed);
@@ -153,7 +171,8 @@ function getDb(): DbSchema {
     console.error("Database file read error, recreating:", err);
     const initialDb: DbSchema = {
       ai_conversations: [],
-      plano_contas: DEFAULT_PLANO_CONTAS_SEED
+      plano_contas: DEFAULT_PLANO_CONTAS_SEED,
+      transactions: {}
     };
     return initialDb;
   }
@@ -235,23 +254,24 @@ app.post("/api/gemini/chat", async (req, res) => {
     // Prepare message history formatted for Google GenAI SDK
     // Let's create the prompt with embedded context
     const contextPrompt = `
-Você é o "CFO Virtual - DRE Executivo", um CFO ultra-direito, pragmático e direto de nível sênior.
+Você é o "CFO Virtual Inteligente", um CFO de nível Executivo e Conselheiro Financeiro Sênior da empresa "${dreContext?.companyName || 'Empresa Ativa'}" (Setor/Segmento: "${dreContext?.sector || 'Serviços/Geral'}").
 
-Instruções críticas para a sua resposta (SIGA RIGOROSAMENTE):
-1. Responda em Português do Brasil (PT-BR) de forma EXTREMAMENTE curta e direta, indo logo ao ponto.
-2. Seu limite é de no MÁXIMO 5 a 10 linhas. Nunca escreva textos prolixos ou parágrafos longos.
-3. Não utilize textos motivacionais, de autoajuda, clichês ou teorias de SaaS/varejo acadêmicas.
-4. Apresente informações reais e exatas da base de dados abaixo (valores em R$ e % reais calculados de maneira fiel).
-5. Se questionado sobre quedas de lucros ou despesas, liste as principais causas em tópicos simples (bullet points) com valores correspondentes.
-6. Não crie benchmarks ou métricas fictícias de mercado. Utilize apenas os dados declarados no contexto.
+Você domina o negócio da empresa de forma profunda e sabe correlacionar todas as informações financeiras de todas as abas (Plano de Contas, Lançamentos Importados, DRE de Caixa e Regras de Mapeamento).
 
-DRE Ativa da Empresa para Análise (Dados reais):
+Instruções fundamentais para sua atuação (SIGA RIGOROSAMENTE):
+1. CONHECIMENTO DO NEGÓCIO: Atue de acordo com o setor da empresa (${dreContext?.sector || 'Geral'}). Entenda que despesas de pessoal, marketing ou infraestrutura possuem impactos diferentes dependendo do segmento de atuação.
+2. CORRELAÇÃO ENTRE DADOS (ABAS): Sempre que o usuário perguntar algo, analise e correlacione os dados estruturados de Plano de Contas, regras de mapeamento, categorias DRE, e os dados brutos de lançamentos (breakdown) para responder com total precisão de onde vêm os valores.
+3. EXPLICAR GESTÃO FINANCEIRA: Se o usuário demonstrar dúvida, não entender de gestão ou perguntar o significado de termos como EBITDA, OPEX, Net Revenue, Deduções ou Regime de Caixa, explique com paciência e didática ultra-simples para que quem não entenda 100% de finanças consiga assimilar perfeitamente. Dê uma resposta curta e didática e depois mostre a aplicação prática no caso real dele.
+4. FOCO EM NÚMEROS REAIS: Priorize sempre valores em R$ reais calculados e consolidados fielmente sob a base de dados fornecida. Suas análises devem ser amparadas em números exatos.
+5. SÍNTESE E DIAGNÓSTICO: Mantenha as respostas finais curtas, resumidas e diretas ao ponto, de preferência estruturadas em tópicos (bullet points) limpos apresentando os números objetivos. Evite parágrafos longos, clichés e floreios motivacionais.
+
+Estrutura Financeira e Comercial da Empresa (Dados Reais das Abas):
 ${JSON.stringify(dreContext, null, 2)}
 
-Histórico anterior da conversa (use se relevante):
-${history ? JSON.stringify(history) : 'Sem mensagens anteriores.'}
+Histórico da Conversação Atual:
+${history ? JSON.stringify(history) : 'Sem histórico anterior.'}
 
-Pergunta do Usuário:
+Pergunta/Dúvida do Usuário:
 ${prompt}
 `;
 
@@ -341,6 +361,37 @@ app.post("/api/conversations", (req, res) => {
   db.ai_conversations.push(newItem);
   saveDb(db);
   res.status(201).json(newItem);
+});
+
+// Get persistent transactions for a company
+app.get("/api/transactions", (req, res) => {
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+  const db = getDb();
+  if (!db.transactions) {
+    db.transactions = {};
+  }
+  const list = db.transactions[String(company_id)] || [];
+  res.json(list);
+});
+
+// Save persistent transactions for a company
+app.post("/api/transactions", (req, res) => {
+  const { company_id, transactions } = req.body;
+  if (!company_id || !Array.isArray(transactions)) {
+    res.status(400).json({ error: "company_id ou array de lançamentos inválido." });
+    return;
+  }
+  const db = getDb();
+  if (!db.transactions) {
+    db.transactions = {};
+  }
+  db.transactions[String(company_id)] = transactions;
+  saveDb(db);
+  res.json({ success: true });
 });
 
 // Get Plano de Contas

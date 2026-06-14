@@ -30,55 +30,20 @@ const MAPPING_CONFIG: {
     normalizedAliases: string[];
   }
 } = {
-  vencimento: {
-    label: 'Vencimento',
-    originalLabel: 'Vencimento',
-    normalizedAliases: ['vencimento', 'datavencimento', 'dtvencimento']
-  },
   operacao: {
     label: 'Operação',
     originalLabel: 'Operação',
-    normalizedAliases: ['operacao', 'dataoperacao']
-  },
-  mes: {
-    label: 'Mês',
-    originalLabel: 'Mês',
-    normalizedAliases: ['mes', 'competencia']
+    normalizedAliases: ['operacao', 'dataoperacao', 'data', 'datalancamentodadespesa']
   },
   conta: {
     label: 'Conta',
     originalLabel: 'Conta',
-    normalizedAliases: ['conta', 'codigoconta']
+    normalizedAliases: ['conta', 'codigoconta', 'codigo']
   },
   descricaoConta: {
     label: 'Descrição - Conta',
     originalLabel: 'Descrição - Conta',
-    normalizedAliases: ['descricaoconta', 'descricaodeconta']
-  },
-  classificacao: {
-    label: 'Classificação',
-    originalLabel: 'Classificação',
-    normalizedAliases: ['classificacao', 'categoria']
-  },
-  descricao: {
-    label: 'Descrição',
-    originalLabel: 'Descrição',
-    normalizedAliases: ['descricao']
-  },
-  custo: {
-    label: 'Custo',
-    originalLabel: 'Custo',
-    normalizedAliases: ['custo', 'tipocusto', 'tipodecusto']
-  },
-  historico: {
-    label: 'Histórico',
-    originalLabel: 'Histórico',
-    normalizedAliases: ['historico']
-  },
-  documento: {
-    label: 'Documento',
-    originalLabel: 'Documento',
-    normalizedAliases: ['documento', 'nf', 'notafiscal', 'numerodocumento']
+    normalizedAliases: ['descricaoconta', 'descricaodeconta', 'nomedaconta', 'nomeconta']
   },
   valor: {
     label: 'Valor',
@@ -380,6 +345,7 @@ export default function TransactionList({
   const [filterCostType, setFilterCostType] = useState('all');
   const [sortField, setSortField] = useState<'date' | 'value'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [realTimePeriod, setRealTimePeriod] = useState<string>('all');
 
   // Editing state
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
@@ -491,16 +457,9 @@ export default function TransactionList({
 
         // Perform dynamic header detection
         const detectedMapping: { [key: string]: string | null } = {
-          vencimento: null,
           operacao: null,
-          mes: null,
           conta: null,
           descricaoConta: null,
-          classificacao: null,
-          descricao: null,
-          custo: null,
-          historico: null,
-          documento: null,
           valor: null,
         };
 
@@ -533,7 +492,7 @@ export default function TransactionList({
         setShowMappingModal(true);
 
         if (!isSuccess) {
-          setValidationError(`Arquivo inválido. A planilha carregada deve conter as 11 colunas obrigatórias do modelo. Colunas obrigatórias ausentes: ${missing.join(', ')}`);
+          setValidationError(`Arquivo inválido. A planilha carregada deve conter as colunas obrigatórias: ${missing.join(', ')}`);
           return;
         }
 
@@ -574,13 +533,13 @@ export default function TransactionList({
           // 2. Verify 'Operação'
           const operVal = row[detectedMapping.operacao!];
           if (operVal === undefined || operVal === null || String(operVal).trim() === '') {
-            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Operação' (Data Competência) é obrigatório e está vazio.`);
+            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Operação' (Data do lançamento) é obrigatório e está vazio.`);
           }
 
-          // 3. Verify 'Classificação'
-          const classVal = row[detectedMapping.classificacao!];
-          if (classVal === undefined || classVal === null || String(classVal).trim() === '') {
-            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Classificação' é obrigatório e está vazio.`);
+          // 3. Verify 'Conta'
+          const contaVal = row[detectedMapping.conta!];
+          if (contaVal === undefined || contaVal === null || String(contaVal).trim() === '') {
+            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Conta' é obrigatório e está vazio.`);
           }
 
           // 4. Verify 'Descrição - Conta' (Obrigatório)
@@ -599,16 +558,9 @@ export default function TransactionList({
 
         // Build records under mirror mode: No system overrides or autoconfig fallback data
         const formattedRecords = excelRows.map((row, idx) => {
-          const rawVenc = row[detectedMapping.vencimento!] !== undefined ? String(row[detectedMapping.vencimento!]).trim() : '';
           const rawOper = row[detectedMapping.operacao!] !== undefined ? String(row[detectedMapping.operacao!]).trim() : '';
-          const rawMes = row[detectedMapping.mes!] !== undefined ? String(row[detectedMapping.mes!]).trim() : '';
           const rawConta = row[detectedMapping.conta!] !== undefined ? String(row[detectedMapping.conta!]).trim() : '';
           const rawDescConta = row[detectedMapping.descricaoConta!] !== undefined ? String(row[detectedMapping.descricaoConta!]).trim() : '';
-          const rawClass = row[detectedMapping.classificacao!] !== undefined ? String(row[detectedMapping.classificacao!]).trim() : '';
-          const rawDesc = row[detectedMapping.descricao!] !== undefined ? String(row[detectedMapping.descricao!]).trim() : '';
-          const rawCusto = row[detectedMapping.custo!] !== undefined ? String(row[detectedMapping.custo!]).trim() : '';
-          const rawHist = row[detectedMapping.historico!] !== undefined ? String(row[detectedMapping.historico!]).trim() : '';
-          const rawDoc = row[detectedMapping.documento!] !== undefined ? String(row[detectedMapping.documento!]).trim() : '';
           const rawVal = row[detectedMapping.valor!];
 
           // Determine numeric value
@@ -620,55 +572,43 @@ export default function TransactionList({
             numericVal = parseFloat(cleaned) || 0;
           }
 
-          // Strict mapping of classification to standard DRE group IDs for calculations
-          const mappedClassification = mapClassificacaoToCategory(rawClass);
+          // Resolve matching account from current planoContas
+          let matchedPc = planoContas.find(pc => pc.code.trim() === String(rawConta).trim());
+          if (!matchedPc && rawDescConta) {
+            matchedPc = planoContas.find(pc => pc.name.trim().toLowerCase() === String(rawDescConta).trim().toLowerCase());
+          }
 
-          // Value mathematical polarity for vertical accounting groups:
-          // Sales: positive value
-          // Costs/Expenses/Taxes/Deductions: negative value
-          const isIncome = mappedClassification === 'sales_products' || 
-                           mappedClassification === 'sales_services' || 
-                           rawClass.toLowerCase().includes('venda') || 
-                           rawClass.toLowerCase().includes('receita') || 
-                           rawClass.toLowerCase().includes('faturamento') || 
-                           rawClass.toLowerCase().includes('entrada');
+          const mappedClassification = matchedPc ? matchedPc.classificationId : 'opex_admin';
+          const isIncome = matchedPc 
+            ? (matchedPc.classificationId === 'sales_products' || 
+               matchedPc.classificationId === 'sales_services' || 
+               matchedPc.name.toLowerCase().includes('venda') || 
+               matchedPc.name.toLowerCase().includes('receita') || 
+               matchedPc.name.toLowerCase().includes('faturamento') || 
+               matchedPc.name.toLowerCase().includes('entrada'))
+            : false;
           
           const mathematicalValue = isIncome ? Math.abs(numericVal) : -Math.abs(numericVal);
 
-          // Map Custo exactly and strictly to standard 'Fixo' | 'Variável' | 'N/A'
-          const normalizedCusto = rawCusto.toLowerCase();
-          let costTypeVal: 'Fixo' | 'Variável' | 'N/A' = 'Fixo';
-          if (normalizedCusto.includes('variavel')) {
-            costTypeVal = 'Variável';
-          } else if (normalizedCusto.includes('fixo')) {
-            costTypeVal = 'Fixo';
-          } else if (normalizedCusto === 'n/a' || normalizedCusto === '') {
-            costTypeVal = 'N/A';
-          }
+          const costTypeVal: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = matchedPc ? matchedPc.costType : 'Fixo';
+          const subCategoryVal = matchedPc ? matchedPc.subCategory : '';
 
-          const parsedDateForQuery = parseExcelDate(rawOper || rawVenc || rawMes);
+          const parsedDateForQuery = parseExcelDate(rawOper);
 
           return {
             id: `temp_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 4)}`,
             date: parsedDateForQuery,
-            account: rawDescConta || rawConta || '',
-            description: rawDesc || '',
-            document: rawDoc || undefined,
+            account: matchedPc ? matchedPc.name : rawDescConta || `CONTA ${rawConta}`,
+            description: subCategoryVal,
+            document: undefined,
             classification: mappedClassification,
             costType: costTypeVal,
             value: mathematicalValue,
 
             // Raw columns supporting 100% literal fidelity
-            vencimento: rawVenc,
             operacao: rawOper,
-            mes: rawMes,
             conta: rawConta,
             descricaoConta: rawDescConta,
-            classificacaoOriginal: rawClass,
-            descricaoOriginal: rawDesc,
-            custoOriginal: rawCusto,
-            historico: rawHist,
-            documentoOriginal: rawDoc,
             valorOriginal: numericVal
           } as Transaction;
         });
@@ -781,8 +721,42 @@ export default function TransactionList({
       return;
     }
 
-    onImportTransactions(tempFile.records);
-    setSuccessMsg(`Sucesso de integridade! Todas as ${tempFile.records.length} linhas do Excel foram importadas sem qualquer modificação.`);
+    // Solve latest relationships against current planoContas before sending to parent
+    const finalRecordsResolved = tempFile.records.map(record => {
+      const rawConta = record.conta || '';
+      const rawDescConta = record.descricaoConta || '';
+      
+      let matchedPc = planoContas.find(pc => pc.code.trim() === String(rawConta).trim());
+      if (!matchedPc && rawDescConta) {
+        matchedPc = planoContas.find(pc => pc.name.trim().toLowerCase() === String(rawDescConta).trim().toLowerCase());
+      }
+
+      if (matchedPc) {
+        const mappedClassification = matchedPc.classificationId;
+        const isIncome = mappedClassification === 'sales_products' || 
+                         mappedClassification === 'sales_services' || 
+                         matchedPc.name.toLowerCase().includes('venda') || 
+                         matchedPc.name.toLowerCase().includes('receita') || 
+                         matchedPc.name.toLowerCase().includes('faturamento') || 
+                         matchedPc.name.toLowerCase().includes('entrada');
+                         
+        const rawVal = record.valorOriginal !== undefined ? record.valorOriginal : Math.abs(record.value);
+        const mathematicalValue = isIncome ? Math.abs(rawVal) : -Math.abs(rawVal);
+
+        return {
+          ...record,
+          account: matchedPc.name,
+          classification: matchedPc.classificationId,
+          description: matchedPc.subCategory,
+          costType: matchedPc.costType,
+          value: mathematicalValue
+        };
+      }
+      return record;
+    });
+
+    onImportTransactions(finalRecordsResolved);
+    setSuccessMsg(`Sucesso de integridade! Todas as ${tempFile.records.length} linhas do Excel foram importadas com mapeamento dinâmico.`);
     setTempFile(null); // Clear preview state
     setAuditLog(null);
     setImportErrors(null);
@@ -805,14 +779,52 @@ export default function TransactionList({
     return revProducts + revServices + revOther;
   }, [revProducts, revServices, revOther]);
 
+  // Extract monthly periods dynamically from transactions
+  const availableMonths = useMemo(() => {
+    const list = Array.from(new Set(transactions.map(t => {
+      const parts = t.date.split('-');
+      return `${parts[0]}-${parts[1]}`; // YYYY-MM
+    })))
+    .filter(Boolean)
+    .sort();
+    return list;
+  }, [transactions]);
+
+  const formatMonthBR = (monthYm: string): string => {
+    const parts = monthYm.split('-');
+    if (parts.length === 2) {
+      return `${parts[1]}/${parts[0]}`;
+    }
+    return monthYm;
+  };
+
+  const formatDateBR = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+    return dateStr;
+  };
+
   // Real-time calculation dashboard sidecar
   const realTimeKpi = useMemo(() => {
     let recBruta = 0;
     let custVarias = 0;
     let custFixos = 0;
     let despOpex = 0;
+    let activeTxsCount = 0;
 
     transactions.forEach(t => {
+      if (realTimePeriod !== 'all') {
+        const parts = t.date.split('-');
+        const monthYm = `${parts[0]}-${parts[1]}`;
+        if (monthYm !== realTimePeriod) return;
+      }
+
+      activeTxsCount++;
+
       const isRevenue = t.classification === 'sales_products' || t.classification === 'sales_services';
       
       if (isRevenue) {
@@ -841,9 +853,9 @@ export default function TransactionList({
       custosFixos: custFixos,
       despesasOpex: despOpex,
       resultadoParcial: resultadoParcialValue,
-      totalCount: transactions.length
+      totalCount: activeTxsCount
     };
-  }, [transactions]);
+  }, [transactions, realTimePeriod]);
 
   // Handle edit transaction dialog saving
   const handleSaveEdit = (e: React.FormEvent) => {
@@ -1220,6 +1232,24 @@ export default function TransactionList({
             </div>
           </div>
 
+          {/* Period Selection Field */}
+          <div className="flex flex-col gap-1 border-b border-slate-800 pb-3">
+            <label className="text-[9px] uppercase font-bold text-slate-400">Selecionar Período</label>
+            <select
+              value={realTimePeriod}
+              onChange={(e) => setRealTimePeriod(e.target.value)}
+              style={{ backgroundColor: '#1e293b' }}
+              className="border border-slate-700 text-xs rounded-lg py-1.5 px-2.5 text-slate-100 cursor-pointer focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+            >
+              <option value="all">Soma de todos os períodos</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {formatMonthBR(m)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="space-y-2.5 text-xs">
             {/* Margins/Revenue indicator */}
             <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
@@ -1454,7 +1484,7 @@ export default function TransactionList({
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-55/40 transition-colors text-[11px] group">
-                      <td className="py-3 px-3 font-mono text-slate-500 whitespace-nowrap">{tx.date}</td>
+                      <td className="py-3 px-3 font-mono text-slate-500 whitespace-nowrap">{formatDateBR(tx.date)}</td>
                       <td className="py-3 px-3 whitespace-nowrap">
                         <span className="font-semibold text-slate-800 block text-xs">{tx.account}</span>
                         {tx.conta && tx.conta !== tx.account && (
@@ -1488,9 +1518,9 @@ export default function TransactionList({
                         </span>
                       </td>
                       <td className={`py-3 px-3 text-right font-mono font-bold ${
-                        isRevenue ? 'text-emerald-600' : 'text-slate-700'
+                        isRevenue ? 'text-emerald-600' : 'text-slate-705 font-semibold'
                       }`}>
-                        {isRevenue ? '+' : ''} R$ {numericVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {isRevenue ? '+' : '-'} R$ {Math.abs(numericVal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </td>
                       <td className="py-3 px-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">

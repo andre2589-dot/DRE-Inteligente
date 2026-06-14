@@ -2,6 +2,16 @@ import React, { useState } from 'react';
 import { Transaction, DreCategory } from '../types';
 import { ChevronDown, ChevronRight, Edit2, RotateCcw, AlertTriangle, HelpCircle } from 'lucide-react';
 
+function formatDateBR(dateStr: string): string {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`;
+  }
+  return dateStr;
+}
+
 interface DreGridProps {
   transactions: Transaction[];
   categories: DreCategory[];
@@ -277,8 +287,8 @@ export default function DreGrid({
                 <div key={tx.id} className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex justify-between items-center text-xs">
                   <div>
                     <span className="font-bold text-slate-800 block">{tx.description}</span>
-                    <span className="font-mono text-slate-500 text-[10px] block mt-0.5">{tx.date} • {tx.account}</span>
-                    <span className="text-[10px] text-slate-400 block font-semibold">Valor original: R$ {tx.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="font-mono text-slate-500 text-[10px] block mt-0.5">{formatDateBR(tx.date)} • {tx.account}</span>
+                    <span className="text-[10px] text-slate-400 block font-semibold">Valor original: R$ {Math.abs(tx.value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                   
                   {/* Select menu representing instant re-classification rule trigger */}

@@ -216,17 +216,59 @@ export default function App() {
     }
   };
 
+  // Load transactions from SQLite database/file persistence via Express
+  const loadTransactionsForCompany = async (companyId: string) => {
+    try {
+      const res = await fetch(`/api/transactions?company_id=${companyId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setTransactions(data);
+          return;
+        }
+      }
+      // If none found in database, seed default preloads
+      const seed = DEFAULT_TRANSACTIONS[companyId] || [];
+      setTransactions(seed);
+      // Persist defaults immediately to make sure they are stored permanently
+      saveTransactionsToServer(companyId, seed);
+    } catch (err) {
+      console.error("Error loading transactions:", err);
+      setTransactions(DEFAULT_TRANSACTIONS[companyId] || []);
+    }
+  };
+
+  useEffect(() => {
+    loadTransactionsForCompany(activeCompany.id);
+  }, [activeCompany.id]);
+
+  const saveTransactionsToServer = async (companyId: string, txs: Transaction[]) => {
+    try {
+      await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_id: companyId,
+          transactions: txs
+        })
+      });
+    } catch (err) {
+      console.error("Error saving transactions permanently:", err);
+    }
+  };
+
   // Trigger reloading transactions when changing simulated Tenant Company
   const selectActiveCompany = (company: Company) => {
     setActiveCompany(company);
-    // Seed with preloaded or fallbacks
-    const seed = DEFAULT_TRANSACTIONS[company.id] || [];
-    setTransactions(seed);
   };
 
   // Transaction Event Handlers
   const handleAddTransaction = (tx: Transaction) => {
-    setTransactions(prev => [tx, ...prev]);
+    setTransactions(prev => {
+      const updated = [tx, ...prev];
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
+    });
   };
 
   const handleSaveManualRevenue = (competency: string, products: number, services: number, other: number) => {
@@ -279,31 +321,47 @@ export default function App() {
         });
       }
 
-      return [...newTxs, ...filtered];
+      const updated = [...newTxs, ...filtered];
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
     });
   };
 
   const handleImportTransactions = (txs: Transaction[]) => {
     // Overwrite to be a 100% faithful mirror of the imported spreadsheet
     setTransactions(txs);
+    saveTransactionsToServer(activeCompany.id, txs);
   };
 
   const handleDeleteTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
+    setTransactions(prev => {
+      const updated = prev.filter(t => t.id !== id);
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
+    });
   };
 
   const handleClearAllTransactions = () => {
     if(window.confirm('Tem certeza que deseja apagar todos os lançamentos correntes da empresa ativa?')) {
       setTransactions([]);
+      saveTransactionsToServer(activeCompany.id, []);
     }
   };
 
   const handleUpdateTransactionCategory = (txId: string, newCatId: string) => {
-    setTransactions(prev => prev.map(t => t.id === txId ? { ...t, classification: newCatId } : t));
+    setTransactions(prev => {
+      const updated = prev.map(t => t.id === txId ? { ...t, classification: newCatId } : t);
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
+    });
   };
 
   const handleUpdateTransaction = (updatedTx: Transaction) => {
-    setTransactions(prev => prev.map(t => t.id === updatedTx.id ? updatedTx : t));
+    setTransactions(prev => {
+      const updated = prev.map(t => t.id === updatedTx.id ? updatedTx : t);
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
+    });
   };
 
   // Plano de Contas Mapping Rules handlers
@@ -354,6 +412,23 @@ export default function App() {
       totalOpex,
       totalEbitda,
       transactionsCount: enrichedTransactions.length,
+      planoContas: planoContas.map(p => ({
+        codigo: p.code,
+        nome: p.name,
+        categoria: p.classificationId,
+        subcategoria: p.subCategory,
+        tipoCusto: p.costType,
+        ativo: p.active
+      })),
+      regrasMapeamento: rules.map(r => ({
+        termo: r.pattern,
+        dreGrupoDestino: r.targetCategoryId
+      })),
+      categoriasDRE: categories.map(c => ({
+        id: c.id,
+        nome: c.name,
+        formula: c.formulaRef
+      })),
       breakdown: enrichedTransactions.map(x => ({
         data: x.date,
         conta: x.conta,
