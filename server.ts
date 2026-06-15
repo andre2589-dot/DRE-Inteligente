@@ -16,6 +16,7 @@ const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
 
 let supabase: any = null;
+let supabaseActive = false;
 if (supabaseUrl && supabaseAnonKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -486,12 +487,16 @@ app.post("/api/supabase/seed", async (req, res) => {
 
 // GET list of multi-tenant enterprise companies
 app.get("/api/companies", async (req, res) => {
-  if (supabase) {
-    const { data, error } = await supabase.from('companies').select('*').order('name', { ascending: true });
-    if (!error && data) {
-      res.json(data);
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase.from('companies').select('*').order('name', { ascending: true });
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API GET /api/companies:", err);
   }
 
   // Fallback
@@ -521,14 +526,18 @@ app.post("/api/companies", async (req, res) => {
     sector
   };
 
-  if (supabase) {
-    const { error } = await supabase.from('companies').insert([newCompany]);
-    if (!error) {
-      res.status(201).json(newCompany);
-      return;
-    } else {
-      console.error("Erro ao salvar empresa no Supabase:", error);
+  try {
+    if (supabase && supabaseActive) {
+      const { error } = await supabase.from('companies').insert([newCompany]);
+      if (!error) {
+        res.status(201).json(newCompany);
+        return;
+      } else {
+        console.error("Erro ao salvar empresa no Supabase:", error);
+      }
     }
+  } catch (err: any) {
+    console.error("Exceção ao salvar empresa no Supabase:", err);
   }
 
   // Fallback
@@ -548,17 +557,21 @@ app.post("/api/companies", async (req, res) => {
 app.get("/api/conversations", async (req, res) => {
   const { company_id, user_id } = req.query;
   
-  if (supabase) {
-    let query = supabase.from('ai_conversations').select('*');
-    if (company_id) query = query.eq('company_id', String(company_id));
-    if (user_id) query = query.eq('user_id', String(user_id));
-    query = query.order('created_at', { ascending: true });
+  try {
+    if (supabase && supabaseActive) {
+      let query = supabase.from('ai_conversations').select('*');
+      if (company_id) query = query.eq('company_id', String(company_id));
+      if (user_id) query = query.eq('user_id', String(user_id));
+      query = query.order('created_at', { ascending: true });
 
-    const { data, error } = await query;
-    if (!error && data) {
-      res.json(data);
-      return;
+      const { data, error } = await query;
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API GET /api/conversations:", err);
   }
 
   // Fallback
@@ -590,12 +603,16 @@ app.post("/api/conversations", async (req, res) => {
     created_at: new Date().toISOString()
   };
 
-  if (supabase) {
-    const { error } = await supabase.from('ai_conversations').insert([newItem]);
-    if (!error) {
-      res.status(201).json(newItem);
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      const { error } = await supabase.from('ai_conversations').insert([newItem]);
+      if (!error) {
+        res.status(201).json(newItem);
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API POST /api/conversations Supabase:", err);
   }
 
   // Fallback
@@ -613,37 +630,41 @@ app.get("/api/transactions", async (req, res) => {
     return;
   }
 
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('company_id', String(company_id));
-    
-    if (!error && data) {
-      const mapped = data.map(item => ({
-        id: item.id,
-        date: item.date,
-        account: item.account,
-        description: item.description,
-        document: item.document,
-        classification: item.classification,
-        costType: item.cost_type,
-        value: Number(item.value),
-        vencimento: item.vencimento,
-        operacao: item.operacao,
-        mes: item.mes,
-        conta: item.conta,
-        descricaoConta: item.descricao_conta,
-        classificacaoOriginal: item.classificacao_original,
-        descricaoOriginal: item.descricao_original,
-        custoOriginal: item.custo_original,
-        historico: item.historico,
-        documentoOriginal: item.documento_original,
-        valorOriginal: item.valor_original ? Number(item.valor_original) : undefined
-      }));
-      res.json(mapped);
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('company_id', String(company_id));
+      
+      if (!error && data) {
+        const mapped = data.map(item => ({
+          id: item.id,
+          date: item.date,
+          account: item.account,
+          description: item.description,
+          document: item.document,
+          classification: item.classification,
+          costType: item.cost_type,
+          value: Number(item.value),
+          vencimento: item.vencimento,
+          operacao: item.operacao,
+          mes: item.mes,
+          conta: item.conta,
+          descricaoConta: item.descricao_conta,
+          classificacaoOriginal: item.classificacao_original,
+          descricaoOriginal: item.descricao_original,
+          custoOriginal: item.custo_original,
+          historico: item.historico,
+          documentoOriginal: item.documento_original,
+          valorOriginal: item.valor_original ? Number(item.valor_original) : undefined
+        }));
+        res.json(mapped);
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API GET /api/transactions:", err);
   }
 
   const db = getDb();
@@ -662,54 +683,58 @@ app.post("/api/transactions", async (req, res) => {
     return;
   }
 
-  if (supabase) {
-    // Delete existing
-    const { error: delErr } = await supabase
-      .from('transactions')
-      .delete()
-      .eq('company_id', String(company_id));
+  try {
+    if (supabase && supabaseActive) {
+      // Delete existing
+      const { error: delErr } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('company_id', String(company_id));
 
-    if (!delErr) {
-      const dbRows = transactions.map(t => ({
-        id: t.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        company_id: String(company_id),
-        date: t.date,
-        account: t.account,
-        description: t.description || "",
-        document: t.document,
-        classification: t.classification,
-        cost_type: t.costType || 'Fixo',
-        value: t.value || 0,
-        vencimento: t.vencimento,
-        operacao: t.operacao,
-        mes: t.mes,
-        conta: t.conta,
-        descricao_conta: t.descricaoConta,
-        classificacao_original: t.classificacaoOriginal,
-        descricao_original: t.descricaoOriginal,
-        custo_original: t.custoOriginal,
-        historico: t.historico,
-        documento_original: t.documentoOriginal,
-        valor_original: t.valorOriginal
-      }));
+      if (!delErr) {
+        const dbRows = transactions.map(t => ({
+          id: t.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: String(company_id),
+          date: t.date,
+          account: t.account,
+          description: t.description || "",
+          document: t.document,
+          classification: t.classification,
+          cost_type: t.costType || 'Fixo',
+          value: t.value || 0,
+          vencimento: t.vencimento,
+          operacao: t.operacao,
+          mes: t.mes,
+          conta: t.conta,
+          descricao_conta: t.descricaoConta,
+          classificacao_original: t.classificacaoOriginal,
+          descricao_original: t.descricaoOriginal,
+          custo_original: t.custoOriginal,
+          historico: t.historico,
+          documento_original: t.documentoOriginal,
+          valor_original: t.valorOriginal
+        }));
 
-      const CHUNK_SIZE = 150;
-      let success = true;
-      for (let i = 0; i < dbRows.length; i += CHUNK_SIZE) {
-        const chunk = dbRows.slice(i, i + CHUNK_SIZE);
-        const { error: insErr } = await supabase.from('transactions').insert(chunk);
-        if (insErr) {
-          console.error("Erro inserindo transactions no Supabase:", insErr);
-          success = false;
-          break;
+        const CHUNK_SIZE = 150;
+        let success = true;
+        for (let i = 0; i < dbRows.length; i += CHUNK_SIZE) {
+          const chunk = dbRows.slice(i, i + CHUNK_SIZE);
+          const { error: insErr } = await supabase.from('transactions').insert(chunk);
+          if (insErr) {
+            console.error("Erro inserindo transactions no Supabase:", insErr);
+            success = false;
+            break;
+          }
+        }
+
+        if (success) {
+          res.json({ success: true, count: dbRows.length });
+          return;
         }
       }
-
-      if (success) {
-        res.json({ success: true, count: dbRows.length });
-        return;
-      }
     }
+  } catch (err: any) {
+    console.error("Erro na API POST /api/transactions Supabase:", err);
   }
 
   // Fallback
@@ -724,21 +749,25 @@ app.post("/api/transactions", async (req, res) => {
 
 // GET Plano de contas (Plano de Contas master configurations)
 app.get("/api/plano_contas", async (req, res) => {
-  if (supabase) {
-    const { data, error } = await supabase.from('plano_contas').select('*');
-    if (!error && data) {
-      const mapped = data.map(item => ({
-        id: item.id,
-        code: item.code,
-        name: item.name,
-        classificationId: item.classification_id,
-        subCategory: item.sub_category,
-        costType: item.cost_type,
-        active: item.active
-      }));
-      res.json(mapped);
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase.from('plano_contas').select('*');
+      if (!error && data) {
+        const mapped = data.map(item => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          classificationId: item.classification_id,
+          subCategory: item.sub_category,
+          costType: item.cost_type,
+          active: item.active
+        }));
+        res.json(mapped);
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API GET /api/plano_contas:", err);
   }
 
   const db = getDb();
@@ -755,54 +784,77 @@ app.post("/api/plano_contas", async (req, res) => {
   
   const codeNormalized = String(code).trim();
 
-  // Duplicity checking
-  if (supabase) {
-    const { data, error } = await supabase.from('plano_contas').select('id').eq('code', codeNormalized);
-    if (!error && data && data.length > 0) {
-      res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso no Supabase." });
-      return;
+  try {
+    // Duplicity checking
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase.from('plano_contas').select('id').eq('code', codeNormalized);
+      if (!error && data && data.length > 0) {
+        res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso no Supabase." });
+        return;
+      }
+    } else {
+      const db = getDb();
+      const exists = db.plano_contas.some(item => String(item.code).trim() === codeNormalized);
+      if (exists) {
+        res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso." });
+        return;
+      }
     }
-  } else {
+
+    const newItem = {
+      id: `pc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      code: codeNormalized,
+      name: String(name).trim(),
+      classificationId: String(classificationId).trim(),
+      subCategory: String(subCategory).trim(),
+      costType: (costType === 'Variável' ? 'Variável' : (costType === 'MEO' ? 'MEO' : (costType === 'N/A' ? 'N/A' : 'Fixo'))) as any,
+      active: req.body.active !== undefined ? Boolean(req.body.active) : true
+    };
+
+    if (supabase && supabaseActive) {
+      const { error } = await supabase.from('plano_contas').insert([{
+        id: newItem.id,
+        code: newItem.code,
+        name: newItem.name,
+        classification_id: newItem.classificationId,
+        sub_category: newItem.subCategory,
+        cost_type: newItem.costType,
+        active: newItem.active,
+        company_id: company_id || 'c1'
+      }]);
+      if (!error) {
+        res.status(201).json(newItem);
+        return;
+      } else {
+        console.warn("⚠️ Supabase insertion failed. Falling back to local persistent store:", error.message);
+      }
+    }
+
+    // Fallback
     const db = getDb();
-    const exists = db.plano_contas.some(item => String(item.code).trim() === codeNormalized);
-    if (exists) {
-      res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso." });
-      return;
-    }
-  }
-
-  const newItem = {
-    id: `pc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    code: codeNormalized,
-    name: String(name).trim(),
-    classificationId: String(classificationId).trim(),
-    subCategory: String(subCategory).trim(),
-    costType: (costType === 'Variável' ? 'Variável' : (costType === 'MEO' ? 'MEO' : (costType === 'N/A' ? 'N/A' : 'Fixo'))) as any,
-    active: req.body.active !== undefined ? Boolean(req.body.active) : true
-  };
-
-  if (supabase) {
-    const { error } = await supabase.from('plano_contas').insert([{
-      id: newItem.id,
-      code: newItem.code,
-      name: newItem.name,
-      classification_id: newItem.classificationId,
-      sub_category: newItem.subCategory,
-      cost_type: newItem.costType,
-      active: newItem.active,
-      company_id: company_id || 'c1'
-    }]);
-    if (!error) {
+    db.plano_contas.push(newItem);
+    saveDb(db);
+    res.status(201).json(newItem);
+  } catch (err: any) {
+    console.error("Exceção capturada ao cadastrar conta:", err);
+    try {
+      const newItem = {
+        id: `pc_${Date.now()}_local`,
+        code: codeNormalized,
+        name: String(name).trim(),
+        classificationId: String(classificationId).trim(),
+        subCategory: String(subCategory).trim(),
+        costType: costType as any,
+        active: req.body.active !== undefined ? Boolean(req.body.active) : true
+      };
+      const db = getDb();
+      db.plano_contas.push(newItem);
+      saveDb(db);
       res.status(201).json(newItem);
-      return;
+    } catch (fallbackErr: any) {
+      res.status(500).json({ error: `Falha crítica ao gravar dados localmente: ${fallbackErr.message}` });
     }
   }
-
-  // Fallback
-  const db = getDb();
-  db.plano_contas.push(newItem);
-  saveDb(db);
-  res.status(201).json(newItem);
 });
 
 // PUT to edit standard Account
@@ -810,43 +862,47 @@ app.put("/api/plano_contas/:id", async (req, res) => {
   const { id } = req.params;
   const { code, name, classificationId, subCategory, costType, active, company_id } = req.body;
   
-  if (supabase) {
-    if (code) {
-      const codeNormalized = String(code).trim();
-      const { data, error } = await supabase.from('plano_contas').select('id, code').eq('code', codeNormalized);
-      if (!error && data && data.some(item => item.id !== id)) {
-        res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta digitado pertence a outra conta existente." });
+  try {
+    if (supabase && supabaseActive) {
+      if (code) {
+        const codeNormalized = String(code).trim();
+        const { data, error } = await supabase.from('plano_contas').select('id, code').eq('code', codeNormalized);
+        if (!error && data && data.some(item => item.id !== id)) {
+          res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta digitado pertence a outra conta existente." });
+          return;
+        }
+      }
+
+      const upd: any = {};
+      if (code !== undefined) upd.code = String(code).trim();
+      if (name !== undefined) upd.name = String(name).trim();
+      if (classificationId !== undefined) upd.classification_id = String(classificationId).trim();
+      if (subCategory !== undefined) upd.sub_category = String(subCategory).trim();
+      if (costType !== undefined) upd.cost_type = costType;
+      if (active !== undefined) upd.active = Boolean(active);
+
+      const { data: updatedData, error: updErr } = await supabase
+        .from('plano_contas')
+        .update(upd)
+        .eq('id', id)
+        .select('*');
+
+      if (!updErr && updatedData && updatedData.length > 0) {
+        const item = updatedData[0];
+        res.json({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          classificationId: item.classification_id,
+          subCategory: item.sub_category,
+          costType: item.cost_type,
+          active: item.active
+        });
         return;
       }
     }
-
-    const upd: any = {};
-    if (code !== undefined) upd.code = String(code).trim();
-    if (name !== undefined) upd.name = String(name).trim();
-    if (classificationId !== undefined) upd.classification_id = String(classificationId).trim();
-    if (subCategory !== undefined) upd.sub_category = String(subCategory).trim();
-    if (costType !== undefined) upd.cost_type = costType;
-    if (active !== undefined) upd.active = Boolean(active);
-
-    const { data: updatedData, error: updErr } = await supabase
-      .from('plano_contas')
-      .update(upd)
-      .eq('id', id)
-      .select('*');
-
-    if (!updErr && updatedData && updatedData.length > 0) {
-      const item = updatedData[0];
-      res.json({
-        id: item.id,
-        code: item.code,
-        name: item.name,
-        classificationId: item.classification_id,
-        subCategory: item.sub_category,
-        costType: item.cost_type,
-        active: item.active
-      });
-      return;
-    }
+  } catch (err: any) {
+    console.error("Erro na API PUT /api/plano_contas Supabase:", err);
   }
 
   // Fallback
@@ -882,20 +938,24 @@ app.delete("/api/plano_contas/:id", async (req, res) => {
   const { id } = req.params;
   const { hasMovements, action } = req.query;
 
-  if (supabase) {
-    if (hasMovements === 'true' || action === 'inactivate') {
-      const { data, error } = await supabase.from('plano_contas').update({ active: false }).eq('id', id).select('*');
-      if (!error && data && data.length > 0) {
-        res.json({ success: true, item: data[0] });
-        return;
-      }
-    } else {
-      const { data, error } = await supabase.from('plano_contas').delete().eq('id', id).select('*');
-      if (!error && data && data.length > 0) {
-        res.json({ success: true, item: data[0] });
-        return;
+  try {
+    if (supabase && supabaseActive) {
+      if (hasMovements === 'true' || action === 'inactivate') {
+        const { data, error } = await supabase.from('plano_contas').update({ active: false }).eq('id', id).select('*');
+        if (!error && data && data.length > 0) {
+          res.json({ success: true, item: data[0] });
+          return;
+        }
+      } else {
+        const { data, error } = await supabase.from('plano_contas').delete().eq('id', id).select('*');
+        if (!error && data && data.length > 0) {
+          res.json({ success: true, item: data[0] });
+          return;
+        }
       }
     }
+  } catch (err: any) {
+    console.error("Erro na API DELETE /api/plano_contas Supabase:", err);
   }
 
   // Fallback
@@ -920,22 +980,26 @@ app.delete("/api/plano_contas/:id", async (req, res) => {
 // GET uploaded metadata files
 app.get("/api/files", async (req, res) => {
   const { company_id } = req.query;
-  if (supabase) {
-    let query = supabase.from('uploaded_files').select('*');
-    if (company_id) query = query.eq('company_id', String(company_id));
-    query = query.order('uploaded_at', { ascending: false });
-    const { data, error } = await query;
-    if (!error && data) {
-      res.json(data.map(item => ({
-        id: item.id,
-        companyId: item.company_id,
-        fileName: item.file_name,
-        fileUrl: item.file_url,
-        fileSize: item.file_size,
-        uploadedAt: item.uploaded_at
-      })));
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      let query = supabase.from('uploaded_files').select('*');
+      if (company_id) query = query.eq('company_id', String(company_id));
+      query = query.order('uploaded_at', { ascending: false });
+      const { data, error } = await query;
+      if (!error && data) {
+        res.json(data.map(item => ({
+          id: item.id,
+          companyId: item.company_id,
+          fileName: item.file_name,
+          fileUrl: item.file_url,
+          fileSize: item.file_size,
+          uploadedAt: item.uploaded_at
+        })));
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API GET /api/files:", err);
   }
 
   // Fallback
@@ -962,19 +1026,23 @@ app.post("/api/files", async (req, res) => {
     uploaded_at: new Date().toISOString()
   };
 
-  if (supabase) {
-    const { error } = await supabase.from('uploaded_files').insert([fileRecord]);
-    if (!error) {
-      res.status(201).json({
-        id: fileRecord.id,
-        companyId: fileRecord.company_id,
-        fileName: fileRecord.file_name,
-        fileUrl: fileRecord.file_url,
-        fileSize: fileRecord.file_size,
-        uploadedAt: fileRecord.uploaded_at
-      });
-      return;
+  try {
+    if (supabase && supabaseActive) {
+      const { error } = await supabase.from('uploaded_files').insert([fileRecord]);
+      if (!error) {
+        res.status(201).json({
+          id: fileRecord.id,
+          companyId: fileRecord.company_id,
+          fileName: fileRecord.file_name,
+          fileUrl: fileRecord.file_url,
+          fileSize: fileRecord.file_size,
+          uploadedAt: fileRecord.uploaded_at
+        });
+        return;
+      }
     }
+  } catch (err: any) {
+    console.error("Erro na API POST /api/files Supabase:", err);
   }
 
   // Fallback
@@ -998,6 +1066,22 @@ app.post("/api/files", async (req, res) => {
 
 // Vite middleware or production build compiler integration
 async function setupViteOrStatic() {
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('plano_contas').select('id').limit(1);
+      if (error) {
+        console.log("⚠️ Supabase está configurado, mas as tabelas ainda não foram localizadas no schema remoto (Pode ser que o script SQL precise rodar). Usando backup local em JSON.");
+        supabaseActive = false;
+      } else {
+        console.log("✅ Conexão com as tabelas do Supabase estabelecida com sucesso! Integração ativa.");
+        supabaseActive = true;
+      }
+    } catch (err: any) {
+      console.log("⚠️ Falha ao verificar as tabelas do Supabase remotamente. Desativando redundância de nuvem por segurança:", err.message || err);
+      supabaseActive = false;
+    }
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
