@@ -1337,8 +1337,8 @@ export default function TransactionList({
                 {tempFile.records.slice(0, 15).map((row, index) => {
                   const catName = categories.find(c => c.id === row.classification)?.name || 'Outras Despesas';
                   return (
-                    <tr key={index} className="hover:bg-slate-50 text-[11px]">
-                      <td className="py-1.5 px-3 font-mono">{row.date}</td>
+                    <tr key={index} className="hover:bg-slate-55/40 text-[11px]">
+                      <td className="py-1.5 px-3 font-mono">{formatDateBR(row.date)}</td>
                       <td className="py-1.5 px-3 truncate max-w-[120px]">{row.account}</td>
                       <td className="py-1.5 px-3 truncate max-w-[200px] font-bold text-slate-800">{row.description}</td>
                       <td className="py-1.5 px-3">
