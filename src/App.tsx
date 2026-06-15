@@ -60,12 +60,29 @@ export default function App() {
   // Tab control state
   const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'docs' | 'diagnostico'>('dre');
 
+  // Helper to parse responses safely and avoid Unexpected token 'T' or similar errors when server restarts or returns HTML
+  const safeFetchJson = async (res: Response) => {
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      try {
+        return await res.json();
+      } catch (e) {
+        throw new Error("Erro de formatação: A resposta recebida do servidor não é um JSON válido.");
+      }
+    }
+    const text = await res.text();
+    if (text.includes("The page") || text.includes("<html") || text.includes("<!DOCTYPE")) {
+      throw new Error("O servidor está indisponível ou reiniciando no momento. Por favor, aguarde alguns segundos e tente novamente.");
+    }
+    throw new Error(text || `Erro de servidor (Código HTTP ${res.status}).`);
+  };
+
   // Load companies list from API database
   const loadCompanies = async () => {
     try {
       const res = await fetch('/api/companies');
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeFetchJson(res);
         if (Array.isArray(data) && data.length > 0) {
           setCompanies(data);
           
@@ -88,7 +105,7 @@ export default function App() {
     try {
       const res = await fetch('/api/plano_contas');
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeFetchJson(res);
         if (Array.isArray(data)) {
           setPlanoContas(data);
         }
@@ -150,9 +167,12 @@ export default function App() {
       const res = await fetch('/api/plano_contas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItem)
+        body: JSON.stringify({
+          ...newItem,
+          company_id: activeCompany.id
+        })
       });
-      const data = await res.json();
+      const data = await safeFetchJson(res);
       if (!res.ok) {
         return { success: false, error: data.error || "Falha ao cadastrar no Plano de Contas (Erro Servidor)." };
       }
@@ -170,7 +190,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedFields)
       });
-      const data = await res.json();
+      const data = await safeFetchJson(res);
       if (!res.ok) {
         return { success: false, error: data.error || "Falha ao atualizar no Plano de Contas." };
       }
@@ -227,7 +247,7 @@ export default function App() {
         res = await fetch(`/api/plano_contas/${id}`, { method: 'DELETE' });
       }
 
-      const data = await res.json();
+      const data = await safeFetchJson(res);
       if (!res.ok) return { success: false, error: data.error };
 
       if (hasMovements) {
@@ -247,7 +267,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/transactions?company_id=${companyId}`);
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeFetchJson(res);
         if (Array.isArray(data) && data.length > 0) {
           setTransactions(data);
           return;
@@ -270,7 +290,7 @@ export default function App() {
 
   const saveTransactionsToServer = async (companyId: string, txs: Transaction[]) => {
     try {
-      await fetch('/api/transactions', {
+      const res = await fetch('/api/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,6 +298,9 @@ export default function App() {
           transactions: txs
         })
       });
+      if (res.ok) {
+        await safeFetchJson(res);
+      }
     } catch (err) {
       console.error("Error saving transactions permanently:", err);
     }

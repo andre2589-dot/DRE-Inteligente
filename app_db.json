@@ -1,0 +1,698 @@
+{
+  "ai_conversations": [],
+  "plano_contas": [
+    {
+      "id": "pc_10101",
+      "code": "10101",
+      "name": "ICMS",
+      "classificationId": "deduction_icms",
+      "subCategory": "Imposto sobre venda",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10103",
+      "code": "10103",
+      "name": "COFINS",
+      "classificationId": "deduction_cofins",
+      "subCategory": "Imposto sobre venda",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10104",
+      "code": "10104",
+      "name": "PIS",
+      "classificationId": "deduction_pis",
+      "subCategory": "Imposto sobre compra",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10105",
+      "code": "10105",
+      "name": "CSLL",
+      "classificationId": "tax_csll",
+      "subCategory": "Imposto sobre lucro",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10106",
+      "code": "10106",
+      "name": "IRPJ",
+      "classificationId": "tax_irpj",
+      "subCategory": "Imposto sobre lucro",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10107",
+      "code": "10107",
+      "name": "ISS",
+      "classificationId": "deduction_iss",
+      "subCategory": "Imposto sobre venda",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10108",
+      "code": "10108",
+      "name": "INSS EMPRESA",
+      "classificationId": "opex_people",
+      "subCategory": "Encargos trabalhistas",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10109",
+      "code": "10109",
+      "name": "TAXAS MUNICIPAIS",
+      "classificationId": "opex_admin",
+      "subCategory": "Taxas de funcionamento",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10110",
+      "code": "10110",
+      "name": "TAXAS SANITARIAS",
+      "classificationId": "opex_admin",
+      "subCategory": "Taxas de funcionamento",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10111",
+      "code": "10111",
+      "name": "MULTAS",
+      "classificationId": "opex_admin",
+      "subCategory": "Multas",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10112",
+      "code": "10112",
+      "name": "DIFAL",
+      "classificationId": "deduction_icms",
+      "subCategory": "Imposto sobre compra",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10113",
+      "code": "10113",
+      "name": "INSS FUNCIONARIO",
+      "classificationId": "opex_people",
+      "subCategory": "Encargos trabalhistas",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10114",
+      "code": "10114",
+      "name": "TAXAS BANCARIAS",
+      "classificationId": "opex_admin",
+      "subCategory": "TAXAS BANCARIAS",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10201",
+      "code": "10201",
+      "name": "MATERIA-PRIMA",
+      "classificationId": "costs_materials",
+      "subCategory": "Insumo",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10202",
+      "code": "10202",
+      "name": "EMBAALAGEM SECUNDARIA",
+      "classificationId": "costs_production",
+      "subCategory": "Embalagem",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10203",
+      "code": "10203",
+      "name": "EMBALAGENS PRIMARIA",
+      "classificationId": "costs_production",
+      "subCategory": "Embalagem",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10204",
+      "code": "10204",
+      "name": "ETIQUETAS",
+      "classificationId": "costs_production",
+      "subCategory": "Embalagem",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10205",
+      "code": "10205",
+      "name": "FRETE COMPRAS",
+      "classificationId": "costs_production",
+      "subCategory": "Frete",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10206",
+      "code": "10206",
+      "name": "CAPSULAS",
+      "classificationId": "costs_materials",
+      "subCategory": "Insumo",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10301",
+      "code": "10301",
+      "name": "SALARIOS",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10302",
+      "code": "10302",
+      "name": "FERIAS",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10303",
+      "code": "10303",
+      "name": "DECIMO-TERCEIRO",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10304",
+      "code": "10304",
+      "name": "RESCISOES",
+      "classificationId": "opex_people",
+      "subCategory": "Encargos trabalhistas",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10305",
+      "code": "10305",
+      "name": "HORAS-EXTRAS",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10307",
+      "code": "10307",
+      "name": "FGTS",
+      "classificationId": "opex_people",
+      "subCategory": "Encargos trabalhistas",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10308",
+      "code": "10308",
+      "name": "SALARIO-FAMILIA",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10309",
+      "code": "10309",
+      "name": "ASSISTENCIA MEDICA",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10310",
+      "code": "10310",
+      "name": "CURSOS E TREINAMENTOS",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10311",
+      "code": "10311",
+      "name": "VALE-TRANSPORTE / CONDUCAO",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10312",
+      "code": "10312",
+      "name": "VALE REFEICAO/ALIMENTACAO",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10313",
+      "code": "10313",
+      "name": "RECRUTAMENTO / SELECAO",
+      "classificationId": "opex_people",
+      "subCategory": "Diversos",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10314",
+      "code": "10314",
+      "name": "UNIFORMES",
+      "classificationId": "opex_people",
+      "subCategory": "Diversos",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10315",
+      "code": "10315",
+      "name": "COMISSAO VENDAS",
+      "classificationId": "opex_people",
+      "subCategory": "Beneficios",
+      "costType": "Variável",
+      "active": true
+    },
+    {
+      "id": "pc_10316",
+      "code": "10316",
+      "name": "CONTROLE DE PONTO",
+      "classificationId": "opex_people",
+      "subCategory": "Diversos",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10317",
+      "code": "10317",
+      "name": "EXAMES ADMISSIONAL/DEMISSIONAL/PERIODICO",
+      "classificationId": "opex_people",
+      "subCategory": "Diversos",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10318",
+      "code": "10318",
+      "name": "DIVERSOS",
+      "classificationId": "opex_people",
+      "subCategory": "Diversos",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10401",
+      "code": "10401",
+      "name": "AGUA",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10402",
+      "code": "10402",
+      "name": "ALUGUEL",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10403",
+      "code": "10403",
+      "name": "EQUIPAMENTO PROTECAO INDIVIDUAL",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10404",
+      "code": "10404",
+      "name": "MATERIAL DE PAPELARIA",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10405",
+      "code": "10405",
+      "name": "MATERIAL LIMPEZA",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10406",
+      "code": "10406",
+      "name": "SEGURO",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10407",
+      "code": "10407",
+      "name": "CORRESPONDENCIA/SEDEX",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10408",
+      "code": "10408",
+      "name": "ENERGIA ELETRICA",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10409",
+      "code": "10409",
+      "name": "TELEFONE",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10410",
+      "code": "10410",
+      "name": "MATERIAL DE CONSUMO",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10411",
+      "code": "10411",
+      "name": "COMBUSTIVEL",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10412",
+      "code": "10412",
+      "name": "ESTORNO PARA CLIENTES",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10413",
+      "code": "10413",
+      "name": "COMPRAS AVULSAS CARTÃO",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10414",
+      "code": "10414",
+      "name": "FALTA CLASSIFICAR",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10801",
+      "code": "10801",
+      "name": "DESENVOLVEDOR / PROGRAMADOR",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10802",
+      "code": "10802",
+      "name": "CONTABILIDADE",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10803",
+      "code": "10803",
+      "name": "JURIDICO",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10804",
+      "code": "10804",
+      "name": "TECNOLOGIA / TI",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10805",
+      "code": "10805",
+      "name": "CONSULTORIA E ASSESSORIA",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10806",
+      "code": "10806",
+      "name": "COLETA DE RESIDUOS",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10807",
+      "code": "10807",
+      "name": "MOTOBOY",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10808",
+      "code": "10808",
+      "name": "CONTROLE DE PRAGA",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10809",
+      "code": "10809",
+      "name": "CONTROLE DE QUALIDADE",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10810",
+      "code": "10810",
+      "name": "SEGURAN/MONIT/RASTRE",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10811",
+      "code": "10811",
+      "name": "TERCEIRIZADO",
+      "classificationId": "opex_contractors",
+      "subCategory": "Serviços",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10901",
+      "code": "10901",
+      "name": "MANUTENÇÃO PREDIAL",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Manutenção",
+      "costType": "MEO",
+      "active": true
+    },
+    {
+      "id": "pc_10902",
+      "code": "10902",
+      "name": "MANUTENÇÃO DE EQUIPAMENTO",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Manutenção",
+      "costType": "MEO",
+      "active": true
+    },
+    {
+      "id": "pc_10903",
+      "code": "10903",
+      "name": "COMPRA DE EQUIPAMENTO / ELETRONICO",
+      "classificationId": "opex_admin",
+      "subCategory": "Operacional",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_10904",
+      "code": "10904",
+      "name": "REFORMA",
+      "classificationId": "opex_maintenance",
+      "subCategory": "Investimento",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11001",
+      "code": "11001",
+      "name": "PUBLICIDADE",
+      "classificationId": "opex_marketing",
+      "subCategory": "Marketing",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11002",
+      "code": "11002",
+      "name": "BRINDES",
+      "classificationId": "opex_marketing",
+      "subCategory": "Marketing",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11003",
+      "code": "11003",
+      "name": "IMPRESSOS",
+      "classificationId": "opex_marketing",
+      "subCategory": "Marketing",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11004",
+      "code": "11004",
+      "name": "EVENTOS",
+      "classificationId": "opex_marketing",
+      "subCategory": "Marketing",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11201",
+      "code": "11201",
+      "name": "ASSINATURA DE SOFTWARES",
+      "classificationId": "opex_systems",
+      "subCategory": "Assinatura",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11202",
+      "code": "11202",
+      "name": "HOSPEDAGEM DE SITES",
+      "classificationId": "opex_systems",
+      "subCategory": "Assinatura",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11203",
+      "code": "11203",
+      "name": "BACKUP EM NUVEM",
+      "classificationId": "opex_systems",
+      "subCategory": "Assinatura",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11204",
+      "code": "11204",
+      "name": "SISTEMA",
+      "classificationId": "opex_systems",
+      "subCategory": "Sistema",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_11205",
+      "code": "11205",
+      "name": "INTERNET",
+      "classificationId": "opex_systems",
+      "subCategory": "Internet",
+      "costType": "Fixo",
+      "active": true
+    },
+    {
+      "id": "pc_20103",
+      "code": "20103",
+      "name": "APORTE",
+      "classificationId": "sales_services",
+      "subCategory": "Aporte",
+      "costType": "N/A",
+      "active": true
+    }
+  ],
+  "transactions": {
+    "c1": [],
+    "c2": []
+  },
+  "companies": [
+    {
+      "id": "c1",
+      "name": "TechVibe Soluções Digitais Ltda",
+      "cnpj": "34.567.890/0001-21",
+      "sector": "Tecnologia & SaaS"
+    },
+    {
+      "id": "c2",
+      "name": "Mercado do Sabor Alimentos",
+      "cnpj": "12.345.678/0001-99",
+      "sector": "Varejo & Distribuição"
+    }
+  ]
+}
