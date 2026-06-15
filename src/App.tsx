@@ -11,6 +11,7 @@ import {
   DEFAULT_RULES, 
   DEFAULT_TRANSACTIONS 
 } from './data/defaultData';
+import { safeFetchJson } from './utils/safeFetch';
 
 // Modular children components
 import TransactionList from './components/TransactionList';
@@ -59,23 +60,6 @@ export default function App() {
 
   // Tab control state
   const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'docs' | 'diagnostico'>('dre');
-
-  // Helper to parse responses safely and avoid Unexpected token 'T' or similar errors when server restarts or returns HTML
-  const safeFetchJson = async (res: Response) => {
-    const contentType = res.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      try {
-        return await res.json();
-      } catch (e) {
-        throw new Error("Erro de formatação: A resposta recebida do servidor não é um JSON válido.");
-      }
-    }
-    const text = await res.text();
-    if (text.includes("The page") || text.includes("<html") || text.includes("<!DOCTYPE")) {
-      throw new Error("O servidor está indisponível ou reiniciando no momento. Por favor, aguarde alguns segundos e tente novamente.");
-    }
-    throw new Error(text || `Erro de servidor (Código HTTP ${res.status}).`);
-  };
 
   // Load companies list from API database
   const loadCompanies = async () => {

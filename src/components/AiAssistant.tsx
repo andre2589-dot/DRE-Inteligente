@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
 import { Send, Sparkles, RefreshCw, Cpu, MessageSquare } from 'lucide-react';
+import { safeFetchJson } from '../utils/safeFetch';
 
 interface AiAssistantProps {
   dreContext: any; // calculated figures for contextual injection
@@ -20,7 +21,7 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
       try {
         const res = await fetch(`/api/conversations?company_id=${companyId}&user_id=${userId}`);
         if (res.ok) {
-          const data = await res.json();
+          const data = await safeFetchJson<any[]>(res);
           if (Array.isArray(data) && data.length > 0) {
             // Map db records to ChatMessage
             const mapped: ChatMessage[] = [];
@@ -103,17 +104,17 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
       if (!response.ok) {
         let errorText = 'Ocorreu um erro ao consultar o assistente de IA. Certifique-se de que o servidor local está em execução.';
         try {
-          const errData = await response.json();
+          const errData = await safeFetchJson(response);
           if (errData && errData.error) {
             errorText = `Erro no Servidor: ${errData.error}`;
           }
-        } catch (e) {
-          errorText = `Falha na resposta do servidor (${response.status} ${response.statusText}).`;
+        } catch (e: any) {
+          errorText = e.message || `Falha na resposta do servidor (${response.status} ${response.statusText}).`;
         }
         throw new Error(errorText);
       }
 
-      const data = await response.json();
+      const data = await safeFetchJson(response);
       const botAnswer = data.text || 'Desculpe, não consegui processar sua solicitação no momento.';
       
       const assistantMsg: ChatMessage = {

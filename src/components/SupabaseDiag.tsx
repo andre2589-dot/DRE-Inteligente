@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safeFetchJson } from '../utils/safeFetch';
 import { 
   CheckCircle2, 
   XCircle, 
@@ -84,7 +85,7 @@ export default function SupabaseDiag() {
       // 1. Fetch server config
       const configRes = await fetch('/api/supabase/config');
       if (configRes.ok) {
-        const conf = await configRes.json();
+        const conf = await safeFetchJson(configRes);
         setSupabaseConfig(conf);
         if (conf.isConfigured && !supabaseClientInstance) {
           const client = createClient(conf.url, conf.anonKey);
@@ -95,14 +96,14 @@ export default function SupabaseDiag() {
       // 2. Fetch server-side live diagnostics report
       const reportRes = await fetch('/api/supabase/diagnose');
       if (reportRes.ok) {
-        const data = await reportRes.json();
+        const data = await safeFetchJson(reportRes);
         setDiag(data);
       }
 
       // 3. Fetch companies directory
       const compRes = await fetch('/api/companies');
       if (compRes.ok) {
-        const companies = await compRes.json();
+        const companies = await safeFetchJson(compRes);
         setCompaniesList(companies);
       }
     } catch (err: any) {
@@ -128,7 +129,7 @@ export default function SupabaseDiag() {
       const res = await fetch('/api/supabase/seed', {
         method: 'POST'
       });
-      const data = await res.json();
+      const data = await safeFetchJson(res);
       if (res.ok) {
         setAuthMsg({ type: 'success', text: data.message || "Tabelas e dados básicos semeados!" });
         runDiagnostics();
@@ -234,7 +235,7 @@ export default function SupabaseDiag() {
         await runDiagnostics();
         alert("Empresa cadastrada com sucesso!");
       } else {
-        const errorData = await res.json();
+        const errorData = await safeFetchJson(res);
         alert(`Erro: ${errorData.error || "Falha ao registrar a empresa."}`);
       }
     } catch (err: any) {
