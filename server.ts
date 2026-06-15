@@ -4,11 +4,28 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+// Initialize server-side Supabase Client
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
+
+let supabase: any = null;
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    console.log("🚀 Supabase Client initialized successfully on Server.");
+  } catch (err) {
+    console.error("❌ Failed to initialize Supabase Client on Server:", err);
+  }
+} else {
+  console.log("ℹ️ Supabase is NOT configured. All database calls will route to the local persistent JSON database.");
+}
 
 // Database configuration for local persistence
 const DB_FILE = path.join(process.cwd(), "app_db.json");
@@ -322,33 +339,248 @@ ${prompt}
   }
 });
 
-// Database API Routes for Conversations and Plano de Contas
+// ==========================================
+// SUPABASE REAL & FALLBACK DATA LAYER CONTROLLERS
+// ==========================================
 
-// Get chat conversations (Problema 1)
-app.get("/api/conversations", (req, res) => {
+// Get config for frontend
+app.get("/api/supabase/config", (req, res) => {
+  res.json({
+    url: process.env.SUPABASE_URL || "",
+    anonKey: process.env.SUPABASE_ANON_KEY || "",
+    isConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY)
+  });
+});
+
+// Run live diagnostic tests on user's Supabase instance
+app.get("/api/supabase/diagnose", async (req, res) => {
+  const isConfigured = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+  if (!isConfigured) {
+    res.json({
+      configured: false,
+      connected: false,
+      authenticated: false,
+      dbAccessible: false,
+      tables: {
+        companies: false,
+        plano_contas: false,
+        transactions: false,
+        ai_conversations: false,
+        uploaded_files: false
+      },
+      permissionsOk: false,
+      error: "Credenciais de ambiente SUPABASE_URL e SUPABASE_ANON_KEY não encontradas nas secrets."
+    });
+    return;
+  }
+
+  try {
+    const client = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+    
+    // Auth status (safe query)
+    const { data: { user }, error: userErr } = await client.auth.getUser();
+    
+    // Check tables individually
+    const tables = {
+      companies: false,
+      plano_contas: false,
+      transactions: false,
+      ai_conversations: false,
+      uploaded_files: false
+    };
+
+    let dbAccessible = true;
+    let permissionsOk = true;
+
+    // Test tables
+    for (const key of Object.keys(tables) as Array<keyof typeof tables>) {
+      try {
+        const { error } = await client.from(key).select('*').limit(1);
+        if (!error) {
+          tables[key] = true;
+        } else {
+          const errMsg = String(error.message).toLowerCase();
+          // If it exists but is empty or unauthorized but not "does not exist"
+          if (!errMsg.includes("does not exist") && !errMsg.includes("relation")) {
+            tables[key] = true;
+          } else {
+            tables[key] = false;
+          }
+          if (errMsg.includes("permission denied") || errMsg.includes("invalid api key") || error.code === '42501') {
+            permissionsOk = false;
+          }
+        }
+      } catch (e) {
+        tables[key] = false;
+      }
+    }
+
+    const allTablesOk = Object.values(tables).every(v => v === true);
+
+    res.json({
+      configured: true,
+      connected: true,
+      authenticated: !!user,
+      dbAccessible: dbAccessible,
+      tables: tables,
+      allTablesCreated: allTablesOk,
+      permissionsOk: permissionsOk,
+      userEmail: user?.email || null,
+      error: null
+    });
+  } catch (err: any) {
+    res.json({
+      configured: true,
+      connected: false,
+      authenticated: false,
+      dbAccessible: false,
+      tables: {
+        companies: false,
+        plano_contas: false,
+        transactions: false,
+        ai_conversations: false,
+        uploaded_files: false
+      },
+      permissionsOk: false,
+      error: err?.message || String(err)
+    });
+  }
+});
+
+// Database Seeder route to populate the Supabase tables if they are empty
+app.post("/api/supabase/seed", async (req, res) => {
+  if (!supabase) {
+    res.status(400).json({ error: "O Supabase não está configurado nas variáveis de ambiente." });
+    return;
+  }
+
+  try {
+    // 1. Seed companies
+    const { error: compErr } = await supabase.from('companies').upsert([
+      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
+      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+    ]);
+    if (compErr) throw new Error(`Falha ao semear 'companies': ${compErr.message}`);
+
+    // 2. Seed plano_contas
+    const dbSeedPlano = DEFAULT_PLANO_CONTAS_SEED.map(item => ({
+      id: item.id,
+      code: item.code,
+      name: item.name,
+      classification_id: item.classificationId,
+      sub_category: item.subCategory,
+      cost_type: item.costType,
+      active: item.active !== undefined ? item.active : true,
+      company_id: 'c1'
+    }));
+
+    const { error: pcErr } = await supabase.from('plano_contas').upsert(dbSeedPlano);
+    if (pcErr) throw new Error(`Falha ao semear 'plano_contas': ${pcErr.message}`);
+
+    res.json({ success: true, message: "Banco de dados do Supabase semeado com sucesso para as empresas demonstrativas!" });
+  } catch (err: any) {
+    console.error("Erro no seeding do Supabase:", err);
+    res.status(500).json({ error: err?.message || "Erro desconhecido ao semear banco." });
+  }
+});
+
+// GET list of multi-tenant enterprise companies
+app.get("/api/companies", async (req, res) => {
+  if (supabase) {
+    const { data, error } = await supabase.from('companies').select('*').order('name', { ascending: true });
+    if (!error && data) {
+      res.json(data);
+      return;
+    }
+  }
+
+  // Fallback
+  const db = getDb();
+  if (!(db as any).companies) {
+    (db as any).companies = [
+      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
+      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+    ];
+    saveDb(db);
+  }
+  res.json((db as any).companies);
+});
+
+// POST to insert/register a new company
+app.post("/api/companies", async (req, res) => {
+  const { name, cnpj, sector } = req.body;
+  if (!name || !cnpj || !sector) {
+    res.status(400).json({ error: "Nome, CNPJ e Setor são campos obrigatórios." });
+    return;
+  }
+
+  const newCompany = {
+    id: `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    name,
+    cnpj,
+    sector
+  };
+
+  if (supabase) {
+    const { error } = await supabase.from('companies').insert([newCompany]);
+    if (!error) {
+      res.status(201).json(newCompany);
+      return;
+    } else {
+      console.error("Erro ao salvar empresa no Supabase:", error);
+    }
+  }
+
+  // Fallback
+  const db = getDb();
+  if (!(db as any).companies) {
+    (db as any).companies = [
+      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
+      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+    ];
+  }
+  (db as any).companies.push(newCompany);
+  saveDb(db);
+  res.status(201).json(newCompany);
+});
+
+// Get chat conversations history
+app.get("/api/conversations", async (req, res) => {
   const { company_id, user_id } = req.query;
+  
+  if (supabase) {
+    let query = supabase.from('ai_conversations').select('*');
+    if (company_id) query = query.eq('company_id', String(company_id));
+    if (user_id) query = query.eq('user_id', String(user_id));
+    query = query.order('created_at', { ascending: true });
+
+    const { data, error } = await query;
+    if (!error && data) {
+      res.json(data);
+      return;
+    }
+  }
+
+  // Fallback
   const db = getDb();
   let list = db.ai_conversations;
-  
   if (company_id) {
     list = list.filter(c => c.company_id === String(company_id));
   }
   if (user_id) {
     list = list.filter(c => c.user_id === String(user_id));
   }
-  
   res.json(list);
 });
 
-// Save chat conversation (Problema 1)
-app.post("/api/conversations", (req, res) => {
+// Save chat conversation log
+app.post("/api/conversations", async (req, res) => {
   const { company_id, user_id, question, answer } = req.body;
   if (!company_id || !user_id || !question || !answer) {
-    res.status(400).json({ error: "Dados incompletos para salvar conversa." });
+    res.status(400).json({ error: "Dados para conversa incompletos." });
     return;
   }
   
-  const db = getDb();
   const newItem = {
     id: `conv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     company_id: String(company_id),
@@ -357,19 +589,63 @@ app.post("/api/conversations", (req, res) => {
     answer: String(answer),
     created_at: new Date().toISOString()
   };
-  
+
+  if (supabase) {
+    const { error } = await supabase.from('ai_conversations').insert([newItem]);
+    if (!error) {
+      res.status(201).json(newItem);
+      return;
+    }
+  }
+
+  // Fallback
+  const db = getDb();
   db.ai_conversations.push(newItem);
   saveDb(db);
   res.status(201).json(newItem);
 });
 
-// Get persistent transactions for a company
-app.get("/api/transactions", (req, res) => {
+// Get transactions (Receitas e Despesas)
+app.get("/api/transactions", async (req, res) => {
   const { company_id } = req.query;
   if (!company_id) {
     res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
     return;
   }
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('company_id', String(company_id));
+    
+    if (!error && data) {
+      const mapped = data.map(item => ({
+        id: item.id,
+        date: item.date,
+        account: item.account,
+        description: item.description,
+        document: item.document,
+        classification: item.classification,
+        costType: item.cost_type,
+        value: Number(item.value),
+        vencimento: item.vencimento,
+        operacao: item.operacao,
+        mes: item.mes,
+        conta: item.conta,
+        descricaoConta: item.descricao_conta,
+        classificacaoOriginal: item.classificacao_original,
+        descricaoOriginal: item.descricao_original,
+        custoOriginal: item.custo_original,
+        historico: item.historico,
+        documentoOriginal: item.documento_original,
+        valorOriginal: item.valor_original ? Number(item.valor_original) : undefined
+      }));
+      res.json(mapped);
+      return;
+    }
+  }
+
   const db = getDb();
   if (!db.transactions) {
     db.transactions = {};
@@ -378,46 +654,123 @@ app.get("/api/transactions", (req, res) => {
   res.json(list);
 });
 
-// Save persistent transactions for a company
-app.post("/api/transactions", (req, res) => {
+// Save transactions (overwrite mirror sync)
+app.post("/api/transactions", async (req, res) => {
   const { company_id, transactions } = req.body;
   if (!company_id || !Array.isArray(transactions)) {
     res.status(400).json({ error: "company_id ou array de lançamentos inválido." });
     return;
   }
+
+  if (supabase) {
+    // Delete existing
+    const { error: delErr } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('company_id', String(company_id));
+
+    if (!delErr) {
+      const dbRows = transactions.map(t => ({
+        id: t.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        company_id: String(company_id),
+        date: t.date,
+        account: t.account,
+        description: t.description || "",
+        document: t.document,
+        classification: t.classification,
+        cost_type: t.costType || 'Fixo',
+        value: t.value || 0,
+        vencimento: t.vencimento,
+        operacao: t.operacao,
+        mes: t.mes,
+        conta: t.conta,
+        descricao_conta: t.descricaoConta,
+        classificacao_original: t.classificacaoOriginal,
+        descricao_original: t.descricaoOriginal,
+        custo_original: t.custoOriginal,
+        historico: t.historico,
+        documento_original: t.documentoOriginal,
+        valor_original: t.valorOriginal
+      }));
+
+      const CHUNK_SIZE = 150;
+      let success = true;
+      for (let i = 0; i < dbRows.length; i += CHUNK_SIZE) {
+        const chunk = dbRows.slice(i, i + CHUNK_SIZE);
+        const { error: insErr } = await supabase.from('transactions').insert(chunk);
+        if (insErr) {
+          console.error("Erro inserindo transactions no Supabase:", insErr);
+          success = false;
+          break;
+        }
+      }
+
+      if (success) {
+        res.json({ success: true, count: dbRows.length });
+        return;
+      }
+    }
+  }
+
+  // Fallback
   const db = getDb();
   if (!db.transactions) {
     db.transactions = {};
   }
   db.transactions[String(company_id)] = transactions;
   saveDb(db);
-  res.json({ success: true });
+  res.json({ success: true, count: transactions.length });
 });
 
-// Get Plano de Contas
-app.get("/api/plano_contas", (req, res) => {
+// GET Plano de contas (Plano de Contas master configurations)
+app.get("/api/plano_contas", async (req, res) => {
+  if (supabase) {
+    const { data, error } = await supabase.from('plano_contas').select('*');
+    if (!error && data) {
+      const mapped = data.map(item => ({
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        classificationId: item.classification_id,
+        subCategory: item.sub_category,
+        costType: item.cost_type,
+        active: item.active
+      }));
+      res.json(mapped);
+      return;
+    }
+  }
+
   const db = getDb();
   res.json(db.plano_contas);
 });
 
-// Save or Create Plano de Contas account (Novo Cadastro)
-app.post("/api/plano_contas", (req, res) => {
-  const { code, name, classificationId, subCategory, costType } = req.body;
+// POST to create / register standard Account
+app.post("/api/plano_contas", async (req, res) => {
+  const { code, name, classificationId, subCategory, costType, company_id } = req.body;
   if (!code || !name || !classificationId || !subCategory || !costType) {
     res.status(400).json({ error: "Campos obrigatórios ausentes para cadastrar a conta." });
     return;
   }
   
-  const db = getDb();
-  
-  // Rule: Não permitir contas duplicadas. Conta deve ser única.
   const codeNormalized = String(code).trim();
-  const exists = db.plano_contas.some(item => String(item.code).trim() === codeNormalized);
-  if (exists) {
-    res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso." });
-    return;
+
+  // Duplicity checking
+  if (supabase) {
+    const { data, error } = await supabase.from('plano_contas').select('id').eq('code', codeNormalized);
+    if (!error && data && data.length > 0) {
+      res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso no Supabase." });
+      return;
+    }
+  } else {
+    const db = getDb();
+    const exists = db.plano_contas.some(item => String(item.code).trim() === codeNormalized);
+    if (exists) {
+      res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta (Conta) digitado já está em uso." });
+      return;
+    }
   }
-  
+
   const newItem = {
     id: `pc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     code: codeNormalized,
@@ -427,17 +780,76 @@ app.post("/api/plano_contas", (req, res) => {
     costType: (costType === 'Variável' ? 'Variável' : (costType === 'MEO' ? 'MEO' : (costType === 'N/A' ? 'N/A' : 'Fixo'))) as any,
     active: req.body.active !== undefined ? Boolean(req.body.active) : true
   };
-  
+
+  if (supabase) {
+    const { error } = await supabase.from('plano_contas').insert([{
+      id: newItem.id,
+      code: newItem.code,
+      name: newItem.name,
+      classification_id: newItem.classificationId,
+      sub_category: newItem.subCategory,
+      cost_type: newItem.costType,
+      active: newItem.active,
+      company_id: company_id || 'c1'
+    }]);
+    if (!error) {
+      res.status(201).json(newItem);
+      return;
+    }
+  }
+
+  // Fallback
+  const db = getDb();
   db.plano_contas.push(newItem);
   saveDb(db);
   res.status(201).json(newItem);
 });
 
-// Edit Plano de Contas account (Editar)
-app.put("/api/plano_contas/:id", (req, res) => {
+// PUT to edit standard Account
+app.put("/api/plano_contas/:id", async (req, res) => {
   const { id } = req.params;
-  const { code, name, classificationId, subCategory, costType, active } = req.body;
+  const { code, name, classificationId, subCategory, costType, active, company_id } = req.body;
   
+  if (supabase) {
+    if (code) {
+      const codeNormalized = String(code).trim();
+      const { data, error } = await supabase.from('plano_contas').select('id, code').eq('code', codeNormalized);
+      if (!error && data && data.some(item => item.id !== id)) {
+        res.status(400).json({ error: "Erro de Duplicidade: O Código da Conta digitado pertence a outra conta existente." });
+        return;
+      }
+    }
+
+    const upd: any = {};
+    if (code !== undefined) upd.code = String(code).trim();
+    if (name !== undefined) upd.name = String(name).trim();
+    if (classificationId !== undefined) upd.classification_id = String(classificationId).trim();
+    if (subCategory !== undefined) upd.sub_category = String(subCategory).trim();
+    if (costType !== undefined) upd.cost_type = costType;
+    if (active !== undefined) upd.active = Boolean(active);
+
+    const { data: updatedData, error: updErr } = await supabase
+      .from('plano_contas')
+      .update(upd)
+      .eq('id', id)
+      .select('*');
+
+    if (!updErr && updatedData && updatedData.length > 0) {
+      const item = updatedData[0];
+      res.json({
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        classificationId: item.classification_id,
+        subCategory: item.sub_category,
+        costType: item.cost_type,
+        active: item.active
+      });
+      return;
+    }
+  }
+
+  // Fallback
   const db = getDb();
   const index = db.plano_contas.findIndex(item => item.id === id);
   if (index === -1) {
@@ -445,7 +857,6 @@ app.put("/api/plano_contas/:id", (req, res) => {
     return;
   }
   
-  // Rule: Não permitir código duplicado com OUTRA conta
   if (code) {
     const codeNormalized = String(code).trim();
     const duplicate = db.plano_contas.some(item => item.id !== id && String(item.code).trim() === codeNormalized);
@@ -466,11 +877,28 @@ app.put("/api/plano_contas/:id", (req, res) => {
   res.json(db.plano_contas[index]);
 });
 
-// Delete or Inactivate Plano de Contas account (Excluir ou Inativar)
-app.delete("/api/plano_contas/:id", (req, res) => {
+// DELETE standard Account
+app.delete("/api/plano_contas/:id", async (req, res) => {
   const { id } = req.params;
-  const { hasMovements, action } = req.query; // action can be 'delete' or 'inactivate'
-  
+  const { hasMovements, action } = req.query;
+
+  if (supabase) {
+    if (hasMovements === 'true' || action === 'inactivate') {
+      const { data, error } = await supabase.from('plano_contas').update({ active: false }).eq('id', id).select('*');
+      if (!error && data && data.length > 0) {
+        res.json({ success: true, item: data[0] });
+        return;
+      }
+    } else {
+      const { data, error } = await supabase.from('plano_contas').delete().eq('id', id).select('*');
+      if (!error && data && data.length > 0) {
+        res.json({ success: true, item: data[0] });
+        return;
+      }
+    }
+  }
+
+  // Fallback
   const db = getDb();
   const index = db.plano_contas.findIndex(item => item.id === id);
   if (index === -1) {
@@ -478,17 +906,93 @@ app.delete("/api/plano_contas/:id", (req, res) => {
     return;
   }
   
-  // Rule: Se houverem lançamentos vinculados, inativar apenas.
   if (hasMovements === 'true' || action === 'inactivate') {
     db.plano_contas[index].active = false;
     saveDb(db);
-    res.json({ success: true, message: "Conta inativada devido a movimentações financeiras vinculadas.", item: db.plano_contas[index] });
+    res.json({ success: true, item: db.plano_contas[index] });
   } else {
-    // Delete account
     const deletedItem = db.plano_contas.splice(index, 1);
     saveDb(db);
-    res.json({ success: true, message: "Conta excluída com sucesso do Plano de Contas.", item: deletedItem[0] });
+    res.json({ success: true, item: deletedItem[0] });
   }
+});
+
+// GET uploaded metadata files
+app.get("/api/files", async (req, res) => {
+  const { company_id } = req.query;
+  if (supabase) {
+    let query = supabase.from('uploaded_files').select('*');
+    if (company_id) query = query.eq('company_id', String(company_id));
+    query = query.order('uploaded_at', { ascending: false });
+    const { data, error } = await query;
+    if (!error && data) {
+      res.json(data.map(item => ({
+        id: item.id,
+        companyId: item.company_id,
+        fileName: item.file_name,
+        fileUrl: item.file_url,
+        fileSize: item.file_size,
+        uploadedAt: item.uploaded_at
+      })));
+      return;
+    }
+  }
+
+  // Fallback
+  const db = getDb();
+  if (!(db as any).uploaded_files) {
+    (db as any).uploaded_files = [];
+  }
+  let list = (db as any).uploaded_files;
+  if (company_id) {
+    list = list.filter((f: any) => f.companyId === String(company_id));
+  }
+  res.json(list);
+});
+
+// POST to insert uploaded file metadata
+app.post("/api/files", async (req, res) => {
+  const { company_id, fileName, fileUrl, fileSize } = req.body;
+  const fileRecord = {
+    id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id || 'c1'),
+    file_name: fileName || "lançamentos_importados.xlsx",
+    file_url: fileUrl || "#",
+    file_size: fileSize || 0,
+    uploaded_at: new Date().toISOString()
+  };
+
+  if (supabase) {
+    const { error } = await supabase.from('uploaded_files').insert([fileRecord]);
+    if (!error) {
+      res.status(201).json({
+        id: fileRecord.id,
+        companyId: fileRecord.company_id,
+        fileName: fileRecord.file_name,
+        fileUrl: fileRecord.file_url,
+        fileSize: fileRecord.file_size,
+        uploadedAt: fileRecord.uploaded_at
+      });
+      return;
+    }
+  }
+
+  // Fallback
+  const db = getDb();
+  if (!(db as any).uploaded_files) {
+    (db as any).uploaded_files = [];
+  }
+  const mapped = {
+    id: fileRecord.id,
+    companyId: fileRecord.company_id,
+    fileName: fileRecord.file_name,
+    fileUrl: fileRecord.file_url,
+    fileSize: fileRecord.file_size,
+    uploadedAt: fileRecord.uploaded_at
+  };
+  (db as any).uploaded_files.push(mapped);
+  saveDb(db);
+  res.status(201).json(mapped);
 });
 
 
@@ -516,3 +1020,4 @@ async function setupViteOrStatic() {
 }
 
 setupViteOrStatic();
+

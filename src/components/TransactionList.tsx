@@ -407,26 +407,158 @@ export default function TransactionList({
   // Convert Date from Excel or Text
   const parseExcelDate = (dateVal: any): string => {
     if (!dateVal) return '2026-05-15';
-    if (typeof dateVal === 'number') {
-      const utcDays = Math.floor(dateVal - 25569);
-      const utcValue = utcDays * 86400;
-      const dateInfo = new Date(utcValue * 1000);
-      return dateInfo.toISOString().split('T')[0];
-    }
-    const cleanDateStr = String(dateVal).trim();
-    const parts = cleanDateStr.split(/[-/]/);
-    if (parts.length === 3) {
-      if (parts[0].length === 4) {
-        return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-      } else {
-        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    
+    // 1. If it is already a JS Date object
+    if (dateVal instanceof Date) {
+      if (!isNaN(dateVal.getTime())) {
+        const y = dateVal.getUTCFullYear();
+        const m = String(dateVal.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(dateVal.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       }
     }
+
+    // 2. If it is a number (Excel Serial Date)
+    if (typeof dateVal === 'number') {
+      if (dateVal > 10000 && dateVal < 100000) {
+        const utcDays = Math.floor(dateVal - 25569);
+        const utcValue = utcDays * 86400;
+        const dateInfo = new Date(utcValue * 1000);
+        return dateInfo.toISOString().split('T')[0];
+      }
+    }
+
+    // 3. If it is a string
+    const cleanDateStr = String(dateVal).trim();
+    if (!cleanDateStr) return '2026-05-15';
+
+    // 3a. If the string consists entirely of digits (serial key as text)
+    if (/^\d+(\.\d+)?$/.test(cleanDateStr)) {
+      const num = parseFloat(cleanDateStr);
+      if (num > 10000 && num < 100000) {
+        const utcDays = Math.floor(num - 25569);
+        const utcValue = utcDays * 86400;
+        const dateInfo = new Date(utcValue * 1000);
+        return dateInfo.toISOString().split('T')[0];
+      }
+    }
+
+    // 3b. If the string is formatted with date separators
+    const parts = cleanDateStr.split(/[-/]/);
+    if (parts.length === 3) {
+      const p0 = parts[0].trim();
+      const p1 = parts[1].trim();
+      const p2 = parts[2].trim();
+      if (p0.length === 4) {
+        return `${p0}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
+      } else if (p2.length === 4) {
+        return `${p2}-${p1.padStart(2, '0')}-${p0.padStart(2, '0')}`;
+      } else if (p2.length === 2) {
+        return `20${p2}-${p1.padStart(2, '0')}-${p0.padStart(2, '0')}`;
+      }
+    }
+
+    // Fallback to JS standard Date parsing (e.g. ISO format)
     const parsed = new Date(cleanDateStr);
     if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString().split('T')[0];
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
+
     return '2026-05-15';
+  };
+
+  const isValidDateString = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return false;
+    
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+
+    // Strict reasonable business year range check (safeguards calendar entries)
+    if (year < 1900 || year > 2100) return false;
+    if (month < 1 || month > 12) return false;
+
+    const daysInMonth = new Date(year, month, 0).getDate();
+    if (day < 1 || day > daysInMonth) return false;
+
+    return true;
+  };
+
+  const getRawDateComponents = (val: any): { day: number; month: number; year: number } | null => {
+    if (!val) return null;
+
+    if (val instanceof Date) {
+      if (!isNaN(val.getTime())) {
+        return {
+          day: val.getUTCDate(),
+          month: val.getUTCMonth() + 1,
+          year: val.getUTCFullYear()
+        };
+      }
+    }
+
+    if (typeof val === 'number') {
+      if (val > 10000 && val < 100000) {
+        const utcDays = Math.floor(val - 25569);
+        const utcValue = utcDays * 86400;
+        const d = new Date(utcValue * 1000);
+        return {
+          day: d.getUTCDate(),
+          month: d.getUTCMonth() + 1,
+          year: d.getUTCFullYear()
+        };
+      }
+    }
+
+    const s = String(val).trim();
+    if (!s) return null;
+
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const num = parseFloat(s);
+      if (num > 10000 && num < 100000) {
+        const utcDays = Math.floor(num - 25569);
+        const utcValue = utcDays * 86400;
+        const d = new Date(utcValue * 1000);
+        return {
+          day: d.getUTCDate(),
+          month: d.getUTCMonth() + 1,
+          year: d.getUTCFullYear()
+        };
+      }
+    }
+
+    const parts = s.split(/[-/]/);
+    if (parts.length === 3) {
+      const p0 = parseInt(parts[0], 10);
+      const p1 = parseInt(parts[1], 10);
+      const p2 = parseInt(parts[2], 10);
+      if (!isNaN(p0) && !isNaN(p1) && !isNaN(p2)) {
+        if (parts[0].length === 4) {
+          return { year: p0, month: p1, day: p2 };
+        } else {
+          const yr = parts[2].length === 2 ? 2000 + p2 : p2;
+          return { year: yr, month: p1, day: p0 };
+        }
+      }
+    }
+
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) {
+      return {
+        day: parsed.getDate(),
+        month: parsed.getMonth() + 1,
+        year: parsed.getFullYear()
+      };
+    }
+
+    return null;
   };
 
   // 1. Process Excel with dynamic/intelligent column mapping validation
@@ -441,7 +573,7 @@ export default function TransactionList({
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         
@@ -463,6 +595,8 @@ export default function TransactionList({
           valor: null,
         };
 
+        let detectedVencimentoKey: string | null = null;
+
         fileHeaders.forEach((rawHeader) => {
           const normalized = normalizeHeader(rawHeader);
           for (const [key, config] of Object.entries(MAPPING_CONFIG)) {
@@ -470,6 +604,9 @@ export default function TransactionList({
               detectedMapping[key] = rawHeader;
               break;
             }
+          }
+          if (['vencimento', 'datavencimento', 'datadevencimento', 'venc'].includes(normalized)) {
+            detectedVencimentoKey = rawHeader;
           }
         });
 
@@ -530,10 +667,52 @@ export default function TransactionList({
             }
           }
 
-          // 2. Verify 'Operação'
+          // 2. Verify 'Operação' (Date) and perform strict auditing
           const operVal = row[detectedMapping.operacao!];
           if (operVal === undefined || operVal === null || String(operVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Operação' (Data do lançamento) é obrigatório e está vazio.`);
+          } else {
+            const parsedOperStr = parseExcelDate(operVal);
+            if (!isValidDateString(parsedOperStr)) {
+              lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Operação' ("${operVal}") obtida foi inválida ou fora do padrão real do calendário.`);
+            } else {
+              // Audit: Compare original vs imported date components to ensure 100% fidelity
+              const origComp = getRawDateComponents(operVal);
+              const parts = parsedOperStr.split('-');
+              const importedYr = parseInt(parts[0], 10);
+              const importedMn = parseInt(parts[1], 10);
+              const importedDy = parseInt(parts[2], 10);
+              
+              if (origComp) {
+                if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
+                  lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data na 'Operação'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
+                }
+              }
+            }
+          }
+
+          // 2.2 Verify 'Vencimento' (Date) if the optional column is present and perform strict auditing
+          if (detectedVencimentoKey) {
+            const vencVal = row[detectedVencimentoKey];
+            if (vencVal !== undefined && vencVal !== null && String(vencVal).trim() !== '') {
+              const parsedVencStr = parseExcelDate(vencVal);
+              if (!isValidDateString(parsedVencStr)) {
+                lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Vencimento' ("${vencVal}") obtida foi inválida ou fora do padrão real do calendário.`);
+              } else {
+                // Audit: Compare original vs imported date components to ensure 100% fidelity
+                const origComp = getRawDateComponents(vencVal);
+                const parts = parsedVencStr.split('-');
+                const importedYr = parseInt(parts[0], 10);
+                const importedMn = parseInt(parts[1], 10);
+                const importedDy = parseInt(parts[2], 10);
+                
+                if (origComp) {
+                  if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
+                    lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data no 'Vencimento'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
+                  }
+                }
+              }
+            }
           }
 
           // 3. Verify 'Conta'
@@ -558,7 +737,19 @@ export default function TransactionList({
 
         // Build records under mirror mode: No system overrides or autoconfig fallback data
         const formattedRecords = excelRows.map((row, idx) => {
-          const rawOper = row[detectedMapping.operacao!] !== undefined ? String(row[detectedMapping.operacao!]).trim() : '';
+          const rawOperVal = row[detectedMapping.operacao!];
+          const parsedDateForQuery = parseExcelDate(rawOperVal);
+
+          // Get rawOper for record storage representation
+          let rawOper = '';
+          if (rawOperVal !== undefined && rawOperVal !== null) {
+            if (rawOperVal instanceof Date) {
+              rawOper = formatDateBR(parsedDateForQuery);
+            } else {
+              rawOper = String(rawOperVal).trim();
+            }
+          }
+
           const rawConta = row[detectedMapping.conta!] !== undefined ? String(row[detectedMapping.conta!]).trim() : '';
           const rawDescConta = row[detectedMapping.descricaoConta!] !== undefined ? String(row[detectedMapping.descricaoConta!]).trim() : '';
           const rawVal = row[detectedMapping.valor!];
@@ -593,11 +784,15 @@ export default function TransactionList({
           const costTypeVal: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = matchedPc ? matchedPc.costType : 'Fixo';
           const subCategoryVal = matchedPc ? matchedPc.subCategory : '';
 
-          const parsedDateForQuery = parseExcelDate(rawOper);
+          const rawVencVal = detectedVencimentoKey ? row[detectedVencimentoKey] : undefined;
+          const parsedVencForQuery = rawVencVal !== undefined && rawVencVal !== null && String(rawVencVal).trim() !== ''
+            ? parseExcelDate(rawVencVal)
+            : undefined;
 
           return {
             id: `temp_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 4)}`,
             date: parsedDateForQuery,
+            vencimento: parsedVencForQuery,
             account: matchedPc ? matchedPc.name : rawDescConta || `CONTA ${rawConta}`,
             description: subCategoryVal,
             document: undefined,

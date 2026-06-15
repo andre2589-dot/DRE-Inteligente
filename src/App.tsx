@@ -20,6 +20,7 @@ import ForecastModule from './components/ForecastModule';
 import PlanoContas from './components/PlanoContas';
 import AiAssistant from './components/AiAssistant';
 import DocsHub from './components/DocsHub';
+import SupabaseDiag from './components/SupabaseDiag';
 
 // Icons
 import { 
@@ -36,7 +37,8 @@ import {
   LogOut,
   Sliders,
   ShieldAlert,
-  Info
+  Info,
+  Database
 } from 'lucide-react';
 
 export default function App() {
@@ -56,7 +58,30 @@ export default function App() {
   const [planoContas, setPlanoContas] = useState<PlanoContasItem[]>([]);
 
   // Tab control state
-  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'docs'>('dre');
+  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'docs' | 'diagnostico'>('dre');
+
+  // Load companies list from API database
+  const loadCompanies = async () => {
+    try {
+      const res = await fetch('/api/companies');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setCompanies(data);
+          
+          // Re-evaluate active company if it changed or wasn't set correctly
+          const existingActive = data.find(c => c.id === activeCompany.id);
+          if (!existingActive) {
+            setActiveCompany(data[0]);
+          } else {
+            setActiveCompany(existingActive);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error loading companies from API:", err);
+    }
+  };
 
   // Load Plano de Contas from Express API database
   const loadPlanoContas = async () => {
@@ -74,8 +99,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    loadCompanies();
     loadPlanoContas();
-  }, []);
+  }, [activeTab]); // Fetch on mount or tab swap to reflect company modifications right away
 
   // Map and enrich transactions dynamically so everything relies on Plano de Contas master configurations
   const enrichedTransactions = React.useMemo(() => {
@@ -617,6 +643,18 @@ export default function App() {
             <FileText className="h-4 w-4" />
             Arquitetura & SQL SaaS
           </button>
+
+          <button
+            onClick={() => setActiveTab('diagnostico')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'diagnostico'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
+            }`}
+          >
+            <Database className="h-4 w-4 text-indigo-500" />
+            Sincronização & Diagnóstico Supabase
+          </button>
         </div>
 
         {/* Tab Body Contents Rendering */}
@@ -691,6 +729,10 @@ export default function App() {
 
           {activeTab === 'docs' && (
             <DocsHub />
+          )}
+
+          {activeTab === 'diagnostico' && (
+            <SupabaseDiag />
           )}
         </div>
       </main>
