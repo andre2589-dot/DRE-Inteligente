@@ -567,7 +567,7 @@ export default function TransactionList({
     return null;
   };
 
-  // 1. Process Excel with strict 11 columns structure
+  // 1. Process Excel supporting full 11 columns or simplified 4 columns
   const handleExcelUpload = (file: File) => {
     setValidationError(null);
     setImportErrors(null);
@@ -586,14 +586,14 @@ export default function TransactionList({
         // Extract headers first to perform physical column checks
         const headersLineAndMore = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         if (headersLineAndMore.length === 0) {
-          setValidationError("Arquivo inválido. Utilize o modelo padrão de importação.");
+          setValidationError("Arquivo inválido. Utilize o modelo de importação.");
           return;
         }
 
         const rawHeaders = (headersLineAndMore[0] as any[]) || [];
         const fileHeaders = rawHeaders.map(h => String(h).trim()).filter(Boolean);
 
-        const REQUIRED_HEADERS_EXACT = [
+        const REQUIRED_HEADERS_11 = [
           'Vencimento',
           'Operação',
           'Mês',
@@ -607,24 +607,36 @@ export default function TransactionList({
           'Valor'
         ];
 
-        // Strict 11 columns checks: No columns created, removed, or renamed
-        const missing = REQUIRED_HEADERS_EXACT.filter(h => !fileHeaders.includes(h));
-        const extra = fileHeaders.filter(h => !REQUIRED_HEADERS_EXACT.includes(h));
+        const is11Columns = REQUIRED_HEADERS_11.every(h => fileHeaders.includes(h)) && fileHeaders.filter(h => !REQUIRED_HEADERS_11.includes(h)).length === 0;
+        
+        let isSimplified4 = false;
+        let dateHeaderName = 'Operação';
 
-        if (missing.length > 0 || extra.length > 0) {
-          let errorMsg = "A estrutura do arquivo não atende ao padrão de importação DRE Inteligente.";
+        if (!is11Columns) {
+          const simplifiedRequired = ['Conta', 'Descrição - Conta', 'Valor'];
+          const hasSimplifiedRequired = simplifiedRequired.every(h => fileHeaders.includes(h));
+          const hasDateHeader = fileHeaders.includes('Data Operação') || fileHeaders.includes('Operação');
+          
+          if (hasSimplifiedRequired && hasDateHeader) {
+            isSimplified4 = true;
+            dateHeaderName = fileHeaders.includes('Data Operação') ? 'Data Operação' : 'Operação';
+          }
+        }
+
+        if (!is11Columns && !isSimplified4) {
+          let errorMsg = "A estrutura do arquivo não atende ao padrão de importação. ";
+          const missing = REQUIRED_HEADERS_11.filter(h => !fileHeaders.includes(h));
+          const extra = fileHeaders.filter(h => !REQUIRED_HEADERS_11.includes(h));
           if (missing.length > 0) {
-            errorMsg += ` Faltando as colunas: ${missing.join(', ')}.`;
+            errorMsg += `Faltando colunas: ${missing.join(', ')}. `;
           }
           if (extra.length > 0) {
-            errorMsg += ` Colunas extras não permitidas encontradas: ${extra.join(', ')}.`;
+            errorMsg += `Colunas não permitidas encontradas: ${extra.join(', ')}.`;
           }
-          setValidationError(errorMsg);
+          setValidationError(errorMsg + " Para formato simplificado, use as colunas: 'Data Operação' (ou 'Operação'), 'Conta', 'Descrição - Conta' e 'Valor'.");
           return;
         }
 
-        // Parse actual records
-        // defval: "" ensures empty fields are returned as empty strings instead of being omitted
         const excelRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
         if (excelRows.length === 0) {
           setValidationError("A planilha de despesas está vazia ou sem dados válidos.");
@@ -634,11 +646,9 @@ export default function TransactionList({
         const lineErrorsList: string[] = [];
         let totalExcelValueSum = 0;
 
-        // Pre-validate all rows for zero-defect integration
         excelRows.forEach((row, idx) => {
-          const rowNum = idx + 2; // header is row 1, index starts at 0 (row 2)
+          const rowNum = idx + 2;
 
-          // 1. Verify 'Valor'
           const valorVal = row['Valor'];
           if (valorVal === undefined || valorVal === null || String(valorVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Valor' é obrigatório e está vazio.`);
@@ -657,78 +667,71 @@ export default function TransactionList({
             }
           }
 
-          // 2. Verify 'Operação' (Date) and perform strict auditing
-          const operVal = row['Operação'];
-          if (operVal === undefined || operVal === null || String(operVal).trim() === '') {
-            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Operação' (Data do lançamento) é obrigatório e está vazio.`);
+          const dateVal = row[dateHeaderName];
+          if (dateVal === undefined || dateVal === null || String(dateVal).trim() === '') {
+            lineErrorsList.push(`Erro na Linha ${rowNum}: O campo '${dateHeaderName}' é obrigatório e está vazio.`);
           } else {
-            const parsedOperStr = parseExcelDate(operVal);
-            if (!isValidDateString(parsedOperStr)) {
-              lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Operação' ("${operVal}") obtida foi inválida ou fora do padrão real do calendário.`);
+            const parsedDateStr = parseExcelDate(dateVal);
+            if (!isValidDateString(parsedDateStr)) {
+              lineErrorsList.push(`Erro na Linha ${rowNum}: A data de '${dateHeaderName}' ("${dateVal}") obtida foi inválida ou fora do padrão real do calendário.`);
             } else {
-              // Audit: Compare original vs imported date components to ensure 100% fidelity
-              const origComp = getRawDateComponents(operVal);
-              const parts = parsedOperStr.split('-');
+              const origComp = getRawDateComponents(dateVal);
+              const parts = parsedDateStr.split('-');
               const importedYr = parseInt(parts[0], 10);
               const importedMn = parseInt(parts[1], 10);
               const importedDy = parseInt(parts[2], 10);
               
               if (origComp) {
                 if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
-                  lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data na 'Operação'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
+                  lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data em '${dateHeaderName}'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
                 }
               }
             }
           }
 
-          // 2.2 Verify 'Vencimento' (Date) if the optional column is present and perform strict auditing
-          const vencVal = row['Vencimento'];
-          if (vencVal !== undefined && vencVal !== null && String(vencVal).trim() !== '') {
-            const parsedVencStr = parseExcelDate(vencVal);
-            if (!isValidDateString(parsedVencStr)) {
-              lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Vencimento' ("${vencVal}") obtida foi inválida ou fora do padrão real do calendário.`);
-            } else {
-              // Audit: Compare original vs imported date components to ensure 100% fidelity
-              const origComp = getRawDateComponents(vencVal);
-              const parts = parsedVencStr.split('-');
-              const importedYr = parseInt(parts[0], 10);
-              const importedMn = parseInt(parts[1], 10);
-              const importedDy = parseInt(parts[2], 10);
-              
-              if (origComp) {
-                if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
-                  lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data no 'Vencimento'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
+          if (!isSimplified4) {
+            const vencVal = row['Vencimento'];
+            if (vencVal !== undefined && vencVal !== null && String(vencVal).trim() !== '') {
+              const parsedVencStr = parseExcelDate(vencVal);
+              if (!isValidDateString(parsedVencStr)) {
+                lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Vencimento' ("${vencVal}") obtida foi inválida ou fora do padrão real do calendário.`);
+              } else {
+                const origComp = getRawDateComponents(vencVal);
+                const parts = parsedVencStr.split('-');
+                const importedYr = parseInt(parts[0], 10);
+                const importedMn = parseInt(parts[1], 10);
+                const importedDy = parseInt(parts[2], 10);
+                
+                if (origComp) {
+                  if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
+                    lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data no 'Vencimento'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
+                  }
                 }
               }
             }
           }
 
-          // 3. Verify 'Conta'
           const contaVal = row['Conta'];
           if (contaVal === undefined || contaVal === null || String(contaVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Conta' é obrigatório e está vazio.`);
           }
 
-          // 4. Verify 'Descrição - Conta' (Obrigatório)
           const descContaVal = row['Descrição - Conta'];
           if (descContaVal === undefined || descContaVal === null || String(descContaVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Descrição - Conta' é obrigatório e está vazio.`);
           }
         });
 
-        // NON-PARTIAL ABORT IF ANY LINE HAS ERRORS
         if (lineErrorsList.length > 0) {
           setImportErrors(lineErrorsList);
           setValidationError(`A importação foi bloqueada devido a erros de validação nas linhas da planilha. Registramos ${lineErrorsList.length} inconsistência(s).`);
           return;
         }
 
-        // Build records under mirror mode: No system overrides or autoconfig fallback data
         const formattedRecords = excelRows.map((row, idx) => {
-          const rawOperVal = row['Operação'];
+          const rawOperVal = row[dateHeaderName];
           const parsedDateForQuery = parseExcelDate(rawOperVal);
 
-          // Get rawOper for record storage representation
           let rawOper = '';
           if (rawOperVal !== undefined && rawOperVal !== null) {
             if (rawOperVal instanceof Date) {
@@ -742,7 +745,6 @@ export default function TransactionList({
           const rawDescConta = row['Descrição - Conta'] !== undefined ? String(row['Descrição - Conta']).trim() : '';
           const rawVal = row['Valor'];
 
-          // Determine numeric value
           let numericVal = 0;
           if (typeof rawVal === 'number') {
             numericVal = rawVal;
@@ -751,13 +753,18 @@ export default function TransactionList({
             numericVal = parseFloat(cleaned) || 0;
           }
 
-          // Resolve matching account from current planoContas
           let matchedPc = planoContas.find(pc => pc.code.trim() === String(rawConta).trim());
           if (!matchedPc && rawDescConta) {
             matchedPc = planoContas.find(pc => pc.name.trim().toLowerCase() === String(rawDescConta).trim().toLowerCase());
           }
 
-          const rawClassValue = String(row['Classificação'] || '').trim();
+          let derivedMes = '';
+          if (parsedDateForQuery && parsedDateForQuery.includes('-')) {
+            const [y, m] = parsedDateForQuery.split('-');
+            derivedMes = `${m}/${y}`;
+          }
+
+          const rawClassValue = isSimplified4 ? "" : String(row['Classificação'] || '').trim();
           const foundCat = categories.find(c => 
             c.name.trim().toLowerCase() === rawClassValue.toLowerCase() ||
             c.id.trim().toLowerCase() === rawClassValue.toLowerCase()
@@ -776,7 +783,7 @@ export default function TransactionList({
             
           const subCategoryVal = matchedPc ? matchedPc.subCategory : String(row['Descrição'] || '').trim();
 
-          const rawVencVal = row['Vencimento'];
+          const rawVencVal = isSimplified4 ? undefined : row['Vencimento'];
           const parsedVencForQuery = rawVencVal !== undefined && rawVencVal !== null && String(rawVencVal).trim() !== ''
             ? parseExcelDate(rawVencVal)
             : undefined;
@@ -787,25 +794,23 @@ export default function TransactionList({
             vencimento: parsedVencForQuery,
             account: matchedPc ? matchedPc.name : rawDescConta || `CONTA ${rawConta}`,
             description: subCategoryVal,
-            document: String(row['Documento'] || '').trim() || undefined,
+            document: isSimplified4 ? "" : String(row['Documento'] || '').trim() || undefined,
             classification: mappedClassification,
             costType: costTypeVal,
             value: mathematicalValue,
 
-            // Raw columns supporting 100% literal fidelity
             operacao: rawOper,
             conta: rawConta,
             descricaoConta: rawDescConta,
-            classificacaoOriginal: String(row['Classificação'] || '').trim(),
-            descricaoOriginal: String(row['Descrição'] || '').trim(),
-            custoOriginal: String(row['Custo'] || '').trim(),
-            historico: String(row['Histórico'] || '').trim(),
-            documentoOriginal: String(row['Documento'] || '').trim(),
+            classificacaoOriginal: isSimplified4 ? (matchedPc ? matchedPc.classificationId : 'opex_admin') : String(row['Classificação'] || '').trim(),
+            descricaoOriginal: isSimplified4 ? (matchedPc ? matchedPc.subCategory : '') : String(row['Descrição'] || '').trim(),
+            custoOriginal: isSimplified4 ? (matchedPc ? matchedPc.costType : 'Fixo') : String(row['Custo'] || '').trim(),
+            historico: isSimplified4 ? "" : String(row['Histórico'] || '').trim(),
+            documentoOriginal: isSimplified4 ? "" : String(row['Documento'] || '').trim(),
             valorOriginal: numericVal
           } as Transaction;
         });
 
-        // Perform self-auditing controls
         const totalImportedRows = formattedRecords.length;
         const totalImportedValueSum = formattedRecords.reduce((sum, r) => sum + r.valorOriginal!, 0);
         const differenceCalculated = Math.abs(totalExcelValueSum - totalImportedValueSum);
@@ -828,15 +833,14 @@ export default function TransactionList({
           return;
         }
 
-        // Build preview info
         setTempFile({
           name: file.name,
           importDate: new Date().toLocaleString('pt-BR'),
           records: formattedRecords,
-          totalValue: formattedRecords.reduce((sum, r) => sum + r.value, 0)
+          totalValue: formattedRecords.reduce((sum, r) => sum + Math.abs(r.value), 0)
         });
 
-        setSuccessMsg("Planilha lida com sucesso! Auditoria de consistência do padrão DRE QUATTRO aprovada (0 divergências).");
+        setSuccessMsg("Planilha lida com sucesso! Auditoria de consistência aprovada (0 divergências).");
         setTimeout(() => setSuccessMsg(null), 5000);
 
       } catch (err) {

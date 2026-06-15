@@ -15,6 +15,11 @@ const PORT = 3000;
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
 
+let resolveDbReady: (val: boolean) => void = () => {};
+const dbReadyPromise = new Promise<boolean>((resolve) => {
+  resolveDbReady = resolve;
+});
+
 let supabase: any = null;
 let supabaseActive = false;
 if (supabaseUrl && supabaseAnonKey) {
@@ -23,9 +28,11 @@ if (supabaseUrl && supabaseAnonKey) {
     console.log("🚀 Supabase Client initialized successfully on Server.");
   } catch (err) {
     console.error("❌ Failed to initialize Supabase Client on Server:", err);
+    resolveDbReady(false);
   }
 } else {
   console.log("ℹ️ Supabase is NOT configured. All database calls will route to the local persistent JSON database.");
+  resolveDbReady(false);
 }
 
 // Database configuration for local persistence
@@ -574,6 +581,7 @@ app.post("/api/supabase/seed", async (req, res) => {
 
 // GET list of multi-tenant enterprise companies
 app.get("/api/companies", async (req, res) => {
+  await dbReadyPromise;
   try {
     if (supabase && supabaseActive) {
       const { data, error } = await supabase.from('companies').select('*').order('name', { ascending: true });
@@ -600,6 +608,7 @@ app.get("/api/companies", async (req, res) => {
 
 // POST to insert/register a new company
 app.post("/api/companies", async (req, res) => {
+  await dbReadyPromise;
   const { name, cnpj, sector } = req.body;
   if (!name || !cnpj || !sector) {
     res.status(400).json({ error: "Nome, CNPJ e Setor são campos obrigatórios." });
@@ -711,6 +720,7 @@ app.post("/api/conversations", async (req, res) => {
 
 // Get transactions (Receitas e Despesas)
 app.get("/api/transactions", async (req, res) => {
+  await dbReadyPromise;
   const { company_id } = req.query;
   if (!company_id) {
     res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
@@ -764,6 +774,7 @@ app.get("/api/transactions", async (req, res) => {
 
 // Save transactions (overwrite mirror sync)
 app.post("/api/transactions", async (req, res) => {
+  await dbReadyPromise;
   const { company_id, transactions } = req.body;
   if (!company_id || !Array.isArray(transactions)) {
     res.status(400).json({ error: "company_id ou array de lançamentos inválido." });
@@ -836,6 +847,7 @@ app.post("/api/transactions", async (req, res) => {
 
 // GET Plano de contas (Plano de Contas master configurations)
 app.get("/api/plano_contas", async (req, res) => {
+  await dbReadyPromise;
   try {
     if (supabase && supabaseActive) {
       const { data, error } = await supabase.from('plano_contas').select('*');
@@ -863,6 +875,7 @@ app.get("/api/plano_contas", async (req, res) => {
 
 // POST to create / register standard Account
 app.post("/api/plano_contas", async (req, res) => {
+  await dbReadyPromise;
   const { code, name, classificationId, subCategory, costType, company_id } = req.body;
   if (!code || !name || !classificationId || !subCategory || !costType) {
     res.status(400).json({ error: "Campos obrigatórios ausentes para cadastrar a conta." });
@@ -1159,6 +1172,7 @@ async function setupViteOrStatic() {
       if (error) {
         console.log("⚠️ Supabase está configurado, mas as tabelas ainda não foram localizadas no schema remoto (Pode ser que o script SQL precise rodar). Usando backup local em JSON.");
         supabaseActive = false;
+        resolveDbReady(false);
       } else {
         console.log("✅ Conexão com as tabelas do Supabase estabelecida com sucesso! Integração ativa.");
         supabaseActive = true;
@@ -1190,11 +1204,15 @@ async function setupViteOrStatic() {
         } catch (seedErr: any) {
           console.error("❌ Falha no semeador automático proativo:", seedErr.message || seedErr);
         }
+        resolveDbReady(true);
       }
     } catch (err: any) {
       console.log("⚠️ Falha ao verificar as tabelas do Supabase remotamente. Desativando redundância de nuvem por segurança:", err.message || err);
       supabaseActive = false;
+      resolveDbReady(false);
     }
+  } else {
+    resolveDbReady(false);
   }
 
   if (process.env.NODE_ENV !== "production") {
