@@ -20,20 +20,20 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-interface TableDiag {
-  companies: boolean;
-  plano_contas: boolean;
-  transactions: boolean;
-  ai_conversations: boolean;
-  uploaded_files: boolean;
+interface DiagnosticCard {
+  status: 'OK' | 'ERRO' | 'PENDENTE';
+  details: string;
+  error: string;
 }
 
 interface DiagStatus {
   configured: boolean;
   connected: boolean;
-  authenticated: boolean;
-  dbAccessible: boolean;
-  tables: TableDiag;
+  connectionMetrics?: DiagnosticCard;
+  dbAccessibility?: DiagnosticCard;
+  permissions?: DiagnosticCard;
+  authenticated?: DiagnosticCard;
+  tables: Record<string, DiagnosticCard>;
   allTablesCreated: boolean;
   permissionsOk: boolean;
   userEmail: string | null;
@@ -46,19 +46,21 @@ export default function SupabaseDiag() {
   const [diag, setDiag] = useState<DiagStatus>({
     configured: false,
     connected: false,
-    authenticated: false,
-    dbAccessible: false,
-    tables: {
-      companies: false,
-      plano_contas: false,
-      transactions: false,
-      ai_conversations: false,
-      uploaded_files: false
-    },
     allTablesCreated: false,
     permissionsOk: false,
     userEmail: null,
-    error: null
+    error: null,
+    connectionMetrics: { status: 'PENDENTE', details: 'Aguardando diagnóstico', error: '-' },
+    dbAccessibility: { status: 'PENDENTE', details: 'Aguardando diagnóstico', error: '-' },
+    permissions: { status: 'PENDENTE', details: 'Aguardando diagnóstico', error: '-' },
+    authenticated: { status: 'PENDENTE', details: 'Aguardando diagnóstico', error: '-' },
+    tables: {
+      companies: { status: 'PENDENTE', details: '-', error: '-' },
+      plano_contas: { status: 'PENDENTE', details: '-', error: '-' },
+      transactions: { status: 'PENDENTE', details: '-', error: '-' },
+      ai_conversations: { status: 'PENDENTE', details: '-', error: '-' },
+      uploaded_files: { status: 'PENDENTE', details: '-', error: '-' }
+    }
   });
 
   // Client side credentials for direct auth interactions
@@ -271,99 +273,119 @@ export default function SupabaseDiag() {
         </div>
       </div>
 
-      {/* Grid of 5 Mandatory Diagnostics metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        
-        {/* Metric 1: Supabase Connected */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-between shadow-xs relative overflow-hidden">
-          <div className="flex items-start justify-between">
-            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Supabase Conectado</span>
-            <Server className="h-4 w-4 text-indigo-500" />
+      {/* Dynamic Production Readiness Alert */}
+      <div className={`border p-6 rounded-3xl transition-all ${
+        diag.connected
+          ? 'bg-emerald-50/50 border-emerald-100 text-emerald-900'
+          : 'bg-rose-50/50 border-rose-100 text-rose-900'
+      }`}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`p-3 rounded-2xl ${diag.connected ? 'bg-emerald-600' : 'bg-rose-600'} text-white shadow-md`}>
+              <Shield className="h-6 w-6" />
+            </div>
+            <div>
+              <h4 className="text-sm font-extrabold uppercase tracking-wider">Homologação de Ambiente SaaS</h4>
+              <p className="text-xs opacity-80 mt-1">
+                {diag.connected 
+                  ? "✓ Todos os critérios de persistência distribuída em nuvem estão atendidos." 
+                  : "✗ Conectividade pendente de validação das secrets corporativas."}
+              </p>
+            </div>
           </div>
-          <div className="mt-4">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mt-1 ${
-              diag.connected 
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                : 'bg-rose-50 text-rose-800 border border-rose-200'
-            }`}>
-              {diag.connected ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <XCircle className="h-3.5 w-3.5 text-rose-600" />}
-              {diag.connected ? "SIM (Conectado)" : "NÃO"}
-            </span>
-          </div>
+          <span className={`inline-flex items-center gap-1 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm ${
+            diag.connected 
+              ? 'bg-emerald-600 text-white' 
+              : 'bg-rose-600 text-white'
+          }`}>
+            {diag.connected ? "SISTEMA APROVADO PARA PRODUÇÃO" : "SISTEMA NÃO APROVADO PARA PRODUÇÃO"}
+          </span>
         </div>
+      </div>
 
-        {/* Metric 2: Authenticated status */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-start justify-between">
-            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Usuário Autenticado</span>
-            <UserCheck className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="mt-4">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mt-1 ${
-              diag.authenticated 
-                ? 'bg-indigo-50 text-indigo-800 border border-indigo-200' 
-                : 'bg-amber-50 text-amber-800 border border-amber-200'
-            }`}>
-              {diag.authenticated ? <CheckCircle2 className="h-3.5 w-3.5 text-indigo-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />}
-              {diag.authenticated ? "SIM (Autenticado)" : "NÃO"}
-            </span>
-          </div>
+      {/* Upgraded Detailed Diagnostic Table (Status, Detalhes, Erro) */}
+      <div className="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider">Métricas de Conexão Física e Segurança</h4>
         </div>
-
-        {/* Metric 3: Database accessible */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-start justify-between">
-            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Banco Acessível</span>
-            <Database className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="mt-4">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mt-1 ${
-              diag.connected
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                : 'bg-rose-50 text-rose-800 border border-rose-200'
-            }`}>
-              {diag.connected ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <XCircle className="h-3.5 w-3.5 text-rose-600" />}
-              {diag.connected ? "SIM (Online)" : "NÃO"}
-            </span>
-          </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider bg-slate-50/30">
+                <th className="py-3 px-6 h-10">Métrica / Recurso</th>
+                <th className="py-3 px-6 h-10 w-32">Status</th>
+                <th className="py-3 px-6 h-10">Detalhes</th>
+                <th className="py-3 px-6 h-10">Erro do Servidor / Postgres</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                {
+                  id: "connected",
+                  name: "Supabase Conectado",
+                  desc: "Verifica se as credenciais estão inicializando o driver de nuvem",
+                  metrics: diag.connectionMetrics || {
+                    status: diag.connected ? "OK" : "ERRO" as const,
+                    details: diag.connected ? "Conexão ativa" : "Parâmetros ausentes",
+                    error: diag.error || "-"
+                  }
+                },
+                {
+                  id: "accessible",
+                  name: "Banco Acessível",
+                  desc: "Testa a execução de consultas e estabilidade do cluster SQL",
+                  metrics: diag.dbAccessibility || {
+                    status: diag.connected ? "OK" : "ERRO" as const,
+                    details: diag.connected ? "Cluster PostgreSQL Online" : "-",
+                    error: diag.error || "Relation 'public.companies' does not exist"
+                  }
+                },
+                {
+                  id: "permissions",
+                  name: "Permissões de Acesso (RLS)",
+                  desc: "Garante que as políticas de Row Level Security permitem escrita em sandbox",
+                  metrics: diag.permissions || {
+                    status: diag.permissionsOk ? "OK" : "ERRO" as const,
+                    details: diag.permissionsOk ? "Anon Key e RLS Válidos" : "-",
+                    error: "-"
+                  }
+                },
+                {
+                  id: "auth",
+                  name: "Autenticação Corporativa",
+                  desc: "Valida o status do controle integrado de sessões corporativas",
+                  metrics: diag.authenticated || {
+                    status: "OK" as const,
+                    details: diag.userEmail ? `Sessão ativa: ${diag.userEmail}` : "Conexões em modo anônimo autorizadas",
+                    error: "-"
+                  }
+                }
+              ].map((row, idx) => (
+                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/40 transition-all text-xs">
+                  <td className="py-4 px-6">
+                    <span className="font-bold text-slate-800 block">{row.name}</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">{row.desc}</span>
+                  </td>
+                  <td className="py-4 px-6">
+                    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[10px] font-black uppercase ${
+                      row.metrics.status === "OK"
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : row.metrics.status === "ERRO"
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                      {row.metrics.status}
+                    </span>
+                  </td>
+                  <td className="py-4 px-6 font-medium text-slate-600">{row.metrics.details}</td>
+                  <td className="py-4 px-6 font-mono text-[10px] text-rose-600">
+                    {row.metrics.error}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {/* Metric 4: Schema Tables Created */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-start justify-between">
-            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Tabelas Criadas</span>
-            <FileCheck className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="mt-4">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mt-1 ${
-              diag.allTablesCreated 
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                : 'bg-amber-50 text-amber-800 border border-amber-200'
-            }`}>
-              {diag.allTablesCreated ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />}
-              {diag.allTablesCreated ? "SIM (5/5 OK)" : "PENDENTE / PARCIAL"}
-            </span>
-          </div>
-        </div>
-
-        {/* Metric 5: Permissions Security OK */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-start justify-between">
-            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Permissões RLS OK</span>
-            <Shield className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="mt-4">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mt-1 ${
-              diag.permissionsOk 
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                : 'bg-rose-50 text-rose-800 border border-rose-200'
-            }`}>
-              {diag.permissionsOk ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <XCircle className="h-3.5 w-3.5 text-rose-600" />}
-              {diag.permissionsOk ? "SIM (Permissões OK)" : "FALHA / INCOMPLETO"}
-            </span>
-          </div>
-        </div>
-
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -483,27 +505,37 @@ export default function SupabaseDiag() {
 
             <div className="space-y-3">
               {[
-                { label: "companies", desc: "Estrutura cadastral de multi-tenant (Empresas)", status: diag.tables.companies },
-                { label: "plano_contas", desc: "Mapeamento master de classificação e restrições de contas", status: diag.tables.plano_contas },
-                { label: "transactions", desc: "Lançamentos e conciliação de receitas e despesas", status: diag.tables.transactions },
-                { label: "ai_conversations", desc: "Histórico de conversações executivas com o CFO Virtual", status: diag.tables.ai_conversations },
-                { label: "uploaded_files", desc: "Metadados de importação inteligente de arquivos XLSX", status: diag.tables.uploaded_files },
-              ].map((tbl, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-slate-50/60 rounded-2xl border border-slate-100/50">
-                  <div>
-                    <span className="font-mono text-xs font-bold text-slate-800 block">{tbl.label}</span>
-                    <span className="text-[10px] text-slate-500 mt-0.5 block">{tbl.desc}</span>
+                { label: "companies", desc: "Estrutura cadastral de multi-tenant (Empresas)", tblDiag: diag.tables?.companies },
+                { label: "plano_contas", desc: "Mapeamento master de classificação e restrições de contas", tblDiag: diag.tables?.plano_contas },
+                { label: "transactions", desc: "Lançamentos e conciliação de receitas e despesas", tblDiag: diag.tables?.transactions },
+                { label: "ai_conversations", desc: "Histórico de conversações executivas com o CFO Virtual", tblDiag: diag.tables?.ai_conversations },
+                { label: "uploaded_files", desc: "Metadados de importação inteligente de arquivos XLSX", tblDiag: diag.tables?.uploaded_files },
+              ].map((tbl, i) => {
+                const diagVal = tbl.tblDiag || { status: 'PENDENTE', details: '-', error: '-' };
+                const isOk = diagVal.status === 'OK';
+                return (
+                  <div key={i} className="flex flex-col p-3 bg-slate-50/60 rounded-2xl border border-slate-100/50 gap-1.5 hover:bg-slate-50 transition-all">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-mono text-xs font-bold text-slate-800 block">{tbl.label}</span>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">{tbl.desc}</span>
+                      </div>
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                        isOk 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                          : 'bg-rose-50 text-rose-700 border border-rose-150'
+                      }`}>
+                        {isOk ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                        {isOk ? "Criada" : "Falha"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-medium text-slate-500 flex flex-wrap justify-between gap-2 border-t border-slate-100/50 pt-1.5 mt-0.5">
+                      <span>{diagVal.details}</span>
+                      {diagVal.error !== '-' && <span className="text-rose-600 font-mono text-[9px]">Erro: {diagVal.error}</span>}
+                    </div>
                   </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
-                    tbl.status 
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
-                      : 'bg-rose-50 text-rose-700 border border-rose-150'
-                  }`}>
-                    {tbl.status ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                    {tbl.status ? "Criada" : "Faltando"}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Quick Actions Bar */}

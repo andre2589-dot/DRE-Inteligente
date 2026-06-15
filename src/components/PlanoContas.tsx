@@ -297,7 +297,7 @@ export default function PlanoContas({
               {/* Código */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Código da Conta *
+                  Conta * (Código)
                 </label>
                 <input
                   type="text"
@@ -316,7 +316,7 @@ export default function PlanoContas({
               {/* Nome da Conta */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Nome da Conta (Despesa) *
+                  Descrição - Conta *
                 </label>
                 <input
                   type="text"
@@ -338,7 +338,7 @@ export default function PlanoContas({
               {/* Agrupador DRE */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Agrupador DRE (Classificação) *
+                  Classificação * (Agrupador DRE)
                 </label>
                 <select
                   value={formClassificationId}
@@ -358,7 +358,7 @@ export default function PlanoContas({
               {/* Subcategoria */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Subcategoria (Descrição) *
+                  Descrição * (Subcategoria)
                 </label>
                 <input
                   type="text"
@@ -380,7 +380,7 @@ export default function PlanoContas({
               {/* Tipo de Custo */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Tipo de Custo *
+                  Custo *
                 </label>
                 <select
                   value={formCostType}
@@ -485,10 +485,10 @@ export default function PlanoContas({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 uppercase text-[9px] font-bold select-none border-b border-slate-150 tracking-wider">
-                  <th className="py-2.5 px-3 w-[10%]">Código</th>
-                  <th className="py-2.5 px-3 w-[25%]">Nome da Conta</th>
-                  <th className="py-2.5 px-3 w-[25%]">Agrupador DRE</th>
-                  <th className="py-2.5 px-3 w-[20%]">Subcategoria</th>
+                  <th className="py-2.5 px-3 w-[10%]">Conta</th>
+                  <th className="py-2.5 px-3 w-[25%]">Descrição - Conta</th>
+                  <th className="py-2.5 px-3 w-[25%]">Classificação</th>
+                  <th className="py-2.5 px-3 w-[20%]">Descrição</th>
                   <th className="py-2.5 px-1 w-[10%] text-center">Custo</th>
                   <th className="py-2.5 px-2 w-[10%] text-center">Status</th>
                   <th className="py-2.5 px-3 w-[10%] text-right">Ação</th>

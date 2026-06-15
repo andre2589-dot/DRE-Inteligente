@@ -16,12 +16,14 @@ interface DreGridProps {
   transactions: Transaction[];
   categories: DreCategory[];
   onUpdateTransactionCategory: (txId: string, newCatId: string) => void;
+  onUpdateCategoryName?: (catId: string, newName: string) => void;
 }
 
 export default function DreGrid({
   transactions,
   categories,
-  onUpdateTransactionCategory
+  onUpdateTransactionCategory,
+  onUpdateCategoryName
 }: DreGridProps) {
   // Collapsed categories state. Collapsed by default? Let's keep them expanded for instant inspection
   const [collapsed, setCollapsed] = useState<{ [key: string]: boolean }>({
@@ -32,6 +34,8 @@ export default function DreGrid({
   
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState<string>('');
 
   // 1. Get unique sorted months (e.g. ["2026-01", "2026-02", ...])
   const months = Array.from(
@@ -228,9 +232,75 @@ export default function DreGrid({
                         {!isParent && hasParentGroup && (
                           <span className="h-1.5 w-1.5 rounded-full bg-slate-300 ml-1.5 mr-1" />
                         )}
-                        <span className={`leading-relaxed ${isFormulaHead ? 'text-slate-900 font-extrabold uppercase text-[11px]' : 'text-slate-800 font-medium'}`}>
-                          {cat.name}
-                        </span>
+                        
+                        {editingCatId === cat.id ? (
+                          <div className="flex items-center gap-1.5 w-full mr-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editingCatName}
+                              onChange={(e) => setEditingCatName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  if (editingCatName.trim() && onUpdateCategoryName) {
+                                    onUpdateCategoryName(cat.id, editingCatName.trim());
+                                  }
+                                  setEditingCatId(null);
+                                } else if (e.key === 'Escape') {
+                                  setEditingCatId(null);
+                                }
+                              }}
+                              className="bg-white border border-indigo-400 rounded px-2 py-0.5 text-xs text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-none w-full"
+                              autoFocus
+                            />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (editingCatName.trim() && onUpdateCategoryName) {
+                                  onUpdateCategoryName(cat.id, editingCatName.trim());
+                                }
+                                setEditingCatId(null);
+                              }}
+                              className="p-1 bg-emerald-500 text-white rounded hover:bg-emerald-600 transition-colors"
+                              title="Salvar"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCatId(null);
+                              }}
+                              className="p-1 bg-slate-300 text-slate-700 rounded hover:bg-slate-400 transition-colors"
+                              title="Cancelar"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between w-full group/label">
+                            <span className={`leading-relaxed ${isFormulaHead ? 'text-slate-900 font-extrabold uppercase text-[11px]' : 'text-slate-800 font-medium'}`}>
+                              {cat.name}
+                            </span>
+                            
+                            {onUpdateCategoryName && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingCatId(cat.id);
+                                  setEditingCatName(cat.name);
+                                }}
+                                className="opacity-0 group-hover/label:opacity-100 p-0.5 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-100 ml-1.5 transition-all"
+                                title="Editar classificação"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {months.map(m => {

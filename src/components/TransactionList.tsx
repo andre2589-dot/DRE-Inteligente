@@ -68,6 +68,9 @@ interface QuickRegisterRowProps {
   key?: React.Key;
   initialCode: string;
   excelDescription: string;
+  initialClassificationId?: string;
+  initialSubCategory?: string;
+  initialCostType?: 'Fixo' | 'Variável' | 'N/A' | 'MEO';
   categories: DreCategory[];
   planoContas: PlanoContasItem[];
   onAddAccount: (newItem: Omit<PlanoContasItem, 'id'>) => Promise<{ success: boolean; error?: string }>;
@@ -76,6 +79,9 @@ interface QuickRegisterRowProps {
 function QuickRegisterRow({
   initialCode,
   excelDescription,
+  initialClassificationId,
+  initialSubCategory,
+  initialCostType,
   categories,
   planoContas,
   onAddAccount
@@ -83,10 +89,10 @@ function QuickRegisterRow({
   const [code, setCode] = useState(initialCode);
   const [name, setName] = useState(excelDescription);
   const [classificationId, setClassificationId] = useState(() => {
-    return categories.filter(c => c.type !== 'formula')[0]?.id || '';
+    return initialClassificationId || categories.filter(c => c.type !== 'formula')[0]?.id || '';
   });
-  const [subCategory, setSubCategory] = useState('');
-  const [costType, setCostType] = useState<'Fixo' | 'Variável' | 'N/A' | 'MEO'>('Fixo');
+  const [subCategory, setSubCategory] = useState(initialSubCategory || '');
+  const [costType, setCostType] = useState<'Fixo' | 'Variável' | 'N/A' | 'MEO'>(initialCostType || 'Fixo');
   const [active, setActive] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -561,7 +567,7 @@ export default function TransactionList({
     return null;
   };
 
-  // 1. Process Excel with dynamic/intelligent column mapping validation
+  // 1. Process Excel with strict 11 columns structure
   const handleExcelUpload = (file: File) => {
     setValidationError(null);
     setImportErrors(null);
@@ -587,49 +593,33 @@ export default function TransactionList({
         const rawHeaders = (headersLineAndMore[0] as any[]) || [];
         const fileHeaders = rawHeaders.map(h => String(h).trim()).filter(Boolean);
 
-        // Perform dynamic header detection
-        const detectedMapping: { [key: string]: string | null } = {
-          operacao: null,
-          conta: null,
-          descricaoConta: null,
-          valor: null,
-        };
+        const REQUIRED_HEADERS_EXACT = [
+          'Vencimento',
+          'Operação',
+          'Mês',
+          'Conta',
+          'Descrição - Conta',
+          'Classificação',
+          'Descrição',
+          'Custo',
+          'Histórico',
+          'Documento',
+          'Valor'
+        ];
 
-        let detectedVencimentoKey: string | null = null;
+        // Strict 11 columns checks: No columns created, removed, or renamed
+        const missing = REQUIRED_HEADERS_EXACT.filter(h => !fileHeaders.includes(h));
+        const extra = fileHeaders.filter(h => !REQUIRED_HEADERS_EXACT.includes(h));
 
-        fileHeaders.forEach((rawHeader) => {
-          const normalized = normalizeHeader(rawHeader);
-          for (const [key, config] of Object.entries(MAPPING_CONFIG)) {
-            if (config.normalizedAliases.includes(normalized)) {
-              detectedMapping[key] = rawHeader;
-              break;
-            }
+        if (missing.length > 0 || extra.length > 0) {
+          let errorMsg = "A estrutura do arquivo não atende ao padrão de importação DRE Inteligente.";
+          if (missing.length > 0) {
+            errorMsg += ` Faltando as colunas: ${missing.join(', ')}.`;
           }
-          if (['vencimento', 'datavencimento', 'datadevencimento', 'venc'].includes(normalized)) {
-            detectedVencimentoKey = rawHeader;
+          if (extra.length > 0) {
+            errorMsg += ` Colunas extras não permitidas encontradas: ${extra.join(', ')}.`;
           }
-        });
-
-        // Determine missing columns
-        const missing: string[] = [];
-        Object.entries(MAPPING_CONFIG).forEach(([key, config]) => {
-          if (!detectedMapping[key]) {
-            missing.push(config.originalLabel);
-          }
-        });
-
-        const isSuccess = missing.length === 0;
-
-        // Save mapping result to prompt the modal
-        setColMapping({
-          success: isSuccess,
-          detected: detectedMapping,
-          missing: missing
-        });
-        setShowMappingModal(true);
-
-        if (!isSuccess) {
-          setValidationError(`Arquivo inválido. A planilha carregada deve conter as colunas obrigatórias: ${missing.join(', ')}`);
+          setValidationError(errorMsg);
           return;
         }
 
@@ -649,7 +639,7 @@ export default function TransactionList({
           const rowNum = idx + 2; // header is row 1, index starts at 0 (row 2)
 
           // 1. Verify 'Valor'
-          const valorVal = row[detectedMapping.valor!];
+          const valorVal = row['Valor'];
           if (valorVal === undefined || valorVal === null || String(valorVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Valor' é obrigatório e está vazio.`);
           } else {
@@ -668,7 +658,7 @@ export default function TransactionList({
           }
 
           // 2. Verify 'Operação' (Date) and perform strict auditing
-          const operVal = row[detectedMapping.operacao!];
+          const operVal = row['Operação'];
           if (operVal === undefined || operVal === null || String(operVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Operação' (Data do lançamento) é obrigatório e está vazio.`);
           } else {
@@ -692,37 +682,35 @@ export default function TransactionList({
           }
 
           // 2.2 Verify 'Vencimento' (Date) if the optional column is present and perform strict auditing
-          if (detectedVencimentoKey) {
-            const vencVal = row[detectedVencimentoKey];
-            if (vencVal !== undefined && vencVal !== null && String(vencVal).trim() !== '') {
-              const parsedVencStr = parseExcelDate(vencVal);
-              if (!isValidDateString(parsedVencStr)) {
-                lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Vencimento' ("${vencVal}") obtida foi inválida ou fora do padrão real do calendário.`);
-              } else {
-                // Audit: Compare original vs imported date components to ensure 100% fidelity
-                const origComp = getRawDateComponents(vencVal);
-                const parts = parsedVencStr.split('-');
-                const importedYr = parseInt(parts[0], 10);
-                const importedMn = parseInt(parts[1], 10);
-                const importedDy = parseInt(parts[2], 10);
-                
-                if (origComp) {
-                  if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
-                    lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data no 'Vencimento'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
-                  }
+          const vencVal = row['Vencimento'];
+          if (vencVal !== undefined && vencVal !== null && String(vencVal).trim() !== '') {
+            const parsedVencStr = parseExcelDate(vencVal);
+            if (!isValidDateString(parsedVencStr)) {
+              lineErrorsList.push(`Erro na Linha ${rowNum}: A data de 'Vencimento' ("${vencVal}") obtida foi inválida ou fora do padrão real do calendário.`);
+            } else {
+              // Audit: Compare original vs imported date components to ensure 100% fidelity
+              const origComp = getRawDateComponents(vencVal);
+              const parts = parsedVencStr.split('-');
+              const importedYr = parseInt(parts[0], 10);
+              const importedMn = parseInt(parts[1], 10);
+              const importedDy = parseInt(parts[2], 10);
+              
+              if (origComp) {
+                if (origComp.day !== importedDy || origComp.month !== importedMn || origComp.year !== importedYr) {
+                  lineErrorsList.push(`Erro na Linha ${rowNum}: Divergência de auditoria de data no 'Vencimento'. Original Excel: ${origComp.day}/${origComp.month}/${origComp.year} | Importado: ${importedDy}/${importedMn}/${importedYr}`);
                 }
               }
             }
           }
 
           // 3. Verify 'Conta'
-          const contaVal = row[detectedMapping.conta!];
+          const contaVal = row['Conta'];
           if (contaVal === undefined || contaVal === null || String(contaVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Conta' é obrigatório e está vazio.`);
           }
 
           // 4. Verify 'Descrição - Conta' (Obrigatório)
-          const descContaVal = row[detectedMapping.descricaoConta!];
+          const descContaVal = row['Descrição - Conta'];
           if (descContaVal === undefined || descContaVal === null || String(descContaVal).trim() === '') {
             lineErrorsList.push(`Erro na Linha ${rowNum}: O campo 'Descrição - Conta' é obrigatório e está vazio.`);
           }
@@ -737,7 +725,7 @@ export default function TransactionList({
 
         // Build records under mirror mode: No system overrides or autoconfig fallback data
         const formattedRecords = excelRows.map((row, idx) => {
-          const rawOperVal = row[detectedMapping.operacao!];
+          const rawOperVal = row['Operação'];
           const parsedDateForQuery = parseExcelDate(rawOperVal);
 
           // Get rawOper for record storage representation
@@ -750,9 +738,9 @@ export default function TransactionList({
             }
           }
 
-          const rawConta = row[detectedMapping.conta!] !== undefined ? String(row[detectedMapping.conta!]).trim() : '';
-          const rawDescConta = row[detectedMapping.descricaoConta!] !== undefined ? String(row[detectedMapping.descricaoConta!]).trim() : '';
-          const rawVal = row[detectedMapping.valor!];
+          const rawConta = row['Conta'] !== undefined ? String(row['Conta']).trim() : '';
+          const rawDescConta = row['Descrição - Conta'] !== undefined ? String(row['Descrição - Conta']).trim() : '';
+          const rawVal = row['Valor'];
 
           // Determine numeric value
           let numericVal = 0;
@@ -769,22 +757,26 @@ export default function TransactionList({
             matchedPc = planoContas.find(pc => pc.name.trim().toLowerCase() === String(rawDescConta).trim().toLowerCase());
           }
 
-          const mappedClassification = matchedPc ? matchedPc.classificationId : 'opex_admin';
+          const rawClassValue = String(row['Classificação'] || '').trim();
+          const foundCat = categories.find(c => 
+            c.name.trim().toLowerCase() === rawClassValue.toLowerCase() ||
+            c.id.trim().toLowerCase() === rawClassValue.toLowerCase()
+          );
+
+          const mappedClassification = matchedPc ? matchedPc.classificationId : (foundCat ? foundCat.id : 'opex_admin');
           const isIncome = matchedPc 
-            ? (matchedPc.classificationId === 'sales_products' || 
-               matchedPc.classificationId === 'sales_services' || 
-               matchedPc.name.toLowerCase().includes('venda') || 
-               matchedPc.name.toLowerCase().includes('receita') || 
-               matchedPc.name.toLowerCase().includes('faturamento') || 
-               matchedPc.name.toLowerCase().includes('entrada'))
-            : false;
+            ? (matchedPc.classificationId === 'sales_products' || matchedPc.classificationId === 'sales_services')
+            : (foundCat ? (foundCat.type === 'incoming') : false);
           
           const mathematicalValue = isIncome ? Math.abs(numericVal) : -Math.abs(numericVal);
 
-          const costTypeVal: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = matchedPc ? matchedPc.costType : 'Fixo';
-          const subCategoryVal = matchedPc ? matchedPc.subCategory : '';
+          const costTypeVal: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = matchedPc 
+            ? matchedPc.costType 
+            : (['Fixo', 'Variável', 'N/A', 'MEO'].includes(String(row['Custo'] || '').trim()) ? String(row['Custo'] || '').trim() as any : 'Fixo');
+            
+          const subCategoryVal = matchedPc ? matchedPc.subCategory : String(row['Descrição'] || '').trim();
 
-          const rawVencVal = detectedVencimentoKey ? row[detectedVencimentoKey] : undefined;
+          const rawVencVal = row['Vencimento'];
           const parsedVencForQuery = rawVencVal !== undefined && rawVencVal !== null && String(rawVencVal).trim() !== ''
             ? parseExcelDate(rawVencVal)
             : undefined;
@@ -795,7 +787,7 @@ export default function TransactionList({
             vencimento: parsedVencForQuery,
             account: matchedPc ? matchedPc.name : rawDescConta || `CONTA ${rawConta}`,
             description: subCategoryVal,
-            document: undefined,
+            document: String(row['Documento'] || '').trim() || undefined,
             classification: mappedClassification,
             costType: costTypeVal,
             value: mathematicalValue,
@@ -804,6 +796,11 @@ export default function TransactionList({
             operacao: rawOper,
             conta: rawConta,
             descricaoConta: rawDescConta,
+            classificacaoOriginal: String(row['Classificação'] || '').trim(),
+            descricaoOriginal: String(row['Descrição'] || '').trim(),
+            custoOriginal: String(row['Custo'] || '').trim(),
+            historico: String(row['Histórico'] || '').trim(),
+            documentoOriginal: String(row['Documento'] || '').trim(),
             valorOriginal: numericVal
           } as Transaction;
         });
@@ -839,7 +836,7 @@ export default function TransactionList({
           totalValue: formattedRecords.reduce((sum, r) => sum + r.value, 0)
         });
 
-        setSuccessMsg("Planilha lida com sucesso! Auditoria de consistência aprovada (0 divergências).");
+        setSuccessMsg("Planilha lida com sucesso! Auditoria de consistência do padrão DRE QUATTRO aprovada (0 divergências).");
         setTimeout(() => setSuccessMsg(null), 5000);
 
       } catch (err) {
@@ -878,24 +875,56 @@ export default function TransactionList({
   const tempUnregisteredAccounts = useMemo(() => {
     if (!tempFile || !tempFile.records) return [];
     
-    // Key: code, Value: description (first matching description is kept)
-    const uniqueMap = new Map<string, string>();
+    // Key: code, Value: { name, classificationId, subCategory, costType }
+    const uniqueMap = new Map<string, { 
+      name: string; 
+      classificationId: string; 
+      subCategory: string; 
+      costType: 'Fixo' | 'Variável' | 'N/A' | 'MEO' 
+    }>();
+
     tempFile.records.forEach(r => {
-      const code = String(r.conta || r.account || '').trim();
+      const code = String(r.conta || '').trim();
       if (code) {
         const found = planoContas.some(pc => pc.code === code);
         if (!found) {
           if (!uniqueMap.has(code)) {
-            // Use exact description from Excel
-            uniqueMap.set(code, String(r.descricaoConta || r.description || '').trim());
+            const spreadsheetClassStr = String(r.classificacaoOriginal || '').trim();
+            const foundCat = categories.find(c => 
+              c.name.trim().toLowerCase() === spreadsheetClassStr.toLowerCase() ||
+              c.id.trim().toLowerCase() === spreadsheetClassStr.toLowerCase()
+            );
+
+            let matchedCst: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = 'Fixo';
+            const rawCst = String(r.custoOriginal || '').trim();
+            if (['Fixo', 'Variável', 'N/A', 'MEO'].includes(rawCst)) {
+              matchedCst = rawCst as any;
+            } else if (rawCst.toLowerCase().includes('fix')) {
+              matchedCst = 'Fixo';
+            } else if (rawCst.toLowerCase().includes('var')) {
+              matchedCst = 'Variável';
+            }
+
+            uniqueMap.set(code, {
+              name: String(r.descricaoConta || r.account || '').trim(),
+              classificationId: foundCat ? foundCat.id : 'opex_admin',
+              subCategory: String(r.descricaoOriginal || '').trim(),
+              costType: matchedCst
+            });
           }
         }
       }
     });
 
-    const list: { code: string; description: string }[] = [];
-    uniqueMap.forEach((desc, code) => {
-      list.push({ code, description: desc || `CONTA ${code}` });
+    const list: { 
+      code: string; 
+      name: string; 
+      classificationId: string; 
+      subCategory: string; 
+      costType: 'Fixo' | 'Variável' | 'N/A' | 'MEO' 
+    }[] = [];
+    uniqueMap.forEach((info, code) => {
+      list.push({ code, ...info });
     });
     return list;
   }, [tempFile, planoContas]);
@@ -1125,22 +1154,25 @@ export default function TransactionList({
             <table className="min-w-full table-auto border-collapse text-left">
               <thead className="bg-slate-100 border-b border-slate-205 text-slate-700 uppercase font-bold text-[10px] tracking-wider select-none sticky top-0 z-10">
                 <tr>
-                  <th className="py-2.5 px-3">Código *</th>
+                  <th className="py-2.5 px-3">Conta *</th>
                   <th className="py-2.5 px-3">Origem Planilha</th>
-                  <th className="py-2.5 px-3">Nome da Conta *</th>
-                  <th className="py-2.5 px-3">Agrupador DRE *</th>
-                  <th className="py-2.5 px-3 font-sans">Subcategoria *</th>
-                  <th className="py-2.5 px-3 text-left">Tipo Custo *</th>
+                  <th className="py-2.5 px-3">Descrição - Conta *</th>
+                  <th className="py-2.5 px-3">Classificação *</th>
+                  <th className="py-2.5 px-3 font-sans font-bold">Descrição *</th>
+                  <th className="py-2.5 px-3 text-left">Custo *</th>
                   <th className="py-2.5 px-3 text-left">Status *</th>
                   <th className="py-2.5 px-3 text-center">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-150">
-                {tempUnregisteredAccounts.map(({ code, description }) => (
+                {tempUnregisteredAccounts.map(({ code, name, classificationId, subCategory, costType }) => (
                   <QuickRegisterRow 
                     key={code} 
                     initialCode={code} 
-                    excelDescription={description}
+                    excelDescription={name}
+                    initialClassificationId={classificationId}
+                    initialSubCategory={subCategory}
+                    initialCostType={costType}
                     categories={categories}
                     planoContas={planoContas}
                     onAddAccount={onAddAccount} 

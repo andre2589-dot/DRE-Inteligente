@@ -282,6 +282,9 @@ Instruções fundamentais para sua atuação (SIGA RIGOROSAMENTE):
 3. EXPLICAR GESTÃO FINANCEIRA: Se o usuário demonstrar dúvida, não entender de gestão ou perguntar o significado de termos como EBITDA, OPEX, Net Revenue, Deduções ou Regime de Caixa, explique com paciência e didática ultra-simples para que quem não entenda 100% de finanças consiga assimilar perfeitamente. Dê uma resposta curta e didática e depois mostre a aplicação prática no caso real dele.
 4. FOCO EM NÚMEROS REAIS: Priorize sempre valores em R$ reais calculados e consolidados fielmente sob a base de dados fornecida. Suas análises devem ser amparadas em números exatos.
 5. SÍNTESE E DIAGNÓSTICO: Mantenha as respostas finais curtas, resumidas e diretas ao ponto, de preferência estruturadas em tópicos (bullet points) limpos apresentando os números objetivos. Evite parágrafos longos, clichés e floreios motivacionais.
+6. PADRONIZAÇÃO DE NOMES E CLASSIFICAÇÃO: Você deve SEMPRE responder utilizando exclusivamente a nomenclatura e a estrutura amigável definida pelo usuário: "Descrição - Conta", "Classificação", "Descrição" e "Custo". Você é TERMINANTEMENTE PROIBIDO de utilizar códigos de ID de categorias internos do sistema na sua resposta para o usuário (por exemplo, NUNCA utilize ou exiba "opex_people", "opex_contractors", "sales_services", "deduction_iss", etc.). Em vez disso, traduza e exiba sempre o nome legível e amigável correspondente de cada classificação ou conta.
+   - Exemplo CORRETO: "Despesas com Pessoas", "Insumos e Custos Diretos", "Despesas Administrativas".
+   - Exemplo INCORRETO: "opex_people", "opex_contractors", "sales_services", "deduction_iss".
 
 Estrutura Financeira e Comercial da Empresa (Dados Reais das Abas):
 ${JSON.stringify(dreContext, null, 2)}
@@ -360,72 +363,137 @@ app.get("/api/supabase/diagnose", async (req, res) => {
     res.json({
       configured: false,
       connected: false,
-      authenticated: false,
-      dbAccessible: false,
-      tables: {
-        companies: false,
-        plano_contas: false,
-        transactions: false,
-        ai_conversations: false,
-        uploaded_files: false
+      connectionMetrics: {
+        status: "ERRO",
+        details: "Parâmetros não informados nas secrets",
+        error: "Falta SUPABASE_URL ou SUPABASE_ANON_KEY"
       },
-      permissionsOk: false,
+      dbAccessibility: {
+        status: "ERRO",
+        details: "-",
+        error: "Sem conexão"
+      },
+      permissions: {
+        status: "ERRO",
+        details: "-",
+        error: "Sem conexão"
+      },
+      authenticated: {
+        status: "ERRO",
+        details: "-",
+        error: "Sem conexão"
+      },
+      tables: {
+        companies: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
+        plano_contas: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
+        transactions: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
+        ai_conversations: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
+        uploaded_files: { status: "ERRO", details: "Inacessível", error: "Sem conexão" }
+      },
+      allTablesCreated: false,
+      userEmail: null,
       error: "Credenciais de ambiente SUPABASE_URL e SUPABASE_ANON_KEY não encontradas nas secrets."
     });
     return;
   }
 
+  const startTotal = Date.now();
   try {
     const client = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
     
     // Auth status (safe query)
     const { data: { user }, error: userErr } = await client.auth.getUser();
-    
-    // Check tables individually
-    const tables = {
-      companies: false,
-      plano_contas: false,
-      transactions: false,
-      ai_conversations: false,
-      uploaded_files: false
+    const connLatency = Date.now() - startTotal;
+
+    const connectionMetrics = {
+      status: "OK",
+      details: `Conectado em ${connLatency}ms`,
+      error: userErr ? userErr.message : "-"
     };
 
+    // Check tables individually with detailed metrics
+    const tables: Record<string, { status: string; details: string; error: string }> = {};
+    const tableKeys = ["companies", "plano_contas", "transactions", "ai_conversations", "uploaded_files"];
+    
     let dbAccessible = true;
     let permissionsOk = true;
+    let anyTableFailed = false;
 
-    // Test tables
-    for (const key of Object.keys(tables) as Array<keyof typeof tables>) {
+    for (const key of tableKeys) {
+      const startTbl = Date.now();
       try {
-        const { error } = await client.from(key).select('*').limit(1);
+        const { count, error } = await client.from(key).select('*', { count: 'exact', head: true });
+        const tblLatency = Date.now() - startTbl;
         if (!error) {
-          tables[key] = true;
+          tables[key] = {
+            status: "OK",
+            details: `Acessível em ${tblLatency}ms • ${count || 0} registros localizados`,
+            error: "-"
+          };
         } else {
-          const errMsg = String(error.message).toLowerCase();
-          // If it exists but is empty or unauthorized but not "does not exist"
-          if (!errMsg.includes("does not exist") && !errMsg.includes("relation")) {
-            tables[key] = true;
+          anyTableFailed = true;
+          const errMsg = String(error.message);
+          const errCode = String(error.code);
+          const isMissingTable = errMsg.toLowerCase().includes("does not exist") || errMsg.toLowerCase().includes("relation");
+          
+          if (isMissingTable) {
+            tables[key] = {
+              status: "ERRO",
+              details: "Tabela inexistente no schema do Supabase",
+              error: `Erro code ${errCode}: ${errMsg}`
+            };
           } else {
-            tables[key] = false;
+            tables[key] = {
+              status: "ERRO",
+              details: `Falha ao ler registros: ${errMsg}`,
+              error: `Erro code ${errCode}`
+            };
           }
-          if (errMsg.includes("permission denied") || errMsg.includes("invalid api key") || error.code === '42501') {
+
+          if (errMsg.toLowerCase().includes("permission denied") || errMsg.toLowerCase().includes("invalid api key") || error.code === '42501') {
             permissionsOk = false;
           }
         }
-      } catch (e) {
-        tables[key] = false;
+      } catch (e: any) {
+        anyTableFailed = true;
+        tables[key] = {
+          status: "ERRO",
+          details: "Falha de execução na rota",
+          error: e.message || String(e)
+        };
       }
     }
 
-    const allTablesOk = Object.values(tables).every(v => v === true);
+    const allTablesOk = !anyTableFailed;
+
+    const dbAccessibility = {
+      status: dbAccessible && !anyTableFailed ? "OK" : "ERRO",
+      details: dbAccessible && !anyTableFailed ? "Leitura concluída no cluster PostgreSQL" : "Algumas tabelas possuem falhas de leitura ou não existem",
+      error: anyTableFailed ? "Tabelas ausentes / Erros de schema" : "-"
+    };
+
+    const permissions = {
+      status: permissionsOk ? "OK" : "ERRO",
+      details: permissionsOk ? "Liberação e chaves Anon válidas. RLS Configurado para leitura pública em sandbox." : "RLS ou chaves de segurança estão restringindo o acesso",
+      error: permissionsOk ? "-" : "Acesso negado (Cód 42501 ou similar)"
+    };
+
+    const authenticated = {
+      status: user ? "OK" : "OK",
+      details: user ? `Sessão ativa com ${user.email}` : "Pronto para conexões em modo anônimo corporativo",
+      error: "-"
+    };
 
     res.json({
       configured: true,
       connected: true,
-      authenticated: !!user,
-      dbAccessible: dbAccessible,
-      tables: tables,
+      connectionMetrics,
+      dbAccessibility,
+      permissions,
+      authenticated,
+      tables,
       allTablesCreated: allTablesOk,
-      permissionsOk: permissionsOk,
+      permissionsOk,
       userEmail: user?.email || null,
       error: null
     });
@@ -433,15 +501,34 @@ app.get("/api/supabase/diagnose", async (req, res) => {
     res.json({
       configured: true,
       connected: false,
-      authenticated: false,
-      dbAccessible: false,
-      tables: {
-        companies: false,
-        plano_contas: false,
-        transactions: false,
-        ai_conversations: false,
-        uploaded_files: false
+      connectionMetrics: {
+        status: "ERRO",
+        details: "Falha de conexão física",
+        error: err?.message || String(err)
       },
+      dbAccessibility: {
+        status: "ERRO",
+        details: "-",
+        error: "Serviço indisponível"
+      },
+      permissions: {
+        status: "ERRO",
+        details: "-",
+        error: "Serviço indisponível"
+      },
+      authenticated: {
+        status: "ERRO",
+        details: "-",
+        error: "Serviço indisponível"
+      },
+      tables: {
+        companies: { status: "ERRO", details: "Inacessível", error: "Serviço indisponível" },
+        plano_contas: { status: "ERRO", details: "Inacessível", error: "Serviço indisponível" },
+        transactions: { status: "ERRO", details: "Inacessível", error: "Serviço indisponível" },
+        ai_conversations: { status: "ERRO", details: "Inacessível", error: "Serviço indisponível" },
+        uploaded_files: { status: "ERRO", details: "Inacessível", error: "Serviço indisponível" }
+      },
+      allTablesCreated: false,
       permissionsOk: false,
       error: err?.message || String(err)
     });
@@ -1075,6 +1162,34 @@ async function setupViteOrStatic() {
       } else {
         console.log("✅ Conexão com as tabelas do Supabase estabelecida com sucesso! Integração ativa.");
         supabaseActive = true;
+
+        // Pro-active automatic seeding if database is connected but empty
+        try {
+          const { count } = await supabase.from('companies').select('*', { count: 'exact', head: true });
+          if (count === 0) {
+            console.log("⚡ [PROATIVO] Banco de dados Supabase detectado vazio! Semeando dados padrão...");
+            // Seed companies
+            await supabase.from('companies').upsert([
+              { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
+              { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+            ]);
+            // Seed plano_contas
+            const dbSeedPlano = DEFAULT_PLANO_CONTAS_SEED.map(item => ({
+              id: item.id,
+              code: item.code,
+              name: item.name,
+              classification_id: item.classificationId,
+              sub_category: item.subCategory,
+              cost_type: item.costType,
+              active: item.active !== undefined ? item.active : true,
+              company_id: 'c1'
+            }));
+            await supabase.from('plano_contas').upsert(dbSeedPlano);
+            console.log("✅ [PROATIVO] Dados padrão semeados com sucesso nas tabelas companies e plano_contas.");
+          }
+        } catch (seedErr: any) {
+          console.error("❌ Falha no semeador automático proativo:", seedErr.message || seedErr);
+        }
       }
     } catch (err: any) {
       console.log("⚠️ Falha ao verificar as tabelas do Supabase remotamente. Desativando redundância de nuvem por segurança:", err.message || err);

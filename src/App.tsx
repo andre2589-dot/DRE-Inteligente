@@ -681,6 +681,7 @@ export default function App() {
                 transactions={enrichedTransactions} 
                 categories={categories}
                 onUpdateTransactionCategory={handleUpdateTransactionCategory}
+                onUpdateCategoryName={handleUpdateCategoryName}
               />
             </div>
           )}
