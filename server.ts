@@ -35,8 +35,25 @@ if (supabaseUrl && supabaseAnonKey) {
   resolveDbReady(false);
 }
 
-// Database configuration for local persistence
-const DB_FILE = path.join(process.cwd(), "app_db.json");
+// Database configuration for local persistence (writable /tmp/ path on Vercel)
+const DB_FILE = process.env.VERCEL
+  ? path.join("/tmp", "app_db.json")
+  : path.join(process.cwd(), "app_db.json");
+
+// On Vercel, dynamically seed writeable /tmp path using the bundled app_db.json to prevent read-only issues
+if (process.env.VERCEL) {
+  try {
+    const bundledDbPath = path.join(process.cwd(), "app_db.json");
+    if (!fs.existsSync(DB_FILE)) {
+      if (fs.existsSync(bundledDbPath)) {
+        fs.copyFileSync(bundledDbPath, DB_FILE);
+        console.log("📁 Server setting: Copied pre-existing database to writeable /tmp path on Vercel.");
+      }
+    }
+  } catch (err) {
+    console.error("❌ Failed to copy local database to /tmp folder on Vercel:", err);
+  }
+}
 
 // Clear fictional transactions on startup once to let user start fresh with real data
 try {

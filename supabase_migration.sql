@@ -11,7 +11,7 @@
 -- DROP TABLE IF EXISTS public.companies CASCADE;
 
 -- 1. CRIAR TABELA DE EMPRESAS (Multi-Tenant)
-CREATE TABLE public.companies (
+CREATE TABLE IF NOT EXISTS public.companies (
     id VARCHAR(100) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     cnpj VARCHAR(20) UNIQUE NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE public.companies (
 );
 
 -- 2. CRIAR TABELA DE PLANO DE CONTAS (Classificações de Despesas/Receitas)
-CREATE TABLE public.plano_contas (
+CREATE TABLE IF NOT EXISTS public.plano_contas (
     id VARCHAR(100) PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE public.plano_contas (
 );
 
 -- 3. CRIAR TABELA DE TRANSAÇÕES FINANCEIRAS (Receitas e Despesas consolidadas)
-CREATE TABLE public.transactions (
+CREATE TABLE IF NOT EXISTS public.transactions (
     id VARCHAR(100) PRIMARY KEY,
     company_id VARCHAR(100) REFERENCES public.companies(id) ON DELETE CASCADE NOT NULL,
     date DATE NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE public.transactions (
 );
 
 -- 4. CRIAR TABELA DE HISTÓRICO DE CONVERSAS COM IA
-CREATE TABLE public.ai_conversations (
+CREATE TABLE IF NOT EXISTS public.ai_conversations (
     id VARCHAR(100) PRIMARY KEY,
     company_id VARCHAR(100) REFERENCES public.companies(id) ON DELETE CASCADE,
     user_id VARCHAR(100),
@@ -68,7 +68,7 @@ CREATE TABLE public.ai_conversations (
 );
 
 -- 5. CRIAR TABELA DE METADADOS DE ATIVIDADE DE ARQUIVOS UPADOS
-CREATE TABLE public.uploaded_files (
+CREATE TABLE IF NOT EXISTS public.uploaded_files (
     id VARCHAR(100) PRIMARY KEY,
     company_id VARCHAR(100) REFERENCES public.companies(id) ON DELETE CASCADE NOT NULL,
     file_name VARCHAR(255) NOT NULL,
