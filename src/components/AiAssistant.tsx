@@ -136,9 +136,10 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: fullPrompt,
+          prompt: textToSend,
           dreContext: dreContext,
-          history: messages.slice(-6)
+          history: messages.slice(-6),
+          attachedContext: attachedContext
         })
       });
       

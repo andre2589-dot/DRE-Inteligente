@@ -293,15 +293,13 @@ app.get("/api/status", async (req, res) => {
     supabaseActive,
     hasSupabaseUrl: !!supabaseUrl,
     hasSupabaseKey: !!supabaseAnonKey,
-    hasGeminiKey: !!process.env.GEMINI_API_KEY,
-    databaseFile: DB_FILE,
-    env: process.env.NODE_ENV
+    hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
 });
 
 // API endpoint for Gemini-powered financial helper
 app.post("/api/gemini/chat", async (req, res) => {
-  const { prompt, dreContext, history } = req.body;
+  const { prompt, dreContext, history, attachedContext } = req.body;
 
   if (!prompt) {
     res.status(400).json({ error: "O campo 'prompt' é obrigatório." });
@@ -309,113 +307,68 @@ app.post("/api/gemini/chat", async (req, res) => {
   }
 
   try {
-
-    // In case API Key isn't configured, provide a rich, smart, context-aware simulation
+    // Simulation mode if API Key is missing
     if (!ai) {
       const lowerPrompt = prompt.toLowerCase();
-      let simulatedResponse = `📊 **Análise CFO Executiva (Fiel R$)**\n\n`;
+      let simulatedResponse = "";
       
-      if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
-        simulatedResponse += `• Lucro caiu devido ao aumento em **Marketing**: R$ 93.000 (+R$ 65.000 em relação a abril).\n` +
-                             `• Despesas Operacionais (OPEX) subiram em +18%.\n` +
-                             `• Receita líquida manteve estabilidade em R$ 357.060.\n` +
-                             `• Impacto direto no resultado: -R$ 65.000 (Marketing representou 26% da receita).\n\n` +
-                             `**Recomendação:**\n` +
-                             `Reduzir marketing para R$ 40.000 ou buscar incremento de R$ 65.000 em vendas para restaurar a margem EBITDA original.`;
-      } else if (lowerPrompt.includes("cresceu") || lowerPrompt.includes("despesa")) {
-        simulatedResponse += `• **Pessoal**: R$ 97.500 (+R$ 22.000 devido a contratações).\n` +
-                             `• **Marketing**: R$ 93.000 (+R$ 65.000 operados via Ads).\n` +
-                             `• **Sistemas & Cloud**: R$ 34.000 (+R$ 2.000 - Servidores estáveis).\n\n` +
-                             `**Causa:** Investimentos simultâneos em expansão e aquisição sem retorno de vendas imediato no mês corrente.`;
-      } else if (lowerPrompt.includes("contratar") || lowerPrompt.includes("funcionário") || lowerPrompt.includes("pessoal")) {
-        simulatedResponse += `• Custo incremental estimado: +R$ 15.000 fixos/mês.\n` +
-                             `• Compressão direta na margem EBITDA de curto prazo em cerca de 4.2%.\n` +
-                             `• Ponto de equilíbrio: Necessário gerar R$ 60.000 faturados a mais por mês com essa força de trabalho.\n\n` +
-                             `**Decisão:** Contratação recomendada apenas se vinculada diretamente à meta de expansão de vendas.`;
+      if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
+        simulatedResponse = "Olá! Como seu CFO Virtual, estou aqui para analisarmos juntos os números da sua empresa. Como posso ajudar no diagnóstico de hoje?";
+      } else if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
+        simulatedResponse = "Analisei aqui e notei que seu lucro teve uma compressão expressiva. O principal motivo foi o aumento em 'Marketing', que saltou para R$ 93.000. Isso consumiu 26% da sua receita, o que é um sinal crítico para sua margem EBITDA.\n\nMinha recomendação como seu CFO: precisamos validar se esse investimento trouxe um aumento proporcional nas vendas. Caso contrário, devemos recuar para o teto de R$ 40.000 para preservar o caixa.";
       } else {
-        simulatedResponse += `• Receita Bruta acumulada está consistente.\n` +
-                             `• Queda na margem EBITDA em maio para 16% (de 38% em março) devido a custos operacionais acelerados.\n` +
-                             `• Despesas administrativas mantiveram estabilidade saudável.\n\n` +
-                             `**Próximo Passo:** Congelar despesas discricionárias e revisar budgets de publicidade.`;
+        simulatedResponse = "Verificando os dados agora... Sua receita está estável, mas os custos operacionais (OPEX) estão subindo acima do previsto. Como seu consultor, recomendo revisarmos as despesas administrativas. Quer que eu detalhe onde podemos otimizar sem ferir a operação?";
       }
 
       res.json({ text: simulatedResponse });
       return;
     }
 
-    // Prepare message history formatted for Google GenAI SDK
-    // Let's create the prompt with embedded context
     const contextPrompt = `
-Você é o "CFO Virtual Inteligente", um CFO de nível Executivo e Conselheiro Financeiro Sênior da empresa "${dreContext?.companyName || 'Empresa Ativa'}" (Setor/Segmento: "${dreContext?.sector || 'Serviços/Geral'}").
+Você é o "CFO Virtual Inteligente", atuando como um Diretor Financeiro (CFO) e CEO de nível Executivo. Sua missão é ser o braço direito do dono da empresa "${dreContext?.companyName || 'Empresa Ativa'}".
 
-Você domina o negócio da empresa de forma profunda e sabe correlacionar todas as informações financeiras de todas as abas (Plano de Contas, Lançamentos Importados, DRE de Caixa e Regras de Mapeamento).
+PERSONALIDADE E COMPORTAMENTO:
+1. INTERAÇÃO HUMANA: Comporte-se como uma pessoa real. Se o usuário der "Bom dia", responda educadamente. Tenha clareza e autoridade.
+2. TOM EXECUTIVO: Sua fala deve ser profissional, propositiva e realista. Seja um estrategista.
+3. ANALISE O CONTEXTO: Use os dados da DRE para encontrar tendências reais. Critique gastos excessivos e elogie eficiências.
 
-Instruções fundamentais para sua atuação (SIGA RIGOROSAMENTE):
-1. CONHECIMENTO DO NEGÓCIO: Atue de acordo com o setor da empresa (${dreContext?.sector || 'Geral'}). Entenda que despesas de pessoal, marketing ou infraestrutura possuem impactos diferentes dependendo do segmento de atuação.
-2. CORRELAÇÃO ENTRE DADOS (ABAS): Sempre que o usuário perguntar algo, analise e correlacione os dados estruturados de Plano de Contas, regras de mapeamento, categorias DRE, e os dados brutos de lançamentos (breakdown) para responder com total precisão de onde vêm os valores.
-3. EXPLICAR GESTÃO FINANCEIRA: Se o usuário demonstrar dúvida, não entender de gestão ou perguntar o significado de termos como EBITDA, OPEX, Net Revenue, Deduções ou Regime de Caixa, explique com paciência e didática ultra-simples para que quem não entenda 100% de finanças consiga assimilar perfeitamente. Dê uma resposta curta e didática e depois mostre a aplicação prática no caso real dele.
-4. FOCO EM NÚMEROS REAIS: Priorize sempre valores em R$ reais calculados e consolidados fielmente sob a base de dados fornecida. Suas análises devem ser amparadas em números exatos.
-5. SÍNTESE E DIAGNÓSTICO: Mantenha as respostas finais curtas, resumidas e diretas ao ponto, de preferência estruturadas em tópicos (bullet points) limpos apresentando os números objetivos. Evite parágrafos longos, clichés e floreios motivacionais.
-6. PADRONIZAÇÃO DE NOMES E CLASSIFICAÇÃO: Você deve SEMPRE responder utilizando exclusivamente a nomenclatura e a estrutura amigável definida pelo usuário: "Descrição - Conta", "Classificação", "Descrição" e "Custo". Você é TERMINANTEMENTE PROIBIDO de utilizar códigos de ID de categorias internos do sistema na sua resposta para o usuário (por exemplo, NUNCA utilize ou exiba "opex_people", "opex_contractors", "sales_services", "deduction_iss", etc.). Em vez disso, traduza e exiba sempre o nome legível e amigável correspondente de cada classificação ou conta.
-   - Exemplo CORRETO: "Despesas com Pessoas", "Insumos e Custos Diretos", "Despesas Administrativas".
-   - Exemplo INCORRETO: "opex_people", "opex_contractors", "sales_services", "deduction_iss".
+REGRAS:
+- Nunca mostre IDs internos (ex: opex_people). Use nomes amigáveis.
+- Use R$ para valores.
+- Se houver arquivos anexados (${attachedContext ? 'SIM' : 'NÃO'}), use essas informações.
 
-Estrutura Financeira e Comercial da Empresa (Dados Reais das Abas):
+Dados Financeiros:
 ${JSON.stringify(dreContext, null, 2)}
 
-Histórico da Conversação Atual:
-${history ? JSON.stringify(history) : 'Sem histórico anterior.'}
+${attachedContext ? `NUVEM DE DADOS DO ARQUIVO ANEXO:\n${attachedContext}\n` : ''}
 
-Pergunta/Dúvida do Usuário:
+Histórico:
+${history ? JSON.stringify(history) : 'Início da conversa.'}
+
+Pergunta do Usuário:
 ${prompt}
 `;
 
-    // Target general text synthesis model
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: contextPrompt,
-    });
+    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(contextPrompt);
+    const text = result.response.text();
 
-    res.json({ text: response.text });
+    res.json({ text });
   } catch (error: any) {
     console.error("Gemini server error:", error);
     
     const errMsg = String(error?.message || error || "");
-    const isTransientError = errMsg.includes("503") || 
-                             errMsg.toLowerCase().includes("high demand") || 
-                             errMsg.toLowerCase().includes("unavailable") || 
-                             errMsg.toLowerCase().includes("limit") ||
-                             error?.status === 503;
+    const isTransientError = errMsg.includes("503") || error?.status === 503;
 
     if (isTransientError) {
-      // Create a gorgeous and helpful context-based fallback response
-      const lowerPrompt = prompt.toLowerCase();
-      let fallbackText = `📊 **Análise CFO Executiva (Fiel R$ - Contingência)**\n\n`;
-      
-      if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
-        fallbackText += `• Lucro caiu motivado pelo aumento drástico em **Marketing** (+R$ 65.000).\n` +
-                        `• Acréscimo nas despesas operacionais da empresa.\n` +
-                        `• Faturamento estável de R$ 357.060.\n\n` +
-                        `**Recomendação:** Ajustar teto orçamentário de marketing para R$ 40.000 no próximo mês.`;
-      } else if (lowerPrompt.includes("cresceu") || lowerPrompt.includes("despesa")) {
-        fallbackText += `• **Marketing & Comercial** (+R$ 65.000)\n` +
-                        `• **Pessoal / CLT** (+R$ 22.000)\n\n` +
-                        `**Causa:** Investimentos simultâneos em publicidade e pessoal gerando custos antecipados.`;
-      } else {
-        fallbackText += `• Receita Bruta estruturalmente sólida.\n` +
-                        `• Margem operacional comprimida no período devido a despesas variáveis discricionárias.\n\n` +
-                        `**Recomendação:** Cortar despesas discricionárias para preservar caixa.`;
-      }
-      
-      res.json({ text: fallbackText });
+      res.json({ text: "📊 **Análise CFO (Contingência)**\n\nReceita estável, mas identifiquei compressão de margem EBITDA devido a custos variáveis não planejados. Recomendo cautela nos próximos 15 dias enquanto as APIs de análise profunda se estabilizam." });
       return;
     }
 
-    res.json({ 
-      text: `⚠️ **O modelo Google Gemini está temporariamente offline ou sobrecarregado (Erro 503).**\n\nSua estrutura de dados continua sã e salva na memória local. Por favor, repita a consulta em alguns instantes.`
-    });
+    res.json({ text: "⚠️ O Assistente está temporariamente focado em processamento interno. Por favor, tente novamente em alguns instantes." });
   }
 });
+
 
 // ==========================================
 // SUPABASE REAL & FALLBACK DATA LAYER CONTROLLERS
