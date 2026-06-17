@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
@@ -12,13 +11,12 @@ const app = express();
 const PORT = 3000;
 
 // Initialize server-side Supabase Client
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
+const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || "").trim();
 
+// Instantly-resolved promise so endpoints never block or hang on Vercel
 let resolveDbReady: (val: boolean) => void = () => {};
-const dbReadyPromise = new Promise<boolean>((resolve) => {
-  resolveDbReady = resolve;
-});
+const dbReadyPromise = Promise.resolve(true);
 
 let supabase: any = null;
 let supabaseActive = false;
@@ -612,9 +610,10 @@ app.get("/api/companies", async (req, res) => {
 
   // Fallback
   const db = getDb();
-  if (!(db as any).companies || (db as any).companies.length > 1 || (db as any).companies[0]?.id !== 'c1') {
+  if (!(db as any).companies || (db as any).companies.length === 0) {
     (db as any).companies = [
-      { id: 'c1', name: 'Empresa Principal', cnpj: '00.000.000/0001-00', sector: 'Geral' }
+      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
+      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
     ];
     saveDb(db);
   }
@@ -716,6 +715,22 @@ app.post("/api/conversations", async (req, res) => {
 
   try {
     if (supabase && supabaseActive) {
+      const targetCompanyId = String(company_id);
+      try {
+        const { data: compData, error: compErr } = await supabase.from('companies').select('id').eq('id', targetCompanyId);
+        if (!compErr && (!compData || compData.length === 0)) {
+          const randomCnpj = `00.000.000/0001-${Math.floor(10 + Math.random() * 89)}`;
+          await supabase.from('companies').insert([{
+            id: targetCompanyId,
+            name: targetCompanyId === 'c1' ? 'Empresa Principal' : `Empresa [${targetCompanyId}]`,
+            cnpj: randomCnpj,
+            sector: 'Geral'
+          }]);
+        }
+      } catch (checkErr) {
+        console.warn("⚠️ Failed to check/upsert parent company proactively for conversations:", checkErr);
+      }
+
       const { error } = await supabase.from('ai_conversations').insert([newItem]);
       if (!error) {
         res.status(201).json(newItem);
@@ -798,11 +813,28 @@ app.post("/api/transactions", async (req, res) => {
 
   try {
     if (supabase && supabaseActive) {
-      // Delete existing
+      const targetCompanyId = String(company_id);
+      try {
+        // Safe check to avoid ForeignKey constraint violations on some empty schemas
+        const { data: compData, error: compErr } = await supabase.from('companies').select('id').eq('id', targetCompanyId);
+        if (!compErr && (!compData || compData.length === 0)) {
+          const randomCnpj = `00.000.000/0001-${Math.floor(10 + Math.random() * 89)}`;
+          await supabase.from('companies').insert([{
+            id: targetCompanyId,
+            name: targetCompanyId === 'c1' ? 'Empresa Principal' : `Empresa [${targetCompanyId}]`,
+            cnpj: randomCnpj,
+            sector: 'Geral'
+          }]);
+        }
+      } catch (checkErr) {
+        console.warn("⚠️ Failed to check/upsert parent company proactively for transactions:", checkErr);
+      }
+
+      // Delete existing using targetCompanyId
       const { error: delErr } = await supabase
         .from('transactions')
         .delete()
-        .eq('company_id', String(company_id));
+        .eq('company_id', targetCompanyId);
 
       if (!delErr) {
         const dbRows = transactions.map(t => ({
@@ -927,6 +959,23 @@ app.post("/api/plano_contas", async (req, res) => {
     };
 
     if (supabase && supabaseActive) {
+      const targetCompanyId = company_id || 'c1';
+      try {
+        // Safe check to avoid ForeignKey constraints violation by creating referencing company first
+        const { data: compData, error: compErr } = await supabase.from('companies').select('id').eq('id', targetCompanyId);
+        if (!compErr && (!compData || compData.length === 0)) {
+          const randomCnpj = `00.000.000/0001-${Math.floor(10 + Math.random() * 89)}`;
+          await supabase.from('companies').insert([{
+            id: targetCompanyId,
+            name: targetCompanyId === 'c1' ? 'Empresa Principal' : `Empresa [${targetCompanyId}]`,
+            cnpj: randomCnpj,
+            sector: 'Geral'
+          }]);
+        }
+      } catch (checkErr) {
+        console.warn("⚠️ Failed to check/upsert parent company proactively:", checkErr);
+      }
+
       const { error } = await supabase.from('plano_contas').insert([{
         id: newItem.id,
         code: newItem.code,
@@ -935,7 +984,7 @@ app.post("/api/plano_contas", async (req, res) => {
         sub_category: newItem.subCategory,
         cost_type: newItem.costType,
         active: newItem.active,
-        company_id: company_id || 'c1'
+        company_id: targetCompanyId
       }]);
       if (!error) {
         res.status(201).json(newItem);
@@ -1143,6 +1192,22 @@ app.post("/api/files", async (req, res) => {
 
   try {
     if (supabase && supabaseActive) {
+      const targetCompanyId = String(company_id || 'c1');
+      try {
+        const { data: compData, error: compErr } = await supabase.from('companies').select('id').eq('id', targetCompanyId);
+        if (!compErr && (!compData || compData.length === 0)) {
+          const randomCnpj = `00.000.000/0001-${Math.floor(10 + Math.random() * 89)}`;
+          await supabase.from('companies').insert([{
+            id: targetCompanyId,
+            name: targetCompanyId === 'c1' ? 'Empresa Principal' : `Empresa [${targetCompanyId}]`,
+            cnpj: randomCnpj,
+            sector: 'Geral'
+          }]);
+        }
+      } catch (checkErr) {
+        console.warn("⚠️ Failed to check/upsert parent company proactively for files:", checkErr);
+      }
+
       const { error } = await supabase.from('uploaded_files').insert([fileRecord]);
       if (!error) {
         res.status(201).json({
@@ -1230,6 +1295,7 @@ async function setupViteOrStatic() {
   }
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
