@@ -302,13 +302,13 @@ export default function App() {
     });
   };
 
-  const handleSaveManualRevenue = (competency: string, products: number, services: number, other: number) => {
+  const handleSaveManualRevenue = (competency: string, products: number, services: number, other: number, shareholder: number) => {
     setTransactions(prev => {
       // Filter out existing manual or other revenues for this competency month
       const filtered = prev.filter(t => {
         const parts = t.date.split('-');
         const currentComp = `${parts[0]}-${parts[1]}`;
-        const isRevenue = t.classification === 'sales_products' || t.classification === 'sales_services';
+        const isRevenue = t.classification === 'sales_products' || t.classification === 'sales_services' || t.classification === 'shareholder_contribution';
         const isThisComp = currentComp === competency;
         return !(isRevenue && isThisComp);
       });
@@ -349,6 +349,18 @@ export default function App() {
           classification: 'sales_products', // Mapped under sales_products for total_sales formula
           costType: 'N/A',
           value: other
+        });
+      }
+
+      if (shareholder > 0) {
+        newTxs.push({
+          id: `${idPrefix}_share`,
+          date: `${competency}-15`,
+          account: 'Aportes de Sócios',
+          description: `Aporte de Capital - Ref: ${competency}`,
+          classification: 'shareholder_contribution',
+          costType: 'N/A',
+          value: shareholder
         });
       }
 

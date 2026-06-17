@@ -9,6 +9,7 @@ export const DRE_CATEGORIES: DreCategory[] = [
   { id: 'total_sales', name: 'Vendas Totais', parentId: null, type: 'formula', formulaRef: 'sales_products + sales_services', expandable: true },
   { id: 'sales_products', name: 'Vendas de Produtos', parentId: 'total_sales', type: 'incoming', expandable: false },
   { id: 'sales_services', name: 'Prestação de Serviços', parentId: 'total_sales', type: 'incoming', expandable: false },
+  { id: 'shareholder_contribution', name: 'Aportes dos Sócios', parentId: null, type: 'incoming', expandable: false },
 
   // Deductions Group
   { id: 'deductions', name: '(-) Deduções e Impostos S/ Vendas', parentId: null, type: 'formula', formulaRef: 'deduction_icms + deduction_pis + deduction_cofins + deduction_iss', expandable: true },
@@ -95,6 +96,7 @@ export const DEFAULT_PLANO_CONTAS: PlanoContasItem[] = [
   { id: 'pc19', code: '40110', name: 'ENERGIA ELETRICA ENEL', classificationId: 'opex_maintenance', subCategory: 'Manutenção, Sedes & Infra', costType: 'Fixo', active: true },
   { id: 'pc20', code: '40201', name: 'SERVICES HEROKU HOSTING', classificationId: 'opex_systems', subCategory: 'Sistemas & Cloud (SaaS, Servidores)', costType: 'Fixo', active: true },
   { id: 'pc21', code: '50101', name: 'IMPOSTO IRPJ', classificationId: 'tax_irpj', subCategory: 'IRPJ S/ Lucro', costType: 'Variável', active: true },
-  { id: 'pc22', code: '50102', name: 'IMPOSTO CSLL', classificationId: 'tax_csll', subCategory: 'CSLL S/ Lucro', costType: 'Variável', active: true }
+  { id: 'pc22', code: '50102', name: 'IMPOSTO CSLL', classificationId: 'tax_csll', subCategory: 'CSLL S/ Lucro', costType: 'Variável', active: true },
+  { id: 'pc23', code: '60101', name: 'APORTE DE CAPITAL - SÓCIOS', classificationId: 'shareholder_contribution', subCategory: 'Aportes de Sócios', costType: 'N/A', active: true }
 ];
 

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
-import { Send, Sparkles, RefreshCw, Cpu, MessageSquare } from 'lucide-react';
+import { Send, Sparkles, RefreshCw, Cpu, MessageSquare, Paperclip, FileText, X } from 'lucide-react';
 import { safeFetchJson } from '../utils/safeFetch';
+import * as XLSX from 'xlsx';
 
 interface AiAssistantProps {
   dreContext: any; // calculated figures for contextual injection
@@ -13,7 +14,10 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [attachedContext, setAttachedContext] = useState<string | null>(null);
+  const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load chat history from SQLite db proxy on mount or company change
   useEffect(() => {
@@ -77,12 +81,49 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
     scrollToBottom();
   }, [messages, isSending]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAttachedFileName(file.name);
+    
+    try {
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          
+          // Convert first 50 rows to string context
+          const textContext = data.slice(0, 50).map(row => (row as any[]).join(' | ')).join('\n');
+          setAttachedContext(`[CONHECIMENTO ADICIONAL DO ARQUIVO ${file.name}]:\n${textContext}`);
+        };
+        reader.readAsBinaryString(file);
+      } else {
+        // Assume text/json/pdf-ish text
+        const text = await file.text();
+        setAttachedContext(`[CONHECIMENTO ADICIONAL DO ARQUIVO ${file.name}]:\n${text.slice(0, 5000)}`);
+      }
+    } catch (err) {
+      console.error("Error reading file for AI:", err);
+      setAttachedContext("Erro ao ler arquivo.");
+    }
+  };
+
   const handleSend = async (textToSend: string) => {
-    if (!textToSend.trim() || isSending) return;
+    if (!textToSend.trim() && !attachedContext) return;
+    if (isSending) return;
+
+    const fullPrompt = attachedContext 
+      ? `${textToSend}\n\nNota: Considere também estas informações que anexei do arquivo ${attachedFileName}:\n${attachedContext}`
+      : textToSend;
 
     const userMsg: ChatMessage = {
       role: 'user',
-      content: textToSend,
+      content: textToSend + (attachedFileName ? ` (Anexo: ${attachedFileName})` : ''),
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -95,11 +136,15 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: textToSend,
+          prompt: fullPrompt,
           dreContext: dreContext,
-          history: messages.slice(-6) // Send recent message history for context stability
+          history: messages.slice(-6)
         })
       });
+      
+      // Clear attachment after sending
+      setAttachedFileName(null);
+      setAttachedContext(null);
 
       if (!response.ok) {
         let errorText = 'Ocorreu um erro ao consultar o assistente de IA. Certifique-se de que o servidor local está em execução.';
@@ -273,28 +318,62 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
         </div>
 
         {/* Input area */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSend(input);
-          }}
-          className="p-3 border-t border-slate-200/60 bg-white flex items-center gap-2"
-        >
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Pergunte-me sobre seu EBITDA ou simulações financeiras..."
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isSending}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-xl transition-all disabled:opacity-50 disabled:hover:bg-indigo-600 cursor-pointer"
+        <div className="p-3 border-t border-slate-200/60 bg-white space-y-2">
+          {attachedFileName && (
+            <div className="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-2">
+                <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                <span className="text-[10px] font-bold text-indigo-700 truncate max-w-[200px]">{attachedFileName}</span>
+              </div>
+              <button 
+                onClick={() => { setAttachedFileName(null); setAttachedContext(null); }}
+                className="text-indigo-400 hover:text-rose-500"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend(input);
+            }}
+            className="flex items-center gap-2"
           >
-            <Send className="h-3.5 w-3.5" />
-          </button>
-        </form>
+            <input 
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileUpload}
+              accept=".xlsx,.xls,.csv,.pdf,.txt"
+            />
+            
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 rounded-xl border border-slate-200 text-slate-400 hover:bg-slate-50 transition-all"
+              title="Anexar arquivo (Excel/PDF)"
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
+
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Pergunte-me ou anexe um arquivo para análise..."
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800"
+            />
+            <button
+              type="submit"
+              disabled={(!input.trim() && !attachedContext) || isSending}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-xl transition-all disabled:opacity-50 disabled:hover:bg-indigo-600 cursor-pointer"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

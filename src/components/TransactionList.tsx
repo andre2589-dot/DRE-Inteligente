@@ -285,7 +285,7 @@ interface TransactionListProps {
   onImportTransactions: (txs: Transaction[]) => void;
   onDeleteTransaction: (id: string) => void;
   onClearAll: () => void;
-  onSaveManualRevenue: (competency: string, products: number, services: number, other: number) => void;
+  onSaveManualRevenue: (competency: string, products: number, services: number, other: number, shareholder: number) => void;
   onUpdateTransaction: (updatedTx: Transaction) => void;
 }
 
@@ -316,6 +316,7 @@ export default function TransactionList({
   const [revProducts, setRevProducts] = useState<number>(0);
   const [revServices, setRevServices] = useState<number>(0);
   const [revOther, setRevOther] = useState<number>(0);
+  const [revShareholder, setRevShareholder] = useState<number>(0);
 
   // Column mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
@@ -352,6 +353,8 @@ export default function TransactionList({
   const [sortField, setSortField] = useState<'date' | 'value'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [realTimePeriod, setRealTimePeriod] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('');
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
 
   // Editing state
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
@@ -949,6 +952,9 @@ export default function TransactionList({
       return;
     }
 
+    const currentBatchId = `batch_${Date.now()}`;
+    const currentBatchName = tempFile.name;
+
     // Solve latest relationships against current planoContas before sending to parent
     const finalRecordsResolved = tempFile.records.map(record => {
       const rawConta = record.conta || '';
@@ -963,16 +969,20 @@ export default function TransactionList({
         const mappedClassification = matchedPc.classificationId;
         const isIncome = mappedClassification === 'sales_products' || 
                          mappedClassification === 'sales_services' || 
+                         mappedClassification === 'shareholder_contribution' ||
                          matchedPc.name.toLowerCase().includes('venda') || 
                          matchedPc.name.toLowerCase().includes('receita') || 
                          matchedPc.name.toLowerCase().includes('faturamento') || 
-                         matchedPc.name.toLowerCase().includes('entrada');
+                         matchedPc.name.toLowerCase().includes('entrada') ||
+                         matchedPc.name.toLowerCase().includes('aporte');
                          
         const rawVal = record.valorOriginal !== undefined ? record.valorOriginal : Math.abs(record.value);
         const mathematicalValue = isIncome ? Math.abs(rawVal) : -Math.abs(rawVal);
 
         return {
           ...record,
+          batchId: currentBatchId,
+          batchName: currentBatchName,
           account: matchedPc.name,
           classification: matchedPc.classificationId,
           description: matchedPc.subCategory,
@@ -980,7 +990,11 @@ export default function TransactionList({
           value: mathematicalValue
         };
       }
-      return record;
+      return {
+        ...record,
+        batchId: currentBatchId,
+        batchName: currentBatchName
+      };
     });
 
     onImportTransactions(finalRecordsResolved);
@@ -997,15 +1011,15 @@ export default function TransactionList({
       setValidationError("A competência é um campo obrigatório.");
       return;
     }
-    onSaveManualRevenue(competency, revProducts, revServices, revOther);
-    setSuccessMsg(`Receitas consolidadas com sucesso para a competência ${competency}!`);
+    onSaveManualRevenue(competency, revProducts, revServices, revOther, revShareholder);
+    setSuccessMsg(`Receitas e Aportes consolidados com sucesso para a competência ${competency}!`);
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
   // Re-evaluated Sum total for manual revenue block
   const totalManualRevenue = useMemo(() => {
-    return revProducts + revServices + revOther;
-  }, [revProducts, revServices, revOther]);
+    return revProducts + revServices + revOther + revShareholder;
+  }, [revProducts, revServices, revOther, revShareholder]);
 
   // Extract monthly periods dynamically from transactions
   const availableMonths = useMemo(() => {
@@ -1120,6 +1134,11 @@ export default function TransactionList({
       result = result.filter(t => t.costType === filterCostType);
     }
 
+    // Date filter
+    if (dateFilter) {
+      result = result.filter(t => t.date.includes(dateFilter));
+    }
+
     // Sort order
     result.sort((a, b) => {
       if (sortField === 'date') {
@@ -1134,7 +1153,38 @@ export default function TransactionList({
     });
 
     return result;
-  }, [transactions, searchText, filterClass, filterCostType, sortField, sortOrder]);
+  }, [transactions, searchText, filterClass, filterCostType, sortField, sortOrder, dateFilter]);
+
+  const groupedByBatch = useMemo(() => {
+    const groups: { [key: string]: { name: string; date: string; txs: Transaction[]; total: number } } = {};
+    
+    // Transactions without batchId go to "Manual/Outros"
+    resolvedTxs.forEach(tx => {
+      const bId = tx.batchId || 'manual';
+      const isBlock1 = tx.classification === 'sales_products' || tx.classification === 'sales_services' || tx.classification === 'shareholder_contribution';
+      const bName = tx.batchName || (isBlock1 ? 'Faturamento e Aportes (Bloco 1)' : 'Lançamentos Avulsos');
+      
+      if (!groups[bId]) {
+        groups[bId] = { name: bName, date: tx.date, txs: [], total: 0 };
+      }
+      groups[bId].txs.push(tx);
+      groups[bId].total += tx.value;
+    });
+
+    return Object.entries(groups).sort((a, b) => {
+      // Sort batches by latest transaction date in each batch (approx)
+      const dateA = a[1].txs[0]?.date || '';
+      const dateB = b[1].txs[0]?.date || '';
+      return dateB.localeCompare(dateA);
+    });
+  }, [resolvedTxs]);
+
+  const toggleBatch = (id: string) => {
+    const next = new Set(expandedBatches);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpandedBatches(next);
+  };
 
   return (
     <div id="transaction-list-workspace" className="space-y-6">
@@ -1276,7 +1326,7 @@ export default function TransactionList({
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Outras Receitas (R$)</label>
+              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Outras Receitas Operacionais (R$)</label>
               <input 
                 type="number"
                 min="0"
@@ -1284,6 +1334,18 @@ export default function TransactionList({
                 value={revOther || ''}
                 onChange={(e) => setRevOther(Number(e.target.value) || 0)}
                 className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Aportes dos Sócios (R$)</label>
+              <input 
+                type="number"
+                min="0"
+                placeholder="0,00"
+                value={revShareholder || ''}
+                onChange={(e) => setRevShareholder(Number(e.target.value) || 0)}
+                className="w-full bg-white border border-indigo-200 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-indigo-900 shadow-sm focus:outline-none font-mono font-bold"
               />
             </div>
 
@@ -1658,13 +1720,26 @@ export default function TransactionList({
               <option value="Fixo">Fixo</option>
               <option value="Variável">Variável</option>
               <option value="N/A">N/A (Receitas)</option>
+              <option value="MEO">MEO</option>
             </select>
+          </div>
+
+          {/* Date filter */}
+          <div className="min-w-[180px] flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1">
+            <Calendar className="h-3.5 w-3.5 text-slate-400" />
+            <input 
+              type="text"
+              placeholder="Filtrar Data (Ex: 2026-05)"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="bg-transparent border-none text-[11px] font-bold text-slate-600 focus:outline-none cursor-pointer flex-1"
+            />
           </div>
         </div>
 
         {/* Core data table list */}
         <div className="flex-1 overflow-y-auto">
-          {resolvedTxs.length === 0 ? (
+          {groupedByBatch.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-12 space-y-2">
               <span className="text-3xl">📂</span>
               <p className="text-xs text-slate-500 font-extrabold uppercase">Nenhum lançamento ativo para os filtros</p>
@@ -1673,111 +1748,97 @@ export default function TransactionList({
               </p>
             </div>
           ) : (
-            <table className="w-full text-left border-collapse text-xs select-none">
-              <thead>
-                <tr className="border-b border-slate-105 text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">
-                  <th 
-                    className="py-3 px-3 cursor-pointer hover:text-slate-600"
-                    onClick={() => {
-                      setSortField('date');
-                      setSortOrder(p => p === 'asc' ? 'desc' : 'asc');
-                    }}
+            <div className="space-y-4">
+              {groupedByBatch.map(([bId, group]) => (
+                <div key={bId} className="border border-slate-100 rounded-xl overflow-hidden bg-white shadow-xs">
+                  {/* Batch Header Row */}
+                  <div 
+                    className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors"
+                    onClick={() => toggleBatch(bId)}
                   >
-                    <div className="flex items-center gap-1">
-                      Data <ArrowUpDown className="h-3 w-3" />
+                    <div className="flex items-center gap-3">
+                      <div className={`p-1.5 rounded-lg ${expandedBatches.has(bId) ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                        <FileSpreadsheet className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{group.name}</h4>
+                        <p className="text-[10px] text-slate-500">{group.txs.length} lançamentos encontrados neste lote</p>
+                      </div>
                     </div>
-                  </th>
-                  <th className="py-3 px-3">Conta</th>
-                  <th className="py-3 px-3">Descrição</th>
-                  <th className="py-3 px-3">Classificação contábil</th>
-                  <th className="py-3 px-3">Tipo de Custo</th>
-                  <th 
-                    className="py-3 px-3 text-right cursor-pointer hover:text-slate-600"
-                    onClick={() => {
-                      setSortField('value');
-                      setSortOrder(p => p === 'asc' ? 'desc' : 'asc');
-                    }}
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      Valor bruto <ArrowUpDown className="h-3 w-3" />
+                    
+                    <div className="flex items-center gap-6">
+                      <div className="text-right">
+                        <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-tight">Subtotal do Lote</span>
+                        <span className={`text-[11px] font-mono font-bold ${group.total >= 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                          R$ {Math.abs(group.total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="text-slate-400">
+                        {expandedBatches.has(bId) ? <ArrowUpDown className="h-4 w-4 rotate-180 transition-transform" /> : <ArrowUpDown className="h-4 w-4" />}
+                      </div>
                     </div>
-                  </th>
-                  <th className="py-3 px-3 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-600">
-                {resolvedTxs.map((tx) => {
-                  const cat = categories.find(c => c.id === tx.classification);
-                  const catName = cat ? cat.name : 'Outros custos';
+                  </div>
 
-                  const isRevenue = tx.classification === 'sales_products' || tx.classification === 'sales_services';
-                  const numericVal = Number(tx.value);
+                  {/* Batch Details Table (Expanded Only) */}
+                  {expandedBatches.has(bId) && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs select-none">
+                        <thead>
+                          <tr className="border-b border-slate-105 text-[10px] font-extrabold uppercase text-slate-400 tracking-wider bg-slate-50/50">
+                            <th className="py-2.5 px-4">Data</th>
+                            <th className="py-2.5 px-4">Conta</th>
+                            <th className="py-2.5 px-4">Descrição</th>
+                            <th className="py-2.5 px-4">Classificação</th>
+                            <th className="py-2.5 px-4 text-right">Valor</th>
+                            <th className="py-2.5 px-4 text-center">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-600">
+                          {group.txs.map((tx) => {
+                            const cat = categories.find(c => c.id === tx.classification);
+                            const catName = cat ? cat.name : 'Outros custos';
+                            const isRevenue = tx.classification === 'sales_products' || tx.classification === 'sales_services' || tx.classification === 'shareholder_contribution';
+                            const numericVal = Number(tx.value);
 
-                  return (
-                    <tr key={tx.id} className="hover:bg-slate-55/40 transition-colors text-[11px] group">
-                      <td className="py-3 px-3 font-mono text-slate-500 whitespace-nowrap">{formatDateBR(tx.date)}</td>
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <span className="font-semibold text-slate-800 block text-xs">{tx.account}</span>
-                        {tx.conta && tx.conta !== tx.account && (
-                          <span className="text-[10px] text-slate-400 font-mono block mt-0.5">Código: {tx.conta}</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-slate-850">
-                        {tx.description}
-                        {tx.document && (
-                          <span className="text-[10px] text-slate-400 font-normal block">Doc: {tx.document}</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                          isRevenue 
-                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' 
-                            : 'bg-indigo-50 text-indigo-805 border border-indigo-100'
-                        }`}>
-                          {catName}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${
-                          tx.costType === 'Fixo' 
-                            ? 'bg-slate-100 text-slate-700' 
-                            : tx.costType === 'Variável' 
-                            ? 'bg-amber-50 text-amber-800 border border-amber-100' 
-                            : 'bg-slate-50 text-slate-400'
-                        }`}>
-                          {tx.costType || 'N/A'}
-                        </span>
-                      </td>
-                      <td className={`py-3 px-3 text-right font-mono font-bold ${
-                        isRevenue ? 'text-emerald-600' : 'text-slate-705 font-semibold'
-                      }`}>
-                        {isRevenue ? '+' : '-'} R$ {Math.abs(numericVal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button 
-                            type="button"
-                            onClick={() => setEditingTx(tx)}
-                            className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
-                            title="Editar lançamento"
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => onDeleteTransaction(tx.id)}
-                            className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Excluir lançamento"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            return (
+                              <tr key={tx.id} className="hover:bg-indigo-50/30 transition-colors text-[11px] group">
+                                <td className="py-2.5 px-4 font-mono text-slate-500 whitespace-nowrap">{formatDateBR(tx.date)}</td>
+                                <td className="py-2.5 px-4 whitespace-nowrap font-semibold text-slate-800">{tx.account}</td>
+                                <td className="py-2.5 px-4 font-medium text-slate-700">{tx.description}</td>
+                                <td className="py-2.5 px-4">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                    isRevenue 
+                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' 
+                                      : 'bg-indigo-50 text-indigo-800 border border-indigo-100'
+                                  }`}>
+                                    {catName}
+                                  </span>
+                                </td>
+                                <td className={`py-2.5 px-4 text-right font-mono font-bold ${
+                                  isRevenue ? 'text-emerald-600' : 'text-slate-700'
+                                }`}>
+                                  {isRevenue ? '+' : '-'} R$ {Math.abs(numericVal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button onClick={() => setEditingTx(tx)} className="p-1 hover:bg-slate-100 rounded text-slate-500" title="Editar">
+                                      <Edit3 className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button onClick={() => onDeleteTransaction(tx.id)} className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-rose-600" title="Excluir">
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

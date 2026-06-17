@@ -7,6 +7,8 @@ export interface Transaction {
   classification: string; // Category ID
   costType?: 'Fixo' | 'Variável' | 'N/A' | 'MEO';
   value: number; // positive for income, negative for expense
+  batchId?: string;
+  batchName?: string;
 
   // Raw columns for 100% spreadsheet fidelity
   vencimento?: string;
