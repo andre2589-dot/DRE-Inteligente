@@ -10,28 +10,51 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-// Initialize server-side Supabase Client
-const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
-const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || "").trim();
-
-// Instantly-resolved promise so endpoints never block or hang on Vercel
-let resolveDbReady: (val: boolean) => void = () => {};
-const dbReadyPromise = Promise.resolve(true);
-
+// Internal state variables
 let supabase: any = null;
 let supabaseActive = false;
-if (supabaseUrl && supabaseAnonKey) {
+let resolveDbReady: (val: boolean) => void = () => {};
+const dbReadyPromise = new Promise<boolean>((resolve) => {
+  resolveDbReady = resolve;
+});
+
+// Environment-safe Supabase credentials
+let supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+let supabaseAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "").trim();
+
+// Sanitize URL: Remove trailing slashes and /rest/v1/ suffix if present
+if (supabaseUrl) {
+  supabaseUrl = supabaseUrl.replace(/\/+$/, ""); // Remove trailing slashes
+  supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, ""); // Remove /rest/v1/ if present
+}
+
+// Log startup environment
+console.log(`🎬 Initializing DRE Inteligente Server... VERCEL=${!!process.env.VERCEL} NODE_ENV=${process.env.NODE_ENV}`);
+console.log(`🔗 Supabase Target URL: ${supabaseUrl || 'NOT CONFIGURED'}`);
+
+// Safe Initialization Wrapper
+const initServer = async () => {
   try {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-    console.log("🚀 Supabase Client initialized successfully on Server.");
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.warn("⚠️ Database credentials missing. Server will run in simulation mode.");
+    } else if (!supabaseUrl.startsWith('http')) {
+      console.warn("⚠️ Invalid supabaseUrl format. Must start with http/https.");
+    } else {
+      supabase = createClient(supabaseUrl, supabaseAnonKey);
+      supabaseActive = true;
+      console.log("🚀 Supabase Client initialized successfully.");
+    }
+    
+    // 2. Resolve DB promise
+    resolveDbReady(true);
   } catch (err) {
-    console.error("❌ Failed to initialize Supabase Client on Server:", err);
+    console.error("💥 CRITICAL CRASH DURING INITIALIZATION:", err);
     resolveDbReady(false);
   }
-} else {
-  console.log("ℹ️ Supabase is NOT configured. All database calls will route to the local persistent JSON database.");
-  resolveDbReady(false);
-}
+};
+
+// Fire initialization
+initServer();
 
 // Database configuration for local persistence (writable /tmp/ path on Vercel)
 const DB_FILE = process.env.VERCEL
@@ -45,25 +68,32 @@ if (process.env.VERCEL) {
     if (!fs.existsSync(DB_FILE)) {
       if (fs.existsSync(bundledDbPath)) {
         fs.copyFileSync(bundledDbPath, DB_FILE);
-        console.log("📁 Server setting: Copied pre-existing database to writeable /tmp path on Vercel.");
+        console.log("📁 Vercel: Copied bundled db to /tmp");
+      } else {
+        // Create empty if not exists to avoid read errors later
+        fs.writeFileSync(DB_FILE, JSON.stringify({ ai_conversations: [], plano_contas: [], transactions: {} }), "utf-8");
       }
     }
   } catch (err) {
-    console.error("❌ Failed to copy local database to /tmp folder on Vercel:", err);
+    console.error("❌ Failed local DB setup on Vercel:", err);
   }
 }
 
-// Clear fictional transactions on startup once to let user start fresh with real data
-try {
-  if (fs.existsSync(DB_FILE)) {
-    const raw = fs.readFileSync(DB_FILE, "utf-8");
-    const parsed = JSON.parse(raw);
-    parsed.transactions = { c1: [] };
-    fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), "utf-8");
-    console.log("Successfully cleared example transactions to prepare for real data.");
+// Clear fictional transactions on startup only locally, avoid during Vercel cold starts if possible
+if (!process.env.VERCEL) {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed.transactions && parsed.transactions.c1 && parsed.transactions.c1.length > 50) {
+         parsed.transactions = { c1: [] };
+         fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), "utf-8");
+         console.log("Successfully cleared example transactions.");
+      }
+    }
+  } catch (e) {
+    // Slient fail
   }
-} catch (e) {
-  console.error("Error clearing transactions:", e);
 }
 
 interface DbSchema {
