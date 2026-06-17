@@ -421,18 +421,18 @@ ${prompt}
 // SUPABASE REAL & FALLBACK DATA LAYER CONTROLLERS
 // ==========================================
 
-// Get config for frontend
+// Get config for frontend (masked for safety)
 app.get("/api/supabase/config", (req, res) => {
   res.json({
-    url: process.env.SUPABASE_URL || "",
-    anonKey: process.env.SUPABASE_ANON_KEY || "",
-    isConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY)
+    url: supabaseUrl || "",
+    anonKey: supabaseAnonKey || "",
+    isConfigured: !!(supabaseUrl && supabaseAnonKey)
   });
 });
 
 // Run live diagnostic tests on user's Supabase instance
 app.get("/api/supabase/diagnose", async (req, res) => {
-  const isConfigured = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+  const isConfigured = !!(supabaseUrl && supabaseAnonKey);
   if (!isConfigured) {
     res.json({
       configured: false,
@@ -445,35 +445,35 @@ app.get("/api/supabase/diagnose", async (req, res) => {
       dbAccessibility: {
         status: "ERRO",
         details: "-",
-        error: "Sem conexão"
+        error: "Sem configuração"
       },
       permissions: {
         status: "ERRO",
         details: "-",
-        error: "Sem conexão"
+        error: "Sem configuração"
       },
       authenticated: {
         status: "ERRO",
         details: "-",
-        error: "Sem conexão"
+        error: "Sem configuração"
       },
       tables: {
-        companies: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
-        plano_contas: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
-        transactions: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
-        ai_conversations: { status: "ERRO", details: "Inacessível", error: "Sem conexão" },
-        uploaded_files: { status: "ERRO", details: "Inacessível", error: "Sem conexão" }
+        companies: { status: "ERRO", details: "Inacessível", error: "Sem configuração" },
+        plano_contas: { status: "ERRO", details: "Inacessível", error: "Sem configuração" },
+        transactions: { status: "ERRO", details: "Inacessível", error: "Sem configuração" },
+        ai_conversations: { status: "ERRO", details: "Inacessível", error: "Sem configuração" },
+        uploaded_files: { status: "ERRO", details: "Inacessível", error: "Sem configuração" }
       },
       allTablesCreated: false,
       userEmail: null,
-      error: "Credenciais de ambiente SUPABASE_URL e SUPABASE_ANON_KEY não encontradas nas secrets."
+      error: "Credenciais de ambiente não encontradas. Verifique as configurações no painel da Vercel."
     });
     return;
   }
 
   const startTotal = Date.now();
   try {
-    const client = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+    const client = createClient(supabaseUrl, supabaseAnonKey);
     
     // Auth status (safe query)
     const { data: { user }, error: userErr } = await client.auth.getUser();
