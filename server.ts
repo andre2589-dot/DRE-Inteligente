@@ -247,6 +247,28 @@ if (apiKey) {
   console.warn("⚠️ Warning: GEMINI_API_KEY is not defined in the environment. AI Financial Assistant will run in simulated mode.");
 }
 
+// API routes FIRST
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    supabase: supabaseActive ? "active" : "inactive",
+    vercel: !!process.env.VERCEL,
+    time: new Date().toISOString()
+  });
+});
+
+app.get("/api/status", async (req, res) => {
+  await dbReadyPromise;
+  res.json({
+    supabaseActive,
+    hasSupabaseUrl: !!supabaseUrl,
+    hasSupabaseKey: !!supabaseAnonKey,
+    hasGeminiKey: !!process.env.GEMINI_API_KEY,
+    databaseFile: DB_FILE,
+    env: process.env.NODE_ENV
+  });
+});
+
 // API endpoint for Gemini-powered financial helper
 app.post("/api/gemini/chat", async (req, res) => {
   const { prompt, dreContext, history } = req.body;
