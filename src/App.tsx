@@ -20,8 +20,6 @@ import DashboardCharts from './components/DashboardCharts';
 import ForecastModule from './components/ForecastModule';
 import PlanoContas from './components/PlanoContas';
 import AiAssistant from './components/AiAssistant';
-import DocsHub from './components/DocsHub';
-import SupabaseDiag from './components/SupabaseDiag';
 
 // Icons
 import { 
@@ -59,7 +57,7 @@ export default function App() {
   const [planoContas, setPlanoContas] = useState<PlanoContasItem[]>([]);
 
   // Tab control state
-  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'docs' | 'diagnostico'>('dre');
+  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai'>('dre');
 
   // Load companies list from API database
   const loadCompanies = async () => {
@@ -493,21 +491,10 @@ export default function App() {
 
         {/* Multitenant Control & Active Role selectors */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Active Company */}
+          {/* Active Company Name (Static, single tenant) */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100/80 rounded-xl px-3 py-1.5">
-            <Building className="h-4 w-4 text-slate-400" />
-            <select
-              value={activeCompany.id}
-              onChange={(e) => {
-                const cmp = companies.find(c => c.id === e.target.value);
-                if (cmp) selectActiveCompany(cmp);
-              }}
-              className="bg-transparent text-xs font-bold text-slate-700 border-none cursor-pointer focus:outline-none focus:ring-0"
-            >
-              {companies.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            <Building className="h-4 w-4 text-indigo-500" />
+            <span className="text-xs font-bold text-slate-700">{activeCompany.name}</span>
           </div>
 
           {/* Active User Security Role */}
@@ -638,30 +625,6 @@ export default function App() {
             <Bot className="h-4 w-4 text-emerald-500 animate-bounce" />
             Assistente IA
           </button>
-
-          <button
-            onClick={() => setActiveTab('docs')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'docs'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <FileText className="h-4 w-4" />
-            Arquitetura & SQL SaaS
-          </button>
-
-          <button
-            onClick={() => setActiveTab('diagnostico')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'diagnostico'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <Database className="h-4 w-4 text-indigo-500" />
-            Sincronização & Diagnóstico Supabase
-          </button>
         </div>
 
         {/* Tab Body Contents Rendering */}
@@ -733,14 +696,6 @@ export default function App() {
               companyId={activeCompany.id}
               userId={activeRole}
             />
-          )}
-
-          {activeTab === 'docs' && (
-            <DocsHub />
-          )}
-
-          {activeTab === 'diagnostico' && (
-            <SupabaseDiag />
           )}
         </div>
       </main>

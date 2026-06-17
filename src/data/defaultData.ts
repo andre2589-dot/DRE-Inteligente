@@ -1,8 +1,7 @@
 import { Company, DreCategory, Transaction, Rule, PlanoContasItem } from '../types';
 
 export const DEFAULT_COMPANIES: Company[] = [
-  { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
-  { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+  { id: 'c1', name: 'Empresa Principal', cnpj: '00.000.000/0001-00', sector: 'Geral' }
 ];
 
 export const DRE_CATEGORIES: DreCategory[] = [
@@ -71,8 +70,7 @@ export const DEFAULT_RULES: Rule[] = [
 ];
 
 export const DEFAULT_TRANSACTIONS: { [companyId: string]: Transaction[] } = {
-  c1: [],
-  c2: []
+  c1: []
 };
 
 export const DEFAULT_PLANO_CONTAS: PlanoContasItem[] = [

@@ -43,7 +43,7 @@ try {
   if (fs.existsSync(DB_FILE)) {
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-    parsed.transactions = { c1: [], c2: [] };
+    parsed.transactions = { c1: [] };
     fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), "utf-8");
     console.log("Successfully cleared example transactions to prepare for real data.");
   }
@@ -552,8 +552,7 @@ app.post("/api/supabase/seed", async (req, res) => {
   try {
     // 1. Seed companies
     const { error: compErr } = await supabase.from('companies').upsert([
-      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
-      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+      { id: 'c1', name: 'Empresa Principal', cnpj: '00.000.000/0001-00', sector: 'Geral' }
     ]);
     if (compErr) throw new Error(`Falha ao semear 'companies': ${compErr.message}`);
 
@@ -596,10 +595,9 @@ app.get("/api/companies", async (req, res) => {
 
   // Fallback
   const db = getDb();
-  if (!(db as any).companies) {
+  if (!(db as any).companies || (db as any).companies.length > 1 || (db as any).companies[0]?.id !== 'c1') {
     (db as any).companies = [
-      { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
-      { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+      { id: 'c1', name: 'Empresa Principal', cnpj: '00.000.000/0001-00', sector: 'Geral' }
     ];
     saveDb(db);
   }
@@ -1184,8 +1182,7 @@ async function setupViteOrStatic() {
             console.log("⚡ [PROATIVO] Banco de dados Supabase detectado vazio! Semeando dados padrão...");
             // Seed companies
             await supabase.from('companies').upsert([
-              { id: 'c1', name: 'TechVibe Soluções Digitais Ltda', cnpj: '34.567.890/0001-21', sector: 'Tecnologia & SaaS' },
-              { id: 'c2', name: 'Mercado do Sabor Alimentos', cnpj: '12.345.678/0001-99', sector: 'Varejo & Distribuição' }
+              { id: 'c1', name: 'Empresa Principal', cnpj: '00.000.000/0001-00', sector: 'Geral' }
             ]);
             // Seed plano_contas
             const dbSeedPlano = DEFAULT_PLANO_CONTAS_SEED.map(item => ({
@@ -1236,5 +1233,22 @@ async function setupViteOrStatic() {
   });
 }
 
-setupViteOrStatic();
+if (!process.env.VERCEL) {
+  setupViteOrStatic();
+} else {
+  // Enforce DB promise resolution on Vercel
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      supabase = createClient(supabaseUrl, supabaseAnonKey);
+      supabaseActive = true;
+      resolveDbReady(true);
+    } catch (err) {
+      resolveDbReady(false);
+    }
+  } else {
+    resolveDbReady(false);
+  }
+}
+
+export default app;
 

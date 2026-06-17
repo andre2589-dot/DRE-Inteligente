@@ -678,21 +678,14 @@
     }
   ],
   "transactions": {
-    "c1": [],
-    "c2": []
+    "c1": []
   },
   "companies": [
     {
       "id": "c1",
-      "name": "TechVibe Soluções Digitais Ltda",
-      "cnpj": "34.567.890/0001-21",
-      "sector": "Tecnologia & SaaS"
-    },
-    {
-      "id": "c2",
-      "name": "Mercado do Sabor Alimentos",
-      "cnpj": "12.345.678/0001-99",
-      "sector": "Varejo & Distribuição"
+      "name": "Empresa Principal",
+      "cnpj": "00.000.000/0001-00",
+      "sector": "Geral"
     }
   ]
 }

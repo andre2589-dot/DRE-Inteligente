@@ -3,8 +3,84 @@ import { PlanoContasItem, DreCategory } from '../types';
 import { 
   Plus, Search, Edit2, Trash2, Power, Check, X, 
   AlertTriangle, Settings2, HelpCircle, Activity,
-  Layers, ToggleLeft, ToggleRight, Info
+  Layers, ToggleLeft, ToggleRight, Info, Upload, FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
+
+const STANDARD_CLASSIFICATION_MAPPING: { 
+  [key: string]: { subCategory: string; costType: 'Fixo' | 'Variável' | 'N/A' | 'MEO' } 
+} = {
+  'sales_products': { subCategory: 'Venda de Produtos', costType: 'N/A' },
+  'sales_services': { subCategory: 'Prestação de Serviços', costType: 'N/A' },
+  'deduction_icms': { subCategory: 'ICMS S/ Vendas', costType: 'Variável' },
+  'deduction_pis': { subCategory: 'PIS S/ Faturamento', costType: 'Variável' },
+  'deduction_cofins': { subCategory: 'COFINS S/ Faturamento', costType: 'Variável' },
+  'deduction_iss': { subCategory: 'ISS S/ Serviços', costType: 'Variável' },
+  'costs_materials': { subCategory: 'Insumos e Matérias-Primas', costType: 'Variável' },
+  'costs_resell': { subCategory: 'Mercadorias para Revenda', costType: 'Variável' },
+  'costs_production': { subCategory: 'Custos Diretos de Produção', costType: 'Variável' },
+  'opex_people': { subCategory: 'Pessoal (Salários, Benefícios e Encargos)', costType: 'Fixo' },
+  'opex_marketing': { subCategory: 'Marketing & Comercial', costType: 'Variável' },
+  'opex_systems': { subCategory: 'Sistemas & Cloud (SaaS, Servidores)', costType: 'Fixo' },
+  'opex_contractors': { subCategory: 'Prestadores de Serviço & Consultoria', costType: 'Fixo' },
+  'opex_maintenance': { subCategory: 'Manutenção, Sedes & Infra', costType: 'Fixo' },
+  'opex_admin': { subCategory: 'Despesas Administrativas & Taxas', costType: 'Fixo' },
+  'tax_irpj': { subCategory: 'IRPJ S/ Lucro', costType: 'Variável' },
+  'tax_csll': { subCategory: 'CSLL S/ Lucro', costType: 'Variável' }
+};
+
+const STANDARD_SUBCATEGORIES = [
+  'Venda de Produtos',
+  'Prestação de Serviços',
+  'ICMS S/ Vendas',
+  'PIS S/ Faturamento',
+  'COFINS S/ Faturamento',
+  'ISS S/ Serviços',
+  'Insumos e Matérias-Primas',
+  'Mercadorias para Revenda',
+  'Custos Diretos de Produção',
+  'Pessoal (Salários, Benefícios e Encargos)',
+  'Marketing & Comercial',
+  'Sistemas & Cloud (SaaS, Servidores)',
+  'Prestadores de Serviço & Consultoria',
+  'Manutenção, Sedes & Infra',
+  'Despesas Administrativas & Taxas',
+  'IRPJ S/ Lucro',
+  'CSLL S/ Lucro'
+];
+
+const matchClassificationId = (val: string, categories: DreCategory[]): string => {
+  const str = String(val || '').trim().toLowerCase();
+  if (!str) return 'opex_admin';
+  
+  const found = categories.find(c => 
+    c.id.toLowerCase() === str || 
+    c.name.toLowerCase() === str || 
+    c.name.toLowerCase().includes(str) ||
+    str.includes(c.name.toLowerCase())
+  );
+  if (found) return found.id;
+
+  if (str.includes('produto') || str.includes('venda')) return 'sales_products';
+  if (str.includes('serviço') || str.includes('prestacao')) return 'sales_services';
+  if (str.includes('icms')) return 'deduction_icms';
+  if (str.includes('pis')) return 'deduction_pis';
+  if (str.includes('cofins')) return 'deduction_cofins';
+  if (str.includes('iss')) return 'deduction_iss';
+  if (str.includes('insumo') || str.includes('materia')) return 'costs_materials';
+  if (str.includes('revenda') || str.includes('mercadoria')) return 'costs_resell';
+  if (str.includes('direto') || str.includes('producao')) return 'costs_production';
+  if (str.includes('pessoal') || str.includes('salario') || str.includes('folha') || str.includes('encargo')) return 'opex_people';
+  if (str.includes('marketing') || str.includes('comercial') || str.includes('anuncio') || str.includes('propaganda')) return 'opex_marketing';
+  if (str.includes('cloud') || str.includes('sistema') || str.includes('server') || str.includes('hosting')) return 'opex_systems';
+  if (str.includes('prestador') || str.includes('consultoria') || str.includes('contador') || str.includes('honorario')) return 'opex_contractors';
+  if (str.includes('manutencao') || str.includes('sede') || str.includes('aluguel') || str.includes('infra')) return 'opex_maintenance';
+  if (str.includes('admin') || str.includes('adm') || str.includes('taxa') || str.includes('correio')) return 'opex_admin';
+  if (str.includes('irpj')) return 'tax_irpj';
+  if (str.includes('csll')) return 'tax_csll';
+
+  return 'opex_admin';
+};
 
 interface PlanoContasProps {
   planoContas: PlanoContasItem[];
@@ -39,6 +115,12 @@ export default function PlanoContas({
   const [formError, setFormError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Excel Import states
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importFileError, setImportFileError] = useState<string | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [excelPreview, setExcelPreview] = useState<Omit<PlanoContasItem, 'id'>[] | null>(null);
+
   // Pagination or list limit to keep render light or extremely fast
   const [listLimit, setListLimit] = useState(25);
 
@@ -64,6 +146,137 @@ export default function PlanoContas({
     const uniqueGroups = new Set(planoContas.map(a => a.classificationId)).size;
     return { total, active, inactive, uniqueGroups };
   }, [planoContas]);
+
+  // Handle double-direction autocomplete & auto-fill state changes
+  const handleClassificationChange = (val: string) => {
+    setFormClassificationId(val);
+    const mapped = STANDARD_CLASSIFICATION_MAPPING[val];
+    if (mapped) {
+      setFormSubCategory(mapped.subCategory);
+      setFormCostType(mapped.costType);
+    }
+  };
+
+  // Import Excel Parser and normalizer
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportFileError(null);
+    setExcelPreview(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setImportFileError("Apenas arquivos do Excel (.xlsx, .xls) são suportados.");
+      return;
+    }
+
+    setImportLoading(true);
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
+        if (rows.length === 0) {
+          setImportFileError("O arquivo carregado está vazio.");
+          setImportLoading(false);
+          return;
+        }
+
+        const parsedItems: Omit<PlanoContasItem, 'id'>[] = [];
+        let errors = 0;
+
+        rows.forEach((row: any) => {
+          const codeRaw = row['Código'] || row['Codigo'] || row['Conta'] || row['Cd'] || row['CÓDIGO'] || row['CODIGO'];
+          const nameRaw = row['Nome'] || row['Nome da Conta'] || row['Descrição da Conta'] || row['Descricao'] || row['Descrição'] || row['DESCRIÇÃO'] || row['NOME'] || row['DESCRICAO'];
+          const classRaw = row['Classificação'] || row['Classificacao'] || row['Agrupador'] || row['Grupo'] || row['Classification'] || row['CLASSIFICAÇÃO'] || row['CLASSIFICACAO'] || row['CLASSIFICATION'];
+          const subCatRaw = row['Subcategoria'] || row['Sub-categoria'] || row['Descrição - Subcategoria'] || row['SubCategory'] || row['SUBCATEGORIA'] || row['SUBCATEGORY'] || row['DESCRIÇÃO_SUBCATEGORIA'];
+          const costTypeRaw = row['Custo'] || row['Tipo de Custo'] || row['Tipo'] || row['CostType'] || row['CUSTO'] || row['TIPO_CUSTO'];
+
+          const code = String(codeRaw || '').trim();
+          const name = String(nameRaw || '').trim().toUpperCase();
+          
+          if (!code || !name) {
+            errors++;
+            return;
+          }
+
+          const matchedClassificationId = matchClassificationId(String(classRaw || ''), categories);
+          
+          let subCategory = String(subCatRaw || '').trim();
+          if (!subCategory) {
+            subCategory = STANDARD_CLASSIFICATION_MAPPING[matchedClassificationId]?.subCategory || 'Geral';
+          }
+
+          let costType: 'Fixo' | 'Variável' | 'N/A' | 'MEO' = 'Fixo';
+          const cstStr = String(costTypeRaw || '').trim().toLowerCase();
+          if (cstStr.includes('fix')) {
+            costType = 'Fixo';
+          } else if (cstStr.includes('var') || cstStr.includes('vári')) {
+            costType = 'Variável';
+          } else if (cstStr.includes('meo')) {
+            costType = 'MEO';
+          } else if (cstStr.includes('n/a') || cstStr.includes('na')) {
+            costType = 'N/A';
+          } else {
+            costType = STANDARD_CLASSIFICATION_MAPPING[matchedClassificationId]?.costType || 'Fixo';
+          }
+
+          parsedItems.push({
+            code,
+            name,
+            classificationId: matchedClassificationId,
+            subCategory,
+            costType,
+            active: true
+          });
+        });
+
+        if (parsedItems.length === 0) {
+          setImportFileError("Nenhum item válido pôde ser extraído. Verifique as colunas (Código, Nome, Classificação, Subcategoria, Custo).");
+        } else {
+          setExcelPreview(parsedItems);
+        }
+      } catch (err: any) {
+        setImportFileError(`Erro ao ler células do Excel: ${err.message || err}`);
+      } finally {
+        setImportLoading(false);
+      }
+    };
+
+    reader.onerror = () => {
+      setImportFileError("Falha física de leitura.");
+      setImportLoading(false);
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const confirmExcelImport = async () => {
+    if (!excelPreview) return;
+    setImportLoading(true);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const item of excelPreview) {
+      const res = await onAddAccount(item);
+      if (res.success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    }
+
+    setSuccessMsg(`Importação Concluída! ${successCount} contas adicionadas com sucesso. ${failCount > 0 ? `${failCount} falhas.` : ''}`);
+    setExcelPreview(null);
+    setIsImportOpen(false);
+    setTimeout(() => setSuccessMsg(null), 5000);
+    setImportLoading(false);
+  };
 
   // Open form for Create
   const handleOpenCreate = () => {
@@ -342,8 +555,8 @@ export default function PlanoContas({
                 </label>
                 <select
                   value={formClassificationId}
-                  onChange={(e) => setFormClassificationId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800 font-medium"
+                  onChange={(e) => handleClassificationChange(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800 font-medium"
                 >
                   <option value="" disabled>--- Selecione ---</option>
                   {selectableCategories.map(cat => (
@@ -351,7 +564,7 @@ export default function PlanoContas({
                   ))}
                 </select>
                 <p className="text-[9px] text-slate-400 mt-0.5">
-                  Estrutura correspondente no relatório de DRE
+                  Filtro inteligente: preencherá por padrão a descrição e custo do plano.
                 </p>
               </div>
 
@@ -360,20 +573,21 @@ export default function PlanoContas({
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
                   Descrição * (Subcategoria)
                 </label>
-                <input
-                  type="text"
-                  required
-                  list="suggested-subcategories"
-                  placeholder="Selecione ou digite..."
+                <select
                   value={formSubCategory}
                   onChange={(e) => setFormSubCategory(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800 font-medium"
-                />
-                <datalist id="suggested-subcategories">
-                  {autocompleteSubCategories.map(sub => <option key={sub} value={sub} />)}
-                </datalist>
+                  className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none text-slate-800 font-medium"
+                >
+                  <option value="" disabled>--- Selecione a Descrição ---</option>
+                  {STANDARD_SUBCATEGORIES.map(sub => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
+                  {formSubCategory && !STANDARD_SUBCATEGORIES.includes(formSubCategory) && (
+                    <option value={formSubCategory}>{formSubCategory} (Customizada)</option>
+                  )}
+                </select>
                 <p className="text-[9px] text-slate-400 mt-0.5">
-                  Subclassificação (ex: Imposto sobre venda, Insumo, Beneficios)
+                  Selecione entre descrições correspondentes à classificação.
                 </p>
               </div>
 
@@ -463,6 +677,14 @@ export default function PlanoContas({
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end text-[11px]">
+              <button
+                onClick={() => setIsImportOpen(!isImportOpen)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer transition-colors mr-2 select-none"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Importar Excel
+              </button>
+
               <span className="text-[10px] uppercase font-bold text-slate-400 whitespace-nowrap hidden md:inline">Filtro:</span>
               <select
                 value={selectedFilterCategory}
@@ -479,6 +701,112 @@ export default function PlanoContas({
               </select>
             </div>
           </div>
+
+          {/* Excel Import Panel Overlay */}
+          {isImportOpen && (
+            <div className="bg-slate-50 p-4 border-b border-slate-150 space-y-4 animate-fade-in text-xs">
+              <div className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200">
+                <div>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <Upload className="h-4 w-4 text-emerald-600" />
+                    Upload de Plano de Contas (.xlsx)
+                  </h4>
+                  <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                    Arraste ou selecione o arquivo correspondente. O sistema mapeia dinamicamente as colunas: 
+                    <strong className="text-slate-700 ml-1">Código, Nome, Classificação (Agrupador DRE), Subcategoria (Descrição) e Custo</strong>.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsImportOpen(false);
+                    setExcelPreview(null);
+                    setImportFileError(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 text-xs"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {!excelPreview ? (
+                <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/20 rounded-xl p-8 text-center transition-all relative">
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls"
+                    onChange={handleExcelImport}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <FileSpreadsheet className="h-10 w-10 text-slate-400 hover:text-emerald-600 transition-colors" />
+                    <span className="text-xs font-bold text-slate-700">Selecione ou solte a planilha .xlsx aqui</span>
+                    <span className="text-[10px] text-slate-400">Padrão da colunagem no cabeçalho do Excel</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                  <div className="p-3 bg-emerald-50 border-b border-slate-150 flex justify-between items-center">
+                    <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                      <Check className="h-4 w-4 text-emerald-600" />
+                      Pronto para importar {excelPreview.length} conta(s) encontradas na planilha!
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setExcelPreview(null)}
+                        className="px-2.5 py-1 text-[10px] font-bold border border-slate-200 bg-white text-slate-600 rounded hover:bg-slate-50"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={confirmExcelImport}
+                        disabled={importLoading}
+                        className="px-3 py-1 text-[10px] font-bold bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {importLoading ? 'Importando...' : 'Confirmar Importação'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto">
+                    <table className="w-full text-left text-[11px] text-slate-700 font-medium">
+                      <thead className="bg-slate-100 text-slate-600 uppercase text-[9px] font-bold tracking-wider sticky top-0 border-b border-slate-200">
+                        <tr>
+                          <th className="p-2 pl-3">Código</th>
+                          <th className="p-2">Nome</th>
+                          <th className="p-2">Classificação</th>
+                          <th className="p-2">Descrição</th>
+                          <th className="p-2 pr-3">Custo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {excelPreview.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 text-[10px]">
+                            <td className="p-2 pl-3 font-mono font-bold text-slate-900">{item.code}</td>
+                            <td className="p-2 font-bold uppercase">{item.name}</td>
+                            <td className="p-2">
+                              {categories.find(c => c.id === item.classificationId)?.name || item.classificationId}
+                            </td>
+                            <td className="p-2 text-slate-500">{item.subCategory}</td>
+                            <td className="p-2 pr-3">
+                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">
+                                {item.costType}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {importFileError && (
+                <div className="bg-rose-50 border-l-3 border-rose-500 text-rose-800 text-[11px] p-3 rounded-lg flex items-start gap-2.5 font-medium">
+                  <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+                  <span className="leading-snug">{importFileError}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Table Area */}
           <div className="overflow-x-auto">
