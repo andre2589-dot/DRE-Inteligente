@@ -353,6 +353,7 @@ export default function TransactionList({
   const [sortField, setSortField] = useState<'date' | 'value'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [realTimePeriod, setRealTimePeriod] = useState<string>('all');
+  const [summaryLayer, setSummaryLayer] = useState<'kpi' | 'account' | 'class' | 'type'>('kpi');
   const [dateFilter, setDateFilter] = useState<string>('');
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
 
@@ -1052,11 +1053,17 @@ export default function TransactionList({
 
   // Real-time calculation dashboard sidecar
   const realTimeKpi = useMemo(() => {
-    let recBruta = 0;
+    let recBruta = 0; // Faturamento e aportes
     let custVarias = 0;
     let custFixos = 0;
     let despOpex = 0;
     let activeTxsCount = 0;
+
+    const breakdown = {
+      accounts: {} as Record<string, number>,
+      categories: {} as Record<string, number>,
+      costTypes: {} as Record<string, number>
+    };
 
     transactions.forEach(t => {
       if (realTimePeriod !== 'all') {
@@ -1067,23 +1074,32 @@ export default function TransactionList({
 
       activeTxsCount++;
 
-      const isRevenue = t.classification === 'sales_products' || t.classification === 'sales_services';
+      const isRevenue = t.classification === 'sales_products' || 
+                        t.classification === 'sales_services' || 
+                        t.classification === 'shareholder_contribution';
       
+      const val = Number(t.value) || 0;
+      const valAbs = Math.abs(val);
+
       if (isRevenue) {
-        recBruta += Math.abs(t.value);
+        recBruta += valAbs;
       } else {
-        // It's outlays
-        const valAbs = Math.abs(t.value);
         if (t.costType === 'Fixo') {
           custFixos += valAbs;
         } else if (t.costType === 'Variável') {
           custVarias += valAbs;
         }
 
-        const isOpex = t.classification.startsWith('opex_');
-        if (isOpex) {
+        if (t.classification.startsWith('opex_')) {
           despOpex += valAbs;
         }
+      }
+
+      // Fill interactive breakdown layers
+      breakdown.accounts[t.account] = (breakdown.accounts[t.account] || 0) + val;
+      breakdown.categories[t.classification] = (breakdown.categories[t.classification] || 0) + val;
+      if (t.costType) {
+        breakdown.costTypes[t.costType] = (breakdown.costTypes[t.costType] || 0) + val;
       }
     });
 
@@ -1095,7 +1111,8 @@ export default function TransactionList({
       custosFixos: custFixos,
       despesasOpex: despOpex,
       resultadoParcial: resultadoParcialValue,
-      totalCount: activeTxsCount
+      totalCount: activeTxsCount,
+      breakdown
     };
   }, [transactions, realTimePeriod]);
 
@@ -1521,78 +1538,155 @@ export default function TransactionList({
             </div>
             <div>
               <h3 className="text-xs uppercase font-extrabold text-slate-200 tracking-wider">Painel - Resumo em Tempo Real</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Indicadores financeiros consolidados do mês</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Indicadores consolidados do período</p>
             </div>
           </div>
 
-          {/* Period Selection Field */}
-          <div className="flex flex-col gap-1 border-b border-slate-800 pb-3">
-            <label className="text-[9px] uppercase font-bold text-slate-400">Selecionar Período</label>
-            <select
-              value={realTimePeriod}
-              onChange={(e) => setRealTimePeriod(e.target.value)}
-              style={{ backgroundColor: '#1e293b' }}
-              className="border border-slate-700 text-xs rounded-lg py-1.5 px-2.5 text-slate-100 cursor-pointer focus:ring-1 focus:ring-emerald-500 focus:outline-none"
-            >
-              <option value="all">Soma de todos os períodos</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>
-                  {formatMonthBR(m)}
-                </option>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[9px] uppercase font-bold text-slate-500">Período de Análise</label>
+              <select
+                value={realTimePeriod}
+                onChange={(e) => setRealTimePeriod(e.target.value)}
+                style={{ backgroundColor: '#1e293b' }}
+                className="border border-slate-700 text-xs rounded-lg py-1.5 px-2.5 text-slate-100 cursor-pointer focus:ring-1 focus:ring-emerald-500 focus:outline-none font-bold"
+              >
+                <option value="all">Visão Consolidada (Total)</option>
+                {availableMonths.map((m) => (
+                  <option key={m} value={m}>
+                    {formatMonthBR(m)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Interactive Tabs */}
+            <div className="flex bg-slate-800/50 p-1 rounded-xl border border-slate-800">
+              {(['kpi', 'account', 'class', 'type'] as const).map((layer) => (
+                <button
+                  key={layer}
+                  onClick={() => setSummaryLayer(layer)}
+                  className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                    summaryLayer === layer 
+                      ? 'bg-emerald-600 text-white shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {layer === 'kpi' ? 'Geral' : layer === 'account' ? 'Contas' : layer === 'class' ? 'Categorias' : 'Tipo'}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
-          <div className="space-y-2.5 text-xs">
-            {/* Margins/Revenue indicator */}
-            <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-              <span className="text-slate-400 font-medium flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Receita Total
-              </span>
-              <span className="font-mono font-bold text-emerald-400">
-                R$ {realTimeKpi.receitaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
+          <div className="min-h-[220px] max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+            {summaryLayer === 'kpi' && (
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400 font-medium flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Receita Total
+                  </span>
+                  <span className="font-mono font-bold text-emerald-400">
+                    R$ {realTimeKpi.receitaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400 font-medium flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-indigo-400"></span> Custos Fixos
+                  </span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    R$ {realTimeKpi.custosFixos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400 font-medium flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-amber-400"></span> Custos Variáveis
+                  </span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    R$ {realTimeKpi.custosVariaveis.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400 font-medium flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-violet-400"></span> Despesas Operacionais
+                  </span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    R$ {realTimeKpi.despesasOpex.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-800">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-slate-500 uppercase text-[9px] font-black tracking-widest">Resultado Parcial</span>
+                    <span className={`font-mono font-black text-sm ${realTimeKpi.resultadoParcial >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      R$ {realTimeKpi.resultadoParcial.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all ${realTimeKpi.resultadoParcial >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                      style={{ 
+                        width: `${Math.min(100, Math.max(10, (Math.abs(realTimeKpi.resultadoParcial) / (realTimeKpi.receitaTotal || 1)) * 100))}%` 
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
-            <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-              <span className="text-slate-400 font-medium flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-indigo-400"></span> Custos Fixos
-              </span>
-              <span className="font-mono font-semibold text-slate-200">
-                R$ {realTimeKpi.custosFixos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
+            {summaryLayer === 'account' && (
+              <div className="space-y-1.5">
+                {Object.entries(realTimeKpi.breakdown.accounts)
+                  .sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))
+                  .slice(0, 15)
+                  .map(([name, val], idx) => (
+                    <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
+                      <span className="text-slate-400 font-medium truncate max-w-[120px]" title={name}>{name}</span>
+                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                        {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
 
-            <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-              <span className="text-slate-400 font-medium flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-amber-400"></span> Custos Variáveis
-              </span>
-              <span className="font-mono font-semibold text-slate-200">
-                R$ {realTimeKpi.custosVariaveis.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
+            {summaryLayer === 'class' && (
+              <div className="space-y-1.5">
+                {Object.entries(realTimeKpi.breakdown.categories)
+                  .sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))
+                  .map(([catId, val], idx) => {
+                    const catName = categories.find(c => c.id === catId)?.name || catId;
+                    return (
+                      <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
+                        <span className="text-slate-400 font-medium truncate max-w-[120px]" title={catName}>{catName}</span>
+                        <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
 
-            <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-              <span className="text-slate-400 font-medium flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-violet-400"></span> Despesas Operacionais
-              </span>
-              <span className="font-mono font-semibold text-slate-200">
-                R$ {realTimeKpi.despesasOpex.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
+            {summaryLayer === 'type' && (
+              <div className="space-y-1.5">
+                {Object.entries(realTimeKpi.breakdown.costTypes)
+                  .sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))
+                  .map(([type, val], idx) => (
+                    <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
+                      <span className="text-slate-400 font-medium">{type}</span>
+                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                        {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
 
-            {/* Resultado Parcial */}
-            <div className="flex justify-between items-center py-2.5 border-b border-slate-800/80 bg-slate-800/25 px-2.5 rounded-lg">
-              <span className="text-slate-300 font-bold uppercase text-[10px]">Resultado Parcial</span>
-              <span className={`font-mono font-black text-[13px] ${realTimeKpi.resultadoParcial >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                R$ {realTimeKpi.resultadoParcial.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="flex justify-between items-center py-1 text-[10px] text-slate-400">
-              <span>Quantidade de Lançamentos:</span>
-              <span className="font-mono font-bold bg-slate-800 px-2 py-0.5 rounded text-white">{realTimeKpi.totalCount} un.</span>
-            </div>
+          <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
+            <span className="text-[9px] uppercase font-bold text-slate-500 tracking-widest">Total Lançamentos</span>
+            <span className="font-mono font-black text-xs text-slate-100 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+              {realTimeKpi.totalCount} un.
+            </span>
           </div>
         </div>
 
