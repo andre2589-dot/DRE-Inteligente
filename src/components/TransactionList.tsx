@@ -1591,7 +1591,7 @@ export default function TransactionList({
                   .map(([name, val], idx) => (
                     <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
                       <span className="text-slate-400 font-medium truncate max-w-[120px]" title={name}>{name}</span>
-                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -1608,7 +1608,7 @@ export default function TransactionList({
                     return (
                       <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
                         <span className="text-slate-400 font-medium truncate max-w-[120px]" title={catName}>{catName}</span>
-                        <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                        <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
@@ -1624,7 +1624,7 @@ export default function TransactionList({
                   .map(([type, val], idx) => (
                     <div key={idx} className="flex justify-between items-center py-1.5 text-[10px] border-b border-slate-800/40 last:border-0 hover:bg-slate-800/30 px-1 rounded transition-colors">
                       <span className="text-slate-400 font-medium">{type}</span>
-                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                      <span className={`font-mono font-bold ${Number(val) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {Number(val) >= 0 ? '+' : ''}R$ {Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </span>
                     </div>

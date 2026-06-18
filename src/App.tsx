@@ -105,20 +105,26 @@ export default function App() {
   // Map and enrich transactions dynamically so everything relies on Plano de Contas master configurations
   const enrichedTransactions = React.useMemo(() => {
     return transactions.map(t => {
-      const codeToFind = String(t.conta || t.account || '').trim();
-      const match = planoContas.find(pc => pc.code === codeToFind);
+      const codeToFind = String(t.conta || '').trim();
+      const nameToFind = String(t.account || t.descricaoConta || '').trim();
+      
+      const match = planoContas.find(pc => 
+        (codeToFind && pc.code.trim() === codeToFind) || 
+        (nameToFind && pc.name.trim().toLowerCase() === nameToFind.toLowerCase())
+      );
       
       if (match) {
         const classificationId = match.classificationId;
-        const isProductOrService = classificationId === 'sales_products' || classificationId === 'sales_services';
+        // ALL ITEMS IN PLANO DE CONTAS ARE EXPENSES (DESPESAS)
         const rawValue = Math.abs(t.value);
-        const mathematicalValue = isProductOrService ? rawValue : -rawValue;
+        const mathematicalValue = -rawValue;
         
         return {
           ...t,
           classification: classificationId,
           costType: match.costType,
           description: t.description || match.name,
+          account: match.name,
           conta: match.code,
           descricaoConta: match.name,
           value: mathematicalValue
@@ -669,7 +675,7 @@ export default function App() {
 
           {activeTab === 'import' && (
             <TransactionList 
-              transactions={transactions}
+              transactions={enrichedTransactions}
               categories={categories}
               rules={rules}
               planoContas={planoContas}
