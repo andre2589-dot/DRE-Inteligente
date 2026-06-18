@@ -9,6 +9,7 @@ export interface Transaction {
   value: number; // positive for income, negative for expense
   batchId?: string;
   batchName?: string;
+  isManual?: boolean;
 
   // Raw columns for 100% spreadsheet fidelity
   vencimento?: string;

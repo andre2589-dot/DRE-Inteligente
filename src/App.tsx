@@ -190,9 +190,8 @@ export default function App() {
             ...t,
             classification: updatedCatId,
             costType: updatedCostType === 'N/A' ? 'N/A' : updatedCostType,
-            value: (updatedCatId === 'sales_products' || updatedCatId === 'sales_services') 
-              ? Math.abs(t.value) 
-              : -Math.abs(t.value)
+            // ALL ITEMS IN PLANO DE CONTAS ARE EXPENSES PER NEW INSTRUCTION
+            value: -Math.abs(t.value)
           };
         }
         return t;

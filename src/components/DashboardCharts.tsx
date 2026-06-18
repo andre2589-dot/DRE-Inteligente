@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Transaction, DreCategory } from '../types';
 import { 
   ResponsiveContainer, 
@@ -127,6 +127,27 @@ export default function DashboardCharts({ transactions, categories }: DashboardC
     };
   });
 
+  // Daily revenue chart calculation
+  const dailyRevenueData = useMemo(() => {
+    const dailyMap = new Map<string, number>();
+    
+    transactions.forEach(t => {
+      const isRevenue = t.classification === 'sales_products' || 
+                        t.classification === 'sales_services' || 
+                        t.classification === 'shareholder_contribution';
+      if (isRevenue) {
+        const date = t.date;
+        dailyMap.set(date, (dailyMap.get(date) || 0) + Math.abs(t.value));
+      }
+    });
+
+    const sortedDates = Array.from(dailyMap.keys()).sort();
+    return sortedDates.map(date => ({
+      dateLabel: new Date(date + "T12:00:00").toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+      'Receita': Math.round(dailyMap.get(date) || 0)
+    }));
+  }, [transactions]);
+
   const lastMonth = chartData[chartData.length - 1];
   const secondLastMonth = chartData[chartData.length - 2];
 
@@ -254,6 +275,36 @@ export default function DashboardCharts({ transactions, categories }: DashboardC
           </div>
         </div>
       </div>
+
+      {/* NEW: Fluxo Diário de Receita */}
+      {dailyRevenueData.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h4 className="text-xs uppercase font-extrabold text-slate-700 tracking-wider">Fluxo Diário de Receitas (Bloco 1)</h4>
+              <p className="text-[10px] text-slate-400 mt-0.5">Análise granular das entradas financeiras registradas diariamente</p>
+            </div>
+            <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-bold">Gráfico de Linha</span>
+          </div>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={dailyRevenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorDailyRev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="dateLabel" tickLine={false} style={{ fontSize: '10px', fill: '#94a3b8' }} />
+                <YAxis tickLine={false} axisLine={false} style={{ fontSize: '10px', fill: '#94a3b8' }} />
+                <Tooltip formatter={(value) => `R$ ${value.toLocaleString()}`} />
+                <Area type="monotone" dataKey="Receita" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorDailyRev)" dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {months.length === 0 ? (
         <div className="bg-white p-12 text-center rounded-2xl border border-slate-100">

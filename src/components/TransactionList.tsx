@@ -313,10 +313,9 @@ export default function TransactionList({
 
   // Competency manual revenues state
   const [competency, setCompetency] = useState('2026-05');
-  const [revProducts, setRevProducts] = useState<number>(0);
-  const [revServices, setRevServices] = useState<number>(0);
-  const [revOther, setRevOther] = useState<number>(0);
-  const [revShareholder, setRevShareholder] = useState<number>(0);
+  const [manualRevDate, setManualRevDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [manualRevValue, setManualRevValue] = useState<number>(0);
+  const [manualRevType, setManualRevType] = useState<string>('sales_products');
 
   // Column mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
@@ -966,19 +965,11 @@ export default function TransactionList({
         matchedPc = planoContas.find(pc => pc.name.trim().toLowerCase() === String(rawDescConta).trim().toLowerCase());
       }
 
+      const rawVal = record.valorOriginal !== undefined ? record.valorOriginal : Math.abs(record.value);
+      
       if (matchedPc) {
-        const mappedClassification = matchedPc.classificationId;
-        const isIncome = mappedClassification === 'sales_products' || 
-                         mappedClassification === 'sales_services' || 
-                         mappedClassification === 'shareholder_contribution' ||
-                         matchedPc.name.toLowerCase().includes('venda') || 
-                         matchedPc.name.toLowerCase().includes('receita') || 
-                         matchedPc.name.toLowerCase().includes('faturamento') || 
-                         matchedPc.name.toLowerCase().includes('entrada') ||
-                         matchedPc.name.toLowerCase().includes('aporte');
-                         
-        const rawVal = record.valorOriginal !== undefined ? record.valorOriginal : Math.abs(record.value);
-        const mathematicalValue = isIncome ? Math.abs(rawVal) : -Math.abs(rawVal);
+        // PER USER INSTRUCTION: ALL ITEMS IN PLANO DE CONTAS ARE EXPENSES
+        const mathematicalValue = -Math.abs(rawVal);
 
         return {
           ...record,
@@ -991,10 +982,13 @@ export default function TransactionList({
           value: mathematicalValue
         };
       }
+
+      // Default if not matched: treat as expense too
       return {
         ...record,
         batchId: currentBatchId,
-        batchName: currentBatchName
+        batchName: currentBatchName,
+        value: -Math.abs(rawVal)
       };
     });
 
@@ -1008,19 +1002,27 @@ export default function TransactionList({
 
   // 3. Manual Revenue submit action
   const handleSaveRevenue = () => {
-    if (!competency) {
-      setValidationError("A competência é um campo obrigatório.");
-      return;
-    }
-    onSaveManualRevenue(competency, revProducts, revServices, revOther, revShareholder);
-    setSuccessMsg(`Receitas e Aportes consolidados com sucesso para a competência ${competency}!`);
-    setTimeout(() => setSuccessMsg(null), 4000);
+    if (manualRevValue <= 0) return;
+    
+    const newTx: Transaction = {
+      id: `man-${Date.now()}`,
+      date: manualRevDate,
+      account: 'Caixa Geral (Manual)',
+      description: 'Lançamento de Receita Manual',
+      value: manualRevValue,
+      costType: 'Variável',
+      classification: manualRevType,
+      isManual: true
+    };
+
+    onAddTransaction(newTx);
+    setManualRevValue(0);
+    setSuccessMsg('Receita registrada com sucesso!');
+    setTimeout(() => setSuccessMsg(null), 3000);
   };
 
   // Re-evaluated Sum total for manual revenue block
-  const totalManualRevenue = useMemo(() => {
-    return revProducts + revServices + revOther + revShareholder;
-  }, [revProducts, revServices, revOther, revShareholder]);
+  // (Obsolete code removed)
 
   // Extract monthly periods dynamically from transactions
   const availableMonths = useMemo(() => {
@@ -1054,9 +1056,7 @@ export default function TransactionList({
   // Real-time calculation dashboard sidecar
   const realTimeKpi = useMemo(() => {
     let recBruta = 0; // Faturamento e aportes
-    let custVarias = 0;
-    let custFixos = 0;
-    let despOpex = 0;
+    let despTotal = 0; // Todas as saídas
     let activeTxsCount = 0;
 
     const breakdown = {
@@ -1066,14 +1066,15 @@ export default function TransactionList({
     };
 
     transactions.forEach(t => {
+      // Period filter
       if (realTimePeriod !== 'all') {
         const parts = t.date.split('-');
-        const monthYm = `${parts[0]}-${parts[1]}`;
-        if (monthYm !== realTimePeriod) return;
+        if (`${parts[0]}-${parts[1]}` !== realTimePeriod) return;
       }
 
       activeTxsCount++;
 
+      // STRICT REVENUE CHECK: Only these 3 are revenues. Anything else is expense.
       const isRevenue = t.classification === 'sales_products' || 
                         t.classification === 'sales_services' || 
                         t.classification === 'shareholder_contribution';
@@ -1084,15 +1085,7 @@ export default function TransactionList({
       if (isRevenue) {
         recBruta += valAbs;
       } else {
-        if (t.costType === 'Fixo') {
-          custFixos += valAbs;
-        } else if (t.costType === 'Variável') {
-          custVarias += valAbs;
-        }
-
-        if (t.classification.startsWith('opex_')) {
-          despOpex += valAbs;
-        }
+        despTotal += valAbs;
       }
 
       // Fill interactive breakdown layers
@@ -1103,13 +1096,11 @@ export default function TransactionList({
       }
     });
 
-    const resultadoParcialValue = recBruta - (custFixos + custVarias);
+    const resultadoParcialValue = recBruta - despTotal;
 
     return {
       receitaTotal: recBruta,
-      custosVariaveis: custVarias,
-      custosFixos: custFixos,
-      despesasOpex: despOpex,
+      despesaTotal: despTotal,
       resultadoParcial: resultadoParcialValue,
       totalCount: activeTxsCount,
       breakdown
@@ -1301,85 +1292,58 @@ export default function TransactionList({
               <Calendar className="h-4.5 w-4.5" />
             </div>
             <div>
-              <h3 className="text-xs uppercase font-extrabold text-slate-800 tracking-wider">Bloco 1 - Receitas Manuais</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Preenchimento direto de faturamento por competência</p>
+              <h3 className="text-xs uppercase font-extrabold text-slate-800 tracking-wider">Bloco 1 - Lançar Receita</h3>
+              <p className="text-[10px] text-slate-400 mt-0.5">Registro diário para análise de fluxo</p>
             </div>
           </div>
 
           <div className="space-y-3.5">
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Competência (Mês/Ano)</label>
+              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Dia do Recebimento</label>
               <input 
-                type="month"
+                type="date"
                 required
-                value={competency}
-                onChange={(e) => setCompetency(e.target.value)}
+                value={manualRevDate}
+                onChange={(e) => setManualRevDate(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-bold"
               />
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Receita de Produtos (R$)</label>
+              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Valor do Lançamento (R$)</label>
               <input 
                 type="number"
                 min="0"
                 placeholder="0,00"
-                value={revProducts || ''}
-                onChange={(e) => setRevProducts(Number(e.target.value) || 0)}
+                value={manualRevValue || ''}
+                onChange={(e) => setManualRevValue(Number(e.target.value) || 0)}
                 className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-mono"
               />
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Receita de Serviços (R$)</label>
-              <input 
-                type="number"
-                min="0"
-                placeholder="0,00"
-                value={revServices || ''}
-                onChange={(e) => setRevServices(Number(e.target.value) || 0)}
-                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Outras Receitas Operacionais (R$)</label>
-              <input 
-                type="number"
-                min="0"
-                placeholder="0,00"
-                value={revOther || ''}
-                onChange={(e) => setRevOther(Number(e.target.value) || 0)}
-                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Aportes dos Sócios (R$)</label>
-              <input 
-                type="number"
-                min="0"
-                placeholder="0,00"
-                value={revShareholder || ''}
-                onChange={(e) => setRevShareholder(Number(e.target.value) || 0)}
-                className="w-full bg-white border border-indigo-200 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-indigo-900 shadow-sm focus:outline-none font-mono font-bold"
-              />
-            </div>
-
-            <div className="bg-indigo-50/50 rounded-xl p-3 border border-indigo-100 flex items-center justify-between text-xs">
-              <span className="font-bold text-indigo-900">Receita Total Calculada</span>
-              <span className="font-mono font-black text-indigo-700 text-sm">
-                R$ {totalManualRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Natureza da Receita</label>
+              <select
+                value={manualRevType}
+                onChange={(e) => setManualRevType(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none"
+              >
+                <option value="sales_products">Venda de Produtos</option>
+                <option value="sales_services">Prestação de Serviços</option>
+                <option value="shareholder_contribution">Aporte de Sócios</option>
+              </select>
             </div>
 
             <button 
               type="button"
               onClick={handleSaveRevenue}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm shadow-indigo-600/10"
+              disabled={manualRevValue <= 0}
+              className={`w-full font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm ${
+                manualRevValue > 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/10' : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+              }`}
             >
               <Save className="h-4 w-4" />
-              Salvar Receita
+              Registrar Receita
             </button>
           </div>
         </div>
@@ -1580,54 +1544,41 @@ export default function TransactionList({
 
           <div className="min-h-[220px] max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
             {summaryLayer === 'kpi' && (
-              <div className="space-y-2.5 text-xs">
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Receita Total
+              <div className="space-y-4 text-xs">
+                <div className="flex justify-between items-center py-2.5 border-b border-slate-800/60 transition-colors hover:bg-slate-800/10 px-1 rounded">
+                  <span className="text-slate-400 font-medium flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span> Receita Total
                   </span>
-                  <span className="font-mono font-bold text-emerald-400">
+                  <span className="font-mono font-bold text-emerald-400 text-[13px]">
                     R$ {realTimeKpi.receitaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-indigo-400"></span> Custos Fixos
+                
+                <div className="flex justify-between items-center py-2.5 border-b border-slate-800/60 transition-colors hover:bg-slate-800/10 px-1 rounded">
+                  <span className="text-slate-400 font-medium flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"></span> Despesa Total
                   </span>
-                  <span className="font-mono font-semibold text-slate-200">
-                    R$ {realTimeKpi.custosFixos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-amber-400"></span> Custos Variáveis
-                  </span>
-                  <span className="font-mono font-semibold text-slate-200">
-                    R$ {realTimeKpi.custosVariaveis.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  <span className="font-mono font-bold text-rose-400 text-[13px]">
+                    R$ {realTimeKpi.despesaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-violet-400"></span> Despesas Operacionais
-                  </span>
-                  <span className="font-mono font-semibold text-slate-200">
-                    R$ {realTimeKpi.despesasOpex.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-800">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-slate-500 uppercase text-[9px] font-black tracking-widest">Resultado Parcial</span>
+
+                <div className="mt-6 pt-4 border-t border-slate-800">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-300 uppercase text-[10px] font-black tracking-widest">Saldo do Período</span>
                     <span className={`font-mono font-black text-sm ${realTimeKpi.resultadoParcial >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       R$ {realTimeKpi.resultadoParcial.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                     <div 
-                      className={`h-full transition-all ${realTimeKpi.resultadoParcial >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                      className={`h-full transition-all duration-700 ${realTimeKpi.resultadoParcial >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
                       style={{ 
                         width: `${Math.min(100, Math.max(10, (Math.abs(realTimeKpi.resultadoParcial) / (realTimeKpi.receitaTotal || 1)) * 100))}%` 
                       }}
                     />
                   </div>
+                  <p className="text-[9px] text-slate-500 mt-2 italic">* Todos os itens do plano de contas são considerados despesas nesta visão.</p>
                 </div>
               </div>
             )}
