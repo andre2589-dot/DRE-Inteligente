@@ -57,6 +57,9 @@ export default function ForecastModule({
   const [logValue, setLogValue] = useState<number>(0);
   const [logObservation, setLogObservation] = useState<string>('');
 
+  // Period filter for Histórico Real da Operação
+  const [selectedHistoricalMonths, setSelectedHistoricalMonths] = useState<string[]>([]);
+
   // Marketing & Investments (for target month feasibility analyzer)
   const [targetFaturamento, setTargetFaturamento] = useState<number>(0);
   const [growthPretensionPct, setGrowthPretensionPct] = useState<number>(10);
@@ -102,6 +105,13 @@ export default function ForecastModule({
     ).sort();
   }, [transactions]);
 
+  // Keep selectedHistoricalMonths initialized to all available months when months list changes
+  useEffect(() => {
+    if (months.length > 0 && selectedHistoricalMonths.length === 0) {
+      setSelectedHistoricalMonths(months);
+    }
+  }, [months]);
+
   // Helper inside Forecast to calculate category sums
   const getCatSum = (catId: string, month: string): number => {
     return transactions
@@ -112,11 +122,12 @@ export default function ForecastModule({
       .reduce((sum, t) => sum + (Number(t.value) || 0), 0);
   };
 
-  // Helper inside Forecast to calculate historical average
+  // Helper inside Forecast to calculate historical average (filtering by active selected period)
   const getAverageValue = (catId: string): number => {
-    if (months.length === 0) return 0;
+    const activeMonths = selectedHistoricalMonths.length > 0 ? selectedHistoricalMonths : months;
+    if (activeMonths.length === 0) return 0;
     let sumTotal = 0;
-    months.forEach(m => {
+    activeMonths.forEach(m => {
       if (catId === 'total_sales') {
         sumTotal += Math.abs(getCatSum('sales_products', m) + getCatSum('sales_services', m));
       } else if (catId === 'net_revenue') {
@@ -141,34 +152,59 @@ export default function ForecastModule({
         sumTotal += Math.abs(getCatSum(catId, m));
       }
     });
-    return sumTotal / months.length;
+    return sumTotal / activeMonths.length;
   };
 
-  const baselineSales = useMemo(() => getAverageValue('total_sales') || 150000, [months, transactions]);
-  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 10000, [months, transactions]);
-  const baselineCosts = useMemo(() => getAverageValue('costs') || 40000, [months, transactions]);
-  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 60000, [months, transactions]);
+  const baselineSales = useMemo(() => getAverageValue('total_sales') || 150000, [months, selectedHistoricalMonths, transactions]);
+  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 10000, [months, selectedHistoricalMonths, transactions]);
+  const baselineCosts = useMemo(() => getAverageValue('costs') || 40000, [months, selectedHistoricalMonths, transactions]);
+  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 60000, [months, selectedHistoricalMonths, transactions]);
+
+  // Helpers to fetch previous month and calculate historical/comparison values
+  const getPreviousMonthStr = (monthStr: string): string => {
+    const parts = monthStr.split('-');
+    if (parts.length === 2) {
+      let year = parseInt(parts[0]);
+      let month = parseInt(parts[1]);
+      month--;
+      if (month === 0) {
+        month = 12;
+        year--;
+      }
+      return `${year}-${month.toString().padStart(2, '0')}`;
+    }
+    return monthStr;
+  };
+
+  const previousMonthSales = useMemo(() => {
+    const prevMonth = getPreviousMonthStr(targetMonth);
+    return Math.abs(getCatSum('sales_products', prevMonth) + getCatSum('sales_services', prevMonth));
+  }, [targetMonth, transactions]);
+
+  const referenceSales = useMemo(() => {
+    return previousMonthSales > 0 ? previousMonthSales : baselineSales;
+  }, [previousMonthSales, baselineSales]);
 
   // Set default target faturamento on base calculation change or month select
   useEffect(() => {
-    if (targetFaturamento === 0 && baselineSales > 0) {
-      const calculatedInitialValue = Math.round(baselineSales * (1 + growthPretensionPct / 100));
+    if (referenceSales > 0) {
+      const calculatedInitialValue = Math.round(referenceSales * (1 + growthPretensionPct / 100));
       setTargetFaturamento(calculatedInitialValue);
     }
-  }, [baselineSales]);
+  }, [referenceSales]);
 
   // Sync Growth rate input change with target faturamento
   const handleGrowthPctChange = (pct: number) => {
     setGrowthPretensionPct(pct);
-    const calculatedVal = Math.round(baselineSales * (1 + pct / 100));
+    const calculatedVal = Math.round(referenceSales * (1 + pct / 100));
     setTargetFaturamento(calculatedVal);
   };
 
   // Sync Target faturamento input change with Growth rate
   const handleTargetFaturamentoChange = (val: number) => {
     setTargetFaturamento(val);
-    if (baselineSales > 0) {
-      const calculatedPct = ((val - baselineSales) / baselineSales) * 100;
+    if (referenceSales > 0) {
+      const calculatedPct = ((val - referenceSales) / referenceSales) * 100;
       setGrowthPretensionPct(Number(calculatedPct.toFixed(1)));
     }
   };
@@ -292,16 +328,16 @@ export default function ForecastModule({
 
   // Calculate FEASIBILITY ANALYZER output (Chances de atingimento da meta)
   const feasibilityAnalysis = useMemo(() => {
-    const requestedGrowth = targetFaturamento - baselineSales;
+    const requestedGrowth = targetFaturamento - referenceSales;
     
-    // 1. Meta conservadora (menor ou igual à média real do passado)
+    // 1. Meta conservadora (menor ou igual ao faturamento real do mês anterior)
     if (requestedGrowth <= 0) {
       return {
         score: 95,
         status: 'Conservadora & Segura',
         colorClass: 'text-emerald-600 bg-emerald-50 border-emerald-100',
         progressBarClass: 'bg-emerald-500',
-        advice: 'Sua meta de vendas está no nível ou abaixo da média histórica real de faturamento. É consideravelmente segura e não exige esforços adicionais significativos de captação.',
+        advice: 'Sua meta de vendas está no nível ou abaixo do faturamento real do mês anterior. É consideravelmente segura e não exige esforços adicionais significativos de captação.',
         marketingStatus: 'Excelente',
         operationalStatus: 'Adequado',
         recommendation: 'Aproveite este período estável para maximizar margem e construir caixa de segurança comercial.'
@@ -311,9 +347,9 @@ export default function ForecastModule({
     // 2. Crescimento positivo: Calcular viabilidade baseada em investimento comercial versus histórico
     // ROI ideal de Marketing estimado em 6x a 8x para ser de baixo risco (ou seja, custo de aquisição CAC médio de 12.5% a 16.6%)
     // Se investirem pouco marketing para muito crescimento projetado, a chance cai
-    const growthPercent = (requestedGrowth / baselineSales) * 100;
+    const growthPercent = (requestedGrowth / referenceSales) * 100;
 
-    // Marketing Investment Ratio (MIR): O quanto investirá em marketing em relação ao delta de receita pretendido
+    // Marketing Investment Ratio (MIR): O qual investirá em marketing em relação ao delta de receita pretendido
     const mir = requestedGrowth > 0 ? (marketingBudget / requestedGrowth) : 0;
     
     // Operational Investment Ratio (OIR): O quanto investirá em infra e contratação em relação ao delta
@@ -360,7 +396,7 @@ export default function ForecastModule({
       status = 'Planejamento Altamente Viável';
       colorClass = 'text-emerald-700 bg-emerald-50 border-emerald-200';
       progressBarClass = 'bg-emerald-500';
-      advice = `Meta realista fundamentada! O orçamento de marketing (MIR de ${(mir * 100).toFixed(1)}%) e os investimentos operacionais declarados dão pleno suporte e sustentação estatística necessária para expandir R$ ${requestedGrowth.toLocaleString('pt-BR')} no faturamento de forma controlada.`;
+      advice = `Meta realista fundamentada! O orçamento de marketing (MIR de ${(mir * 100).toFixed(1)}%) e os investimentos operacionais declarados dão pleno suporte e sustentação de caixa estatística para expandir R$ ${requestedGrowth.toLocaleString('pt-BR')} no faturamento em relação ao mês anterior (R$ ${Math.round(referenceSales).toLocaleString('pt-BR')}) de forma controlada.`;
       marketingStatus = 'Excelente (Suficiente)';
       operationalStatus = 'Excelente (Estruturado)';
       recommendation = 'Mantenha a execução comercial conforme planejado. Monitore semanalmente o CAC de cada canal de tráfego.';
@@ -370,7 +406,7 @@ export default function ForecastModule({
       progressBarClass = 'bg-amber-500';
       marketingStatus = mir >= 0.08 ? 'Razoável' : 'Abaixo do Recomendado';
       operationalStatus = oir >= 0.05 ? 'Equilibrado' : 'Próximo ao Gargalo';
-      advice = `Sua meta é viável, porém impõe pressão. O crescimento almejado (${growthPercent.toFixed(1)}%) exigirá dedicação pesada da equipe. O aporte em publicidade gerará tráfego, mas o orçamento operacional está levemente subdimensionado para a entrega física técnica.`;
+      advice = `Sua meta é viável para crescimento em relação ao mês anterior (+${growthPercent.toFixed(1)}%), porém impõe pressão. O crescimento almejado exigirá dedicação pesada da equipe. O aporte em publicidade gerará tráfego, mas o orçamento operacional está levemente subdimensionado para a entrega física técnica.`;
       
       const suggestedMkt = requestedGrowth * 0.15;
       const suggestedOp = requestedGrowth * 0.08;
@@ -381,10 +417,10 @@ export default function ForecastModule({
       progressBarClass = 'bg-red-500';
       marketingStatus = 'Crítico / Insuficiente';
       operationalStatus = 'Gargalo Operacional Crítico';
-      advice = `Atenção: Esta meta possui forte risco de frustração ("meta imbatível"). Exigir um crescimento abrupto de ${growthPercent.toFixed(1)}% sem suporte de aquisição pagos (Marketing de ${(mir*100).toFixed(1)}% do crescimento) ou estrutura técnica (investimento op.) criará sobrecarga sem gerar novas vendas reais no curto prazo.`;
+      advice = `Atenção: Esta meta possui forte risco de frustração. Exigir um crescimento abrupto de +${growthPercent.toFixed(1)}% em relação ao mês anterior sem suporte suficiente de aquisição comercial paga (Marketing de ${(mir*100).toFixed(1)}% do crescimento) criará gargalos ou sobrecargas.`;
       
       const suggestedMinMkt = requestedGrowth * 0.16;
-      recommendation = `Sugerimos recalcular os objetivos comerciais. Caso mantenha esse faturamento agressivo, invista ativamente pelo menos R$ ${Math.round(suggestedMinMkt).toLocaleString('pt-BR')} em canais de atração paga ou dilua essa expansão em um plano de 3 a 4 meses.`;
+      recommendation = `Sugerimos recalcular os objetivos comerciais com base no faturamento do mês anterior (R$ ${Math.round(referenceSales).toLocaleString('pt-BR')}). Caso mantenha esse faturamento agressivo, invista ativamente pelo menos R$ ${Math.round(suggestedMinMkt).toLocaleString('pt-BR')} em canais de atração paga ou dilua essa expansão em um plano de 2 a 3 meses.`;
     }
 
     return {
@@ -399,7 +435,7 @@ export default function ForecastModule({
       requestedGrowth,
       growthPercent
     };
-  }, [targetFaturamento, marketingBudget, operationalInvestment, baselineSales]);
+  }, [targetFaturamento, marketingBudget, operationalInvestment, referenceSales]);
 
   // Action: Apply generated goal values directly into App State
   const handleApplyGoals = () => {
@@ -556,6 +592,74 @@ export default function ForecastModule({
                 </div>
               </div>
 
+              {/* Filtro de Período Multi-mês */}
+              <div className="space-y-2 border-b border-slate-150 pb-3">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <span>Filtrar Período de Análise</span>
+                  <div className="flex gap-2">
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedHistoricalMonths(months)}
+                      className="text-indigo-600 hover:text-indigo-800 transition-colors uppercase text-[9px] font-black cursor-pointer bg-none border-none p-0"
+                    >
+                      Todos
+                    </button>
+                    <span className="text-slate-250 font-normal">|</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedHistoricalMonths([])}
+                      className="text-slate-500 hover:text-slate-800 transition-colors uppercase text-[9px] font-black cursor-pointer bg-none border-none p-0"
+                    >
+                      Nenhum
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 max-h-[110px] overflow-y-auto pr-1">
+                  {months.map((m) => {
+                    const isSelected = selectedHistoricalMonths.includes(m);
+                    const label = (() => {
+                      const parts = m.split('-');
+                      if (parts.length === 2) {
+                        const monthsMap: { [key: string]: string } = {
+                          '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr',
+                          '05': 'Mai', '06': 'Jun', '07': 'Jul', '08': 'Ago',
+                          '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez'
+                        };
+                        return `${monthsMap[parts[1]]}/${parts[0].substring(2)}`;
+                      }
+                      return m;
+                    })();
+
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedHistoricalMonths(prev => prev.filter(x => x !== m));
+                          } else {
+                            setSelectedHistoricalMonths(prev => [...prev, m].sort());
+                          }
+                        }}
+                        className={`text-[9.5px] font-extrabold px-1.5 py-1 rounded border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs hover:bg-indigo-750'
+                            : 'bg-slate-50 text-slate-500 border-slate-205 hover:bg-slate-100 hover:text-slate-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedHistoricalMonths.length === 0 && (
+                  <p className="text-[10px] text-amber-600 font-bold italic">
+                    Nenhum mês selecionado. Utilizando histórico completo por padrão.
+                  </p>
+                )}
+              </div>
+
               <div className="space-y-3.5">
                 <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
                   <div>
@@ -659,7 +763,18 @@ export default function ForecastModule({
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs">
                       <span className="font-bold text-slate-600">Meta Faturamento Bruto (R$)</span>
-                      <span className="text-slate-400 text-[10px] font-medium font-mono">Média: R$ {Math.round(baselineSales).toLocaleString('pt-BR')}</span>
+                      <span className="text-slate-400 text-[10px] font-medium font-mono">
+                        Mês Anterior ({(() => {
+                          const prevMonth = getPreviousMonthStr(targetMonth);
+                          const parts = prevMonth.split('-');
+                          const monthsMap: { [key: string]: string } = {
+                            '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr',
+                            '05': 'Mai', '06': 'Jun', '07': 'Jul', '08': 'Ago',
+                            '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez'
+                          };
+                          return `${monthsMap[parts[1]] || parts[1]}/${parts[0].substring(2)}`;
+                        })()}): R$ {Math.round(referenceSales).toLocaleString('pt-BR')}
+                      </span>
                     </div>
                     <div className="relative">
                       <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold font-mono">R$</span>
@@ -690,7 +805,7 @@ export default function ForecastModule({
                     />
                     <div className="flex justify-between text-[9px] text-slate-450 font-bold font-mono">
                       <span>-10%</span>
-                      <span>Média (+0%)</span>
+                      <span>Mês Anterior (0%)</span>
                       <span>Desafiadora (+25%)</span>
                       <span>Imbatível (+50%)</span>
                     </div>
