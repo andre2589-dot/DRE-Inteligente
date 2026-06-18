@@ -751,6 +751,9 @@ export default function App() {
               monthConfigs={monthConfigs}
               onSaveCategoryGoal={handleSaveCategoryGoal}
               onSaveMonthConfig={handleSaveMonthConfig}
+              onAddTransaction={handleAddTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+              onUpdateTransaction={handleUpdateTransaction}
             />
           )}
 

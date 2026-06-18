@@ -30,6 +30,9 @@ interface ForecastModuleProps {
   monthConfigs: MonthConfig[];
   onSaveCategoryGoal: (categoryId: string, month: string, targetValue: number) => void;
   onSaveMonthConfig: (month: string, totalWorkingDays: number, elapsedWorkingDays: number) => void;
+  onAddTransaction?: (tx: Transaction) => void;
+  onDeleteTransaction?: (id: string) => void;
+  onUpdateTransaction?: (tx: Transaction) => void;
 }
 
 export default function ForecastModule({ 
@@ -38,7 +41,10 @@ export default function ForecastModule({
   categoryGoals, 
   monthConfigs, 
   onSaveCategoryGoal, 
-  onSaveMonthConfig 
+  onSaveMonthConfig,
+  onAddTransaction,
+  onDeleteTransaction,
+  onUpdateTransaction
 }: ForecastModuleProps) {
   // Top-level module tabs
   const [activeSubTab, setActiveSubTab] = useState<'goals_planner' | 'long_term_forecast'>('goals_planner');
@@ -46,6 +52,11 @@ export default function ForecastModule({
   // Interactive configurations for historical analysis & target month
   const [targetMonth, setTargetMonth] = useState('2026-06');
   
+  // Daily Vendas states
+  const [logDay, setLogDay] = useState<number>(1);
+  const [logValue, setLogValue] = useState<number>(0);
+  const [logObservation, setLogObservation] = useState<string>('');
+
   // Marketing & Investments (for target month feasibility analyzer)
   const [targetFaturamento, setTargetFaturamento] = useState<number>(0);
   const [growthPretensionPct, setGrowthPretensionPct] = useState<number>(10);
@@ -53,6 +64,21 @@ export default function ForecastModule({
   const [operationalInvestment, setOperationalInvestment] = useState<number>(3000);
   const [workingDays, setWorkingDays] = useState<number>(22);
   const [successApplyMsg, setSuccessApplyMsg] = useState<string | null>(null);
+
+  // Synchronize dynamic input as selected day, month, or transactions change
+  useEffect(() => {
+    const dayStr = logDay.toString().padStart(2, '0');
+    const txId = `daily-sale-${targetMonth}-${dayStr}`;
+    const tx = transactions.find(t => t.id === txId);
+    if (tx) {
+      setLogValue(Math.abs(tx.value));
+      const parts = tx.description.split(' | Obs: ');
+      setLogObservation(parts.length > 1 ? parts[1] : '');
+    } else {
+      setLogValue(0);
+      setLogObservation('');
+    }
+  }, [logDay, targetMonth, transactions]);
 
   // Existing compound forecast parameters
   const [horizon, setHorizon] = useState<12 | 24 | 36>(12);
@@ -144,6 +170,123 @@ export default function ForecastModule({
     if (baselineSales > 0) {
       const calculatedPct = ((val - baselineSales) / baselineSales) * 100;
       setGrowthPretensionPct(Number(calculatedPct.toFixed(1)));
+    }
+  };
+
+  const daysInMonth = useMemo(() => {
+    const parts = targetMonth.split('-');
+    if (parts.length === 2) {
+      const year = parseInt(parts[0]);
+      const month = parseInt(parts[1]);
+      return new Date(year, month, 0).getDate();
+    }
+    return 30; // fallback
+  }, [targetMonth]);
+
+  const dailyRegisters = useMemo(() => {
+    const list = [];
+    const dailyTarget = targetFaturamento / (workingDays || 1);
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayStr = d.toString().padStart(2, '0');
+      const txId = `daily-sale-${targetMonth}-${dayStr}`;
+      const tx = transactions.find(t => t.id === txId);
+      
+      const value = tx ? Math.abs(tx.value) : 0;
+      const exactPct = dailyTarget > 0 ? (value / dailyTarget) * 100 : 0;
+
+      let obs = '';
+      if (tx) {
+        const parts = tx.description.split(' | Obs: ');
+        obs = parts.length > 1 ? parts[1] : '';
+      }
+
+      // Day of week calculation
+      const parts = targetMonth.split('-');
+      const weekdayName = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, d)
+        .toLocaleDateString('pt-BR', { weekday: 'short' });
+
+      list.push({
+        day: d,
+        dayStr,
+        weekdayName,
+        value,
+        exactPct,
+        observation: obs,
+        exists: !!tx,
+      });
+    }
+    return list;
+  }, [daysInMonth, targetMonth, transactions, targetFaturamento, workingDays]);
+
+  const totalRegisteredDaily = useMemo(() => {
+    return dailyRegisters.reduce((sum, item) => sum + item.value, 0);
+  }, [dailyRegisters]);
+
+  const progressTotalPct = useMemo(() => {
+    return targetFaturamento > 0 ? (totalRegisteredDaily / targetFaturamento) * 100 : 0;
+  }, [totalRegisteredDaily, targetFaturamento]);
+
+  const registeredDaysCount = useMemo(() => {
+    return dailyRegisters.filter(item => item.exists).length;
+  }, [dailyRegisters]);
+
+  const handleSaveDailySaleLocal = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!onAddTransaction || !onDeleteTransaction || !onUpdateTransaction) {
+      alert("Operações de transação não configuradas no componente.");
+      return;
+    }
+
+    const dayStr = logDay.toString().padStart(2, '0');
+    const dateStr = `${targetMonth}-${dayStr}`;
+    const txId = `daily-sale-${targetMonth}-${dayStr}`;
+
+    const existingTx = transactions.find(t => t.id === txId);
+
+    if (logValue <= 0) {
+      if (existingTx) {
+        onDeleteTransaction(existingTx.id);
+        setSuccessApplyMsg(`Lançamento do dia ${dayStr} removido.`);
+        setTimeout(() => setSuccessApplyMsg(null), 4000);
+      }
+      return;
+    }
+
+    const finalDescription = `Venda Diária - Dia ${dayStr}${logObservation.trim() ? ` | Obs: ${logObservation.trim()}` : ''}`;
+
+    const newTx: Transaction = {
+      id: txId,
+      date: dateStr,
+      account: 'Caixa de Vendas Diárias',
+      description: finalDescription,
+      classification: 'sales_products',
+      costType: 'N/A',
+      value: logValue,
+      isManual: true,
+      batchId: `daily_sales_${targetMonth}`,
+      batchName: `Vendas Diárias - ${targetMonth}`
+    };
+
+    if (existingTx) {
+      onUpdateTransaction(newTx);
+    } else {
+      onAddTransaction(newTx);
+    }
+
+    setSuccessApplyMsg(`Venda do Dia ${dayStr} registrada: R$ ${logValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+    setTimeout(() => setSuccessApplyMsg(null), 4500);
+  };
+
+  const handleDeleteDailySaleDirect = (dayNum: number) => {
+    if (!onDeleteTransaction) return;
+    const dayStr = dayNum.toString().padStart(2, '0');
+    const txId = `daily-sale-${targetMonth}-${dayStr}`;
+    const existingTx = transactions.find(t => t.id === txId);
+    if (existingTx) {
+      onDeleteTransaction(existingTx.id);
+      setSuccessApplyMsg(`Lançamento do dia ${dayStr} removido.`);
+      setTimeout(() => setSuccessApplyMsg(null), 4000);
     }
   };
 
@@ -396,7 +539,8 @@ export default function ForecastModule({
       </div>
 
       {activeSubTab === 'goals_planner' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <>
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
           
           {/* COLUNA ESQUERDA: HISTÓRICO DA OPERAÇÃO (BASE REALÍSTICA) */}
           <div className="xl:col-span-4 flex flex-col gap-6">
@@ -563,6 +707,17 @@ export default function ForecastModule({
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-mono font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
+
+                  {/* Inform required daily sales meta */}
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3.5 space-y-1 mt-2.5 shadow-2xs">
+                    <span className="text-[10px] uppercase font-bold text-indigo-500 block">Meta Diária Requerida para Vendas</span>
+                    <span className="text-base font-black text-indigo-750 font-mono block">
+                      R$ {(targetFaturamento / (workingDays || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-[9px] text-indigo-400 block font-medium">
+                      Estipulado sobre {workingDays} dias úteis comerciais estimados no período selecionado.
+                    </span>
+                  </div>
                 </div>
 
                 {/* ORÇAMENTO SUPORTE */}
@@ -701,6 +856,203 @@ export default function ForecastModule({
           </div>
 
         </div>
+
+        {/* --- DYNAMIC DAILY SALES LOG FOR DETAILED TRACKING --- */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-6 mt-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-extrabold uppercase text-slate-800 tracking-wider flex items-center gap-3 font-sans">
+                <Target className="h-4.5 w-4.5 text-indigo-600" /> Planejamento de Metas & Projeção Realista
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 font-sans">
+                Registre as vendas realizadas dia a dia para correlacionar exatamente com as metas e o DRE de faturamento do período de <span className="font-bold text-slate-650">
+                  {(() => {
+                    const parts = targetMonth.split('-');
+                    if (parts.length === 2) {
+                      const monthsMap: { [key: string]: string } = {
+                        '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março', '04': 'Abril',
+                        '05': 'Maio', '06': 'Junho', '07': 'Julho', '08': 'Agosto',
+                        '09': 'Setembro', '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
+                      };
+                      return `${monthsMap[parts[1]]} de ${parts[0]}`;
+                    }
+                    return targetMonth;
+                  })()}
+                </span>
+              </p>
+            </div>
+            
+            {/* Quick stats badges */}
+            <div className="flex flex-wrap gap-2.5 font-sans">
+              <div className="bg-slate-50 border border-slate-150 px-3 py-1.5 rounded-xl text-center shadow-2xs">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block font-sans">Registrado no Mês</span>
+                <span className="text-xs font-black text-slate-800 font-mono mt-0.5 block">
+                  R$ {totalRegisteredDaily.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl text-center shadow-2xs">
+                <span className="text-[9px] uppercase font-bold text-indigo-500 block font-sans">Atingimento Geral</span>
+                <span className="text-xs font-black text-indigo-700 font-mono mt-0.5 block">
+                  {progressTotalPct.toFixed(1)}% <span className="text-[9px] font-bold text-indigo-550 shrink-0">({progressTotalPct >= 100 ? 'Meta Atingida! 🎉' : 'do faturamento'})</span>
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-150 px-3 py-1.5 rounded-xl text-center shadow-2xs">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block font-sans">Dias Lançados</span>
+                <span className="text-xs font-black text-slate-700 font-mono mt-0.5 block">
+                  {registeredDaysCount} de {daysInMonth} dias
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
+            {/* Form Column: 4 cols */}
+            <div className="lg:col-span-4 bg-slate-50/50 border border-slate-150 rounded-2xl p-5 space-y-4">
+              <span className="text-[10px] uppercase font-black text-indigo-600 tracking-widest block border-b pb-1 font-sans">
+                Lançar Nova Venda Diária
+              </span>
+              
+              <form onSubmit={handleSaveDailySaleLocal} className="space-y-4 font-sans">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-450 block uppercase">Escolher o Dia</label>
+                  <select
+                    value={logDay}
+                    onChange={(e) => setLogDay(Number(e.target.value))}
+                    className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs font-mono font-bold text-slate-705 focus:ring-1 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                  >
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        Dia {d.toString().padStart(2, '0')} ({new Date(parseInt(targetMonth.split('-')[0]), parseInt(targetMonth.split('-')[1]) - 1, d).toLocaleDateString('pt-BR', { weekday: 'short' })})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-450 block uppercase">Valor Vendido no Dia (R$)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-xs font-mono font-bold text-slate-400 select-none">R$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0,00"
+                      value={logValue || ''}
+                      onChange={(e) => setLogValue(Number(e.target.value) || 0)}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-450 block uppercase">Observação / Nota do Dia (Livre)</label>
+                  <textarea
+                    placeholder="Ex: Promoção em itens com prazo de validade curta."
+                    value={logObservation}
+                    onChange={(e) => setLogObservation(e.target.value)}
+                    rows={2}
+                    className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-700 focus:ring-1 focus:ring-indigo-500 focus:outline-none placeholder:text-slate-300"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/10"
+                >
+                  <Check className="h-4 w-4" />
+                  {dailyRegisters.find(item => item.day === logDay)?.exists ? 'Atualizar Registro' : 'Salvar Registro de Venda'}
+                </button>
+              </form>
+            </div>
+
+            {/* List Table Column: 8 cols */}
+            <div className="lg:col-span-8 flex flex-col gap-3 font-sans">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-1 gap-2">
+                <span className="text-[10px] uppercase font-black text-indigo-600 tracking-widest block border-b font-sans">
+                  Planilha de Fechamentos Diários
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold font-mono">
+                  Meta Diária Base: R$ {(targetFaturamento / (workingDays || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (com {workingDays} dias úteis)
+                </span>
+              </div>
+
+              <div className="border border-slate-150 rounded-2xl overflow-hidden max-h-[380px] overflow-y-auto">
+                <table className="w-full text-left border-collapse bg-white">
+                  <thead className="bg-slate-50 border-b border-slate-150 text-[10px] uppercase tracking-wider text-slate-500 font-black font-sans sticky top-0 z-10">
+                    <tr>
+                      <th className="py-2 px-3 text-center w-16">Dia</th>
+                      <th className="py-2 px-3 text-right w-36">Valor Vendido</th>
+                      <th className="py-2 px-3 text-center w-48">% Atingido</th>
+                      <th className="py-2 px-3 text-left">Obs do Dia</th>
+                      <th className="py-2 px-3 text-center w-24">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {dailyRegisters.map((row) => {
+                      const isPassed = row.exactPct >= 100;
+                      const hasValue = row.value > 0;
+                      return (
+                        <tr 
+                          key={row.day} 
+                          className={`hover:bg-slate-55 transition-colors ${row.exists ? 'bg-indigo-50/15' : ''}`}
+                        >
+                          <td className="py-1.5 px-3 text-center font-bold font-mono text-slate-700">
+                            {row.dayStr} <span className="text-[9px] text-slate-400 block font-sans lowercase font-normal">{row.weekdayName}</span>
+                          </td>
+                          <td className="py-1.5 px-3 text-right font-bold font-mono text-slate-800">
+                            {hasValue ? `R$ ${row.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'R$ 0,00'}
+                          </td>
+                          <td className="py-1.5 px-3 text-center">
+                            {hasValue ? (
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                                isPassed 
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}>
+                                {row.exactPct.toFixed(0)}% DA META {isPassed ? '(PASSOU)' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-slate-350 font-medium font-mono">-</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-3 text-left font-medium text-slate-500 italic max-w-xs truncate" title={row.observation || undefined}>
+                            {row.observation || '-'}
+                          </td>
+                          <td className="py-1.5 px-3 text-center">
+                            <div className="flex justify-center items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setLogDay(row.day);
+                                }}
+                                className="text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 font-extrabold text-[10px] uppercase py-1 px-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Editar lançamento"
+                              >
+                                Editar
+                              </button>
+                              {row.exists && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDailySaleDirect(row.day)}
+                                  className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 font-extrabold text-[10px] uppercase py-1 px-1.5 rounded-lg transition-colors cursor-pointer"
+                                  title="Remover lançamento"
+                                >
+                                  Limpar
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        </>
       )}
 
       {activeSubTab === 'long_term_forecast' && (

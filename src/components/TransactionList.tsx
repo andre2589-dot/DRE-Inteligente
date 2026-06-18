@@ -1286,69 +1286,7 @@ export default function TransactionList({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* BLOCO 1 - RECEITAS */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600">
-              <Calendar className="h-4.5 w-4.5" />
-            </div>
-            <div>
-              <h3 className="text-xs uppercase font-extrabold text-slate-800 tracking-wider">Bloco 1 - Lançar Receita</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Registro diário para análise de fluxo</p>
-            </div>
-          </div>
-
-          <div className="space-y-3.5">
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Dia do Recebimento</label>
-              <input 
-                type="date"
-                required
-                value={manualRevDate}
-                onChange={(e) => setManualRevDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-bold"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Valor do Lançamento (R$)</label>
-              <input 
-                type="number"
-                min="0"
-                placeholder="0,00"
-                value={manualRevValue || ''}
-                onChange={(e) => setManualRevValue(Number(e.target.value) || 0)}
-                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Natureza da Receita</label>
-              <select
-                value={manualRevType}
-                onChange={(e) => setManualRevType(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-150 rounded-lg py-2 px-3 text-xs focus:ring-1 focus:ring-indigo-500 text-slate-800 focus:outline-none"
-              >
-                <option value="sales_products">Venda de Produtos</option>
-                <option value="sales_services">Prestação de Serviços</option>
-                <option value="shareholder_contribution">Aporte de Sócios</option>
-              </select>
-            </div>
-
-            <button 
-              type="button"
-              onClick={handleSaveRevenue}
-              disabled={manualRevValue <= 0}
-              className={`w-full font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm ${
-                manualRevValue > 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/10' : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-              }`}
-            >
-              <Save className="h-4 w-4" />
-              Registrar Receita
-            </button>
-          </div>
-        </div>
-
+          
         {/* BLOCO 2 - IMPORTAÇÃO DE DESPESAS */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
