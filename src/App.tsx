@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Company, Transaction, Rule, DreCategory, PlanoContasItem } from './types';
+import { Company, Transaction, Rule, DreCategory, PlanoContasItem, CategoryGoal, MonthConfig } from './types';
 import { 
   DEFAULT_COMPANIES, 
   DRE_CATEGORIES, 
@@ -56,8 +56,47 @@ export default function App() {
   // Plano de Contas State
   const [planoContas, setPlanoContas] = useState<PlanoContasItem[]>([]);
 
+  // Category Goals (Metas) and MonthConfigs (Working days & business pacing)
+  const [categoryGoals, setCategoryGoals] = useState<CategoryGoal[]>([]);
+  const [monthConfigs, setMonthConfigs] = useState<MonthConfig[]>([]);
+
   // Tab control state
   const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai'>('dre');
+
+  // Load category goals and month configs based on active company
+  useEffect(() => {
+    try {
+      const savedGoals = localStorage.getItem(`category_goals_${activeCompany.id}`);
+      setCategoryGoals(savedGoals ? JSON.parse(savedGoals) : []);
+    } catch {
+      setCategoryGoals([]);
+    }
+
+    try {
+      const savedConfigs = localStorage.getItem(`month_configs_${activeCompany.id}`);
+      setMonthConfigs(savedConfigs ? JSON.parse(savedConfigs) : []);
+    } catch {
+      setMonthConfigs([]);
+    }
+  }, [activeCompany.id]);
+
+  const handleSaveCategoryGoal = (categoryId: string, month: string, targetValue: number) => {
+    setCategoryGoals(prev => {
+      const filtered = prev.filter(g => !(g.categoryId === categoryId && g.month === month));
+      const newVal = [...filtered, { categoryId, month, targetValue }];
+      localStorage.setItem(`category_goals_${activeCompany.id}`, JSON.stringify(newVal));
+      return newVal;
+    });
+  };
+
+  const handleSaveMonthConfig = (month: string, totalWorkingDays: number, elapsedWorkingDays: number) => {
+    setMonthConfigs(prev => {
+      const filtered = prev.filter(c => c.month !== month);
+      const newVal = [...filtered, { month, totalWorkingDays, elapsedWorkingDays }];
+      localStorage.setItem(`month_configs_${activeCompany.id}`, JSON.stringify(newVal));
+      return newVal;
+    });
+  };
 
   // Load companies list from API database
   const loadCompanies = async () => {
@@ -662,6 +701,10 @@ export default function App() {
                 categories={categories}
                 onUpdateTransactionCategory={handleUpdateTransactionCategory}
                 onUpdateCategoryName={handleUpdateCategoryName}
+                categoryGoals={categoryGoals}
+                monthConfigs={monthConfigs}
+                onSaveCategoryGoal={handleSaveCategoryGoal}
+                onSaveMonthConfig={handleSaveMonthConfig}
               />
             </div>
           )}

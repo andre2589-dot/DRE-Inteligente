@@ -78,3 +78,15 @@ export interface AiConversationItem {
   answer: string;
   created_at: string;
 }
+
+export interface CategoryGoal {
+  categoryId: string;
+  month: string; // YYYY-MM
+  targetValue: number;
+}
+
+export interface MonthConfig {
+  month: string;
+  totalWorkingDays: number;
+  elapsedWorkingDays: number;
+}
