@@ -1,39 +1,82 @@
-import React, { useState } from 'react';
-import { Transaction, DreCategory, ForecastParams } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Transaction, DreCategory, CategoryGoal, MonthConfig } from '../types';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { Settings, TrendingUp, Users, Sparkles, Sliders, Play } from 'lucide-react';
+import { 
+  Settings, 
+  TrendingUp, 
+  Users, 
+  Sparkles, 
+  Sliders, 
+  Play, 
+  Target, 
+  Award, 
+  Calendar, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Percent, 
+  Landmark, 
+  Info, 
+  Zap, 
+  TrendingDown, 
+  ArrowRight,
+  ShieldCheck,
+  Check
+} from 'lucide-react';
 
 interface ForecastModuleProps {
   transactions: Transaction[];
   categories: DreCategory[];
+  categoryGoals: CategoryGoal[];
+  monthConfigs: MonthConfig[];
+  onSaveCategoryGoal: (categoryId: string, month: string, targetValue: number) => void;
+  onSaveMonthConfig: (month: string, totalWorkingDays: number, elapsedWorkingDays: number) => void;
 }
 
-export default function ForecastModule({ transactions, categories }: ForecastModuleProps) {
+export default function ForecastModule({ 
+  transactions, 
+  categories, 
+  categoryGoals, 
+  monthConfigs, 
+  onSaveCategoryGoal, 
+  onSaveMonthConfig 
+}: ForecastModuleProps) {
+  // Top-level module tabs
+  const [activeSubTab, setActiveSubTab] = useState<'goals_planner' | 'long_term_forecast'>('goals_planner');
+
+  // Interactive configurations for historical analysis & target month
+  const [targetMonth, setTargetMonth] = useState('2026-06');
+  
+  // Marketing & Investments (for target month feasibility analyzer)
+  const [targetFaturamento, setTargetFaturamento] = useState<number>(0);
+  const [growthPretensionPct, setGrowthPretensionPct] = useState<number>(10);
+  const [marketingBudget, setMarketingBudget] = useState<number>(4500);
+  const [operationalInvestment, setOperationalInvestment] = useState<number>(3000);
+  const [workingDays, setWorkingDays] = useState<number>(22);
+  const [successApplyMsg, setSuccessApplyMsg] = useState<string | null>(null);
+
+  // Existing compound forecast parameters
   const [horizon, setHorizon] = useState<12 | 24 | 36>(12);
   const [scenario, setScenario] = useState<'conservative' | 'normal' | 'aggressive'>('normal');
-  const [params, setParams] = useState<ForecastParams>({
+  const [forecastParams, setForecastParams] = useState({
     growthRate: 8,
     expenseGrowthRate: 3,
     hiringImpact: 8500,
     marketingBoost: 1.5
   });
 
-  // Scenario multipliers
-  const scenarioMultiplier = {
-    conservative: 0.7,
-    normal: 1,
-    aggressive: 1.4
-  };
+  // Unique list of months present in transactions history
+  const months = useMemo(() => {
+    return Array.from(
+      new Set(
+        transactions.map(t => {
+          const parts = t.date.split('-');
+          return `${parts[0]}-${parts[1]}`;
+        })
+      )
+    ).sort();
+  }, [transactions]);
 
-  const months = Array.from(
-    new Set(
-      transactions.map(t => {
-        const parts = t.date.split('-');
-        return `${parts[0]}-${parts[1]}`;
-      })
-    )
-  ).sort();
-
+  // Helper inside Forecast to calculate category sums
   const getCatSum = (catId: string, month: string): number => {
     return transactions
       .filter(t => {
@@ -43,16 +86,15 @@ export default function ForecastModule({ transactions, categories }: ForecastMod
       .reduce((sum, t) => sum + (Number(t.value) || 0), 0);
   };
 
-  // Compile baseline (average month)
+  // Helper inside Forecast to calculate historical average
   const getAverageValue = (catId: string): number => {
     if (months.length === 0) return 0;
     let sumTotal = 0;
     months.forEach(m => {
-      // For formula resolution
       if (catId === 'total_sales') {
-        sumTotal += getCatSum('sales_products', m) + getCatSum('sales_services', m);
+        sumTotal += Math.abs(getCatSum('sales_products', m) + getCatSum('sales_services', m));
       } else if (catId === 'net_revenue') {
-        const sales = getCatSum('sales_products', m) + getCatSum('sales_services', m);
+        const sales = Math.abs(getCatSum('sales_products', m) + getCatSum('sales_services', m));
         const deductions = Math.abs(
           getCatSum('deduction_icms', m) + getCatSum('deduction_pis', m) + getCatSum('deduction_cofins', m) + getCatSum('deduction_iss', m)
         );
@@ -76,233 +118,743 @@ export default function ForecastModule({ transactions, categories }: ForecastMod
     return sumTotal / months.length;
   };
 
-  const baselineSales = getAverageValue('total_sales') || 150000;
-  const baselineDeductions = getAverageValue('deductions') || 10000;
-  const baselineCosts = getAverageValue('costs') || 40000;
-  const baselineOpex = getAverageValue('operating_expenses') || 60000;
+  const baselineSales = useMemo(() => getAverageValue('total_sales') || 150000, [months, transactions]);
+  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 10000, [months, transactions]);
+  const baselineCosts = useMemo(() => getAverageValue('costs') || 40000, [months, transactions]);
+  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 60000, [months, transactions]);
 
-  // Generate future simulation coordinates
-  const projectionTimeline = [];
-  const latestMonthStr = months[months.length - 1] || '2026-05';
-  const lastDate = new Date(latestMonthStr + '-15');
+  // Set default target faturamento on base calculation change or month select
+  useEffect(() => {
+    if (targetFaturamento === 0 && baselineSales > 0) {
+      const calculatedInitialValue = Math.round(baselineSales * (1 + growthPretensionPct / 100));
+      setTargetFaturamento(calculatedInitialValue);
+    }
+  }, [baselineSales]);
 
-  for (let step = 1; step <= horizon; step++) {
-    const futureDate = new Date(lastDate);
-    futureDate.setMonth(lastDate.getMonth() + step);
-    const label = futureDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+  // Sync Growth rate input change with target faturamento
+  const handleGrowthPctChange = (pct: number) => {
+    setGrowthPretensionPct(pct);
+    const calculatedVal = Math.round(baselineSales * (1 + pct / 100));
+    setTargetFaturamento(calculatedVal);
+  };
 
-    // Compound Growth calculations with scenario multiplier
-    const effectiveGrowth = params.growthRate * scenarioMultiplier[scenario];
-    const compoundRevenueFactor = Math.pow(1 + (effectiveGrowth + (params.marketingBoost * 0.5)) / 100, step);
-    const compoundOpexFactor = Math.pow(1 + params.expenseGrowthRate / 100, step);
+  // Sync Target faturamento input change with Growth rate
+  const handleTargetFaturamentoChange = (val: number) => {
+    setTargetFaturamento(val);
+    if (baselineSales > 0) {
+      const calculatedPct = ((val - baselineSales) / baselineSales) * 100;
+      setGrowthPretensionPct(Number(calculatedPct.toFixed(1)));
+    }
+  };
 
-    const projectedRevenue = Math.round(baselineSales * compoundRevenueFactor);
-    const projectedDeductions = Math.round(baselineDeductions * compoundRevenueFactor);
-    const projectedCosts = Math.round(baselineCosts * compoundRevenueFactor * 0.95);
-    const projectedOpex = Math.round(baselineOpex * compoundOpexFactor + (params.hiringImpact * (1 + (step / 12) * 0.1)));
+  // Calculate FEASIBILITY ANALYZER output (Chances de atingimento da meta)
+  const feasibilityAnalysis = useMemo(() => {
+    const requestedGrowth = targetFaturamento - baselineSales;
+    
+    // 1. Meta conservadora (menor ou igual à média real do passado)
+    if (requestedGrowth <= 0) {
+      return {
+        score: 95,
+        status: 'Conservadora & Segura',
+        colorClass: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+        progressBarClass: 'bg-emerald-500',
+        advice: 'Sua meta de vendas está no nível ou abaixo da média histórica real de faturamento. É consideravelmente segura e não exige esforços adicionais significativos de captação.',
+        marketingStatus: 'Excelente',
+        operationalStatus: 'Adequado',
+        recommendation: 'Aproveite este período estável para maximizar margem e construir caixa de segurança comercial.'
+      };
+    }
 
-    const projectedEbitda = projectedRevenue - (projectedDeductions + projectedCosts + projectedOpex);
-    const projectedNetProfit = Math.round(projectedEbitda * 0.85);
+    // 2. Crescimento positivo: Calcular viabilidade baseada em investimento comercial versus histórico
+    // ROI ideal de Marketing estimado em 6x a 8x para ser de baixo risco (ou seja, custo de aquisição CAC médio de 12.5% a 16.6%)
+    // Se investirem pouco marketing para muito crescimento projetado, a chance cai
+    const growthPercent = (requestedGrowth / baselineSales) * 100;
 
-    projectionTimeline.push({
-      stepLabel: label,
-      revenue: projectedRevenue,
-      expenses: projectedDeductions + projectedCosts + projectedOpex,
-      ebitda: projectedEbitda,
-      netProfit: projectedNetProfit,
-      margin: projectedRevenue > 0 ? (projectedEbitda / projectedRevenue) * 100 : 0
-    });
-  }
+    // Marketing Investment Ratio (MIR): O quanto investirá em marketing em relação ao delta de receita pretendido
+    const mir = requestedGrowth > 0 ? (marketingBudget / requestedGrowth) : 0;
+    
+    // Operational Investment Ratio (OIR): O quanto investirá em infra e contratação em relação ao delta
+    const oir = requestedGrowth > 0 ? (operationalInvestment / requestedGrowth) : 0;
+
+    // Base score start at 100, penalized by high growth rate requirements without matching resources
+    let score = 92 - growthPercent; // Mais crescimento pretendido = mais difícil/arriscado
+
+    // Resource boosters
+    // Se o orçamento de marketing for pelo menos 13% do delta de receita, adiciona 20 pontos de chance
+    const expectedMarketingRatio = 0.13;
+    if (mir >= expectedMarketingRatio) {
+      score += 25;
+    } else if (mir > 0) {
+      score += (mir / expectedMarketingRatio) * 20;
+    }
+
+    // Se o investimento operacional for pelo menos 8% do delta de receita, adiciona 15 pontos de chance (evita gargalo)
+    const expectedOpRatio = 0.08;
+    if (oir >= expectedOpRatio) {
+      score += 15;
+    } else if (oir > 0) {
+      score += (oir / expectedOpRatio) * 12;
+    }
+
+    // Penalidade por meta excessivamente arrojada (crescimento > 45% em 1 mês é considerado meta imbatível sem investimentos hercúleos)
+    if (growthPercent > 45) {
+      score -= 22;
+    }
+
+    // Ensure score is clamped inside realistic limits
+    score = Math.max(15, Math.min(97, Math.round(score)));
+
+    let status = '';
+    let colorClass = '';
+    let progressBarClass = '';
+    let advice = '';
+    let marketingStatus = 'Baixo';
+    let operationalStatus = 'Baixo';
+    let recommendation = '';
+
+    // Classify
+    if (score >= 80) {
+      status = 'Planejamento Altamente Viável';
+      colorClass = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+      progressBarClass = 'bg-emerald-500';
+      advice = `Meta realista fundamentada! O orçamento de marketing (MIR de ${(mir * 100).toFixed(1)}%) e os investimentos operacionais declarados dão pleno suporte e sustentação estatística necessária para expandir R$ ${requestedGrowth.toLocaleString('pt-BR')} no faturamento de forma controlada.`;
+      marketingStatus = 'Excelente (Suficiente)';
+      operationalStatus = 'Excelente (Estruturado)';
+      recommendation = 'Mantenha a execução comercial conforme planejado. Monitore semanalmente o CAC de cada canal de tráfego.';
+    } else if (score >= 50) {
+      status = 'Desafiadora / Requer Atenção';
+      colorClass = 'text-amber-700 bg-amber-50 border-amber-200';
+      progressBarClass = 'bg-amber-500';
+      marketingStatus = mir >= 0.08 ? 'Razoável' : 'Abaixo do Recomendado';
+      operationalStatus = oir >= 0.05 ? 'Equilibrado' : 'Próximo ao Gargalo';
+      advice = `Sua meta é viável, porém impõe pressão. O crescimento almejado (${growthPercent.toFixed(1)}%) exigirá dedicação pesada da equipe. O aporte em publicidade gerará tráfego, mas o orçamento operacional está levemente subdimensionado para a entrega física técnica.`;
+      
+      const suggestedMkt = requestedGrowth * 0.15;
+      const suggestedOp = requestedGrowth * 0.08;
+      recommendation = `Para elevar a chance de sucesso para o patamar seguro (verde), recomendamos expandir o orçamento de marketing para cerca de R$ ${Math.round(suggestedMkt).toLocaleString('pt-BR')} ou adicionar R$ ${Math.round(suggestedOp).toLocaleString('pt-BR')} em sistemas/melhorias de processos.`;
+    } else {
+      status = 'Sob Alto Risco de Não Atingimento';
+      colorClass = 'text-red-700 bg-red-50 border-red-200';
+      progressBarClass = 'bg-red-500';
+      marketingStatus = 'Crítico / Insuficiente';
+      operationalStatus = 'Gargalo Operacional Crítico';
+      advice = `Atenção: Esta meta possui forte risco de frustração ("meta imbatível"). Exigir um crescimento abrupto de ${growthPercent.toFixed(1)}% sem suporte de aquisição pagos (Marketing de ${(mir*100).toFixed(1)}% do crescimento) ou estrutura técnica (investimento op.) criará sobrecarga sem gerar novas vendas reais no curto prazo.`;
+      
+      const suggestedMinMkt = requestedGrowth * 0.16;
+      recommendation = `Sugerimos recalcular os objetivos comerciais. Caso mantenha esse faturamento agressivo, invista ativamente pelo menos R$ ${Math.round(suggestedMinMkt).toLocaleString('pt-BR')} em canais de atração paga ou dilua essa expansão em um plano de 3 a 4 meses.`;
+    }
+
+    return {
+      score,
+      status,
+      colorClass,
+      progressBarClass,
+      advice,
+      marketingStatus,
+      operationalStatus,
+      recommendation,
+      requestedGrowth,
+      growthPercent
+    };
+  }, [targetFaturamento, marketingBudget, operationalInvestment, baselineSales]);
+
+  // Action: Apply generated goal values directly into App State
+  const handleApplyGoals = () => {
+    // 1. Save Total Sales Goal (categoryId: 'total_sales' which drives overall display logic, but also divide proportionately between sales_products and sales_services based on history)
+    const histProd = Math.abs(getAverageValue('sales_products'));
+    const histServ = Math.abs(getAverageValue('sales_services'));
+    const totHist = histProd + histServ || 1;
+    const prodRatio = histProd / totHist;
+    const servRatio = histServ / totHist;
+
+    const prodGoal = Math.round(targetFaturamento * prodRatio);
+    const servGoal = Math.round(targetFaturamento * servRatio);
+
+    onSaveCategoryGoal('sales_products', targetMonth, prodGoal);
+    onSaveCategoryGoal('sales_services', targetMonth, servGoal);
+    
+    // Also store total_sales as a unified goal so DRE columns sync properly
+    onSaveCategoryGoal('total_sales', targetMonth, targetFaturamento);
+
+    // 2. Set default proportionate costs targets to keep targets connected to operational realities!
+    // Materials & production costs usually grow linearly with sales (Variable costs)
+    if (baselineSales > 0) {
+      const salesGrowthFactor = targetFaturamento / baselineSales;
+      const calculatedCostsProd = Math.round(Math.abs(getAverageValue('costs_production')) * salesGrowthFactor);
+      const calculatedCostsResell = Math.round(Math.abs(getAverageValue('costs_resell')) * salesGrowthFactor);
+      
+      onSaveCategoryGoal('costs_production', targetMonth, calculatedCostsProd);
+      onSaveCategoryGoal('costs_resell', targetMonth, calculatedCostsResell);
+    }
+
+    // 3. Set marketing opex goal to the planned marketingBudget
+    onSaveCategoryGoal('opex_marketing', targetMonth, marketingBudget);
+
+    // 4. Save month working days config
+    onSaveMonthConfig(targetMonth, workingDays, 0);
+
+    setSuccessApplyMsg(`Meta de R$ ${targetFaturamento.toLocaleString('pt-BR')} aplicada com sucesso para ${targetMonth}! Distribuímos as metas proporcionais de produtos, serviços e custos variáveis para manter sua DRE perfeitamente coerente.`);
+    setTimeout(() => setSuccessApplyMsg(null), 8500);
+  };
+
+
+  // -------------------------------------------------------------
+  // SIMULADOR DE LONGO PRAZO ENGINE (Compound Forecast - Existing)
+  // -------------------------------------------------------------
+  const scenarioMultiplier = {
+    conservative: 0.7,
+    normal: 1,
+    aggressive: 1.4
+  };
+
+  const projectionTimeline = useMemo(() => {
+    const list = [];
+    const latestMonthStr = months[months.length - 1] || '2026-05';
+    const lastDate = new Date(latestMonthStr + '-15');
+
+    for (let step = 1; step <= horizon; step++) {
+      const futureDate = new Date(lastDate);
+      futureDate.setMonth(lastDate.getMonth() + step);
+      const label = futureDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+
+      // Compound calculations with scenario limits
+      const effectiveGrowth = forecastParams.growthRate * scenarioMultiplier[scenario];
+      const compoundRevenueFactor = Math.pow(1 + (effectiveGrowth + (forecastParams.marketingBoost * 0.5)) / 100, step);
+      const compoundOpexFactor = Math.pow(1 + forecastParams.expenseGrowthRate / 100, step);
+
+      const projectedRevenue = Math.round(baselineSales * compoundRevenueFactor);
+      const projectedDeductions = Math.round(baselineDeductions * compoundRevenueFactor);
+      const projectedCosts = Math.round(baselineCosts * compoundRevenueFactor * 0.95);
+      const projectedOpex = Math.round(baselineOpex * compoundOpexFactor + (forecastParams.hiringImpact * (1 + (step / 12) * 0.1)));
+
+      const projectedEbitda = projectedRevenue - (projectedDeductions + projectedCosts + projectedOpex);
+      const projectedNetProfit = Math.round(projectedEbitda * 0.85);
+
+      list.push({
+        stepLabel: label,
+        revenue: projectedRevenue,
+        expenses: projectedDeductions + projectedCosts + projectedOpex,
+        ebitda: projectedEbitda,
+        netProfit: projectedNetProfit,
+        margin: projectedRevenue > 0 ? (projectedEbitda / projectedRevenue) * 100 : 0
+      });
+    }
+    return list;
+  }, [horizon, scenario, forecastParams, baselineSales, baselineDeductions, baselineCosts, baselineOpex, months]);
 
   const finalRevenue = projectionTimeline[horizon - 1]?.revenue || 0;
   const finalEbitda = projectionTimeline[horizon - 1]?.ebitda || 0;
   const growthMultiple = baselineSales > 0 ? (finalRevenue / baselineSales) : 1;
 
   return (
-    <div id="forecast-root" className="flex flex-col gap-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-6 overflow-hidden">
+    <div id="forecast-tab-workspace" className="space-y-6">
       
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Simulation triggers */}
-        <div className="lg:col-span-1 bg-slate-50 border border-slate-100 rounded-xl p-5 space-y-5">
-          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-            <Sliders className="h-4 w-4 text-indigo-600" />
-            <h3 className="text-sm font-bold text-slate-800">Cenário Forecast</h3>
+      {/* Page Title Header */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-indigo-50 p-2.5 rounded-xl border border-indigo-100 text-indigo-650">
+            <Target className="h-6 w-6 animate-pulse" />
           </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Intensidade do Cenário</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['conservative', 'normal', 'aggressive'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setScenario(s)}
-                  className={`py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${
-                    scenario === s 
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  {s === 'conservative' ? 'Pessimista' : s === 'normal' ? 'Normal' : 'Otimista'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2 pt-2">
-            <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Horizonte</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[12, 24, 36].map((h) => (
-                <button
-                  key={h}
-                  onClick={() => setHorizon(h as any)}
-                  className={`py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
-                    horizon === h
-                      ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-                      : 'bg-white text-slate-500 border-slate-200'
-                  }`}
-                >
-                  {h} Meses
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-4 border-t border-slate-200">
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-semibold text-slate-700">Crescimento Faturamento (a.m.)</span>
-                <span className="font-mono font-bold text-indigo-600">+{params.growthRate}%</span>
-              </div>
-              <input 
-                type="range" min="0" max="30" value={params.growthRate} 
-                onChange={(e) => setParams(prev => ({ ...prev, growthRate: parseInt(e.target.value) }))}
-                className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-semibold text-slate-700">Aumento OPEX (a.m.)</span>
-                <span className="font-mono font-bold text-indigo-600">+{params.expenseGrowthRate}%</span>
-              </div>
-              <input 
-                type="range" min="0" max="20" value={params.expenseGrowthRate} 
-                onChange={(e) => setParams(prev => ({ ...prev, expenseGrowthRate: parseInt(e.target.value) }))}
-                className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-semibold text-slate-700">Contratações/mês</span>
-                <span className="font-mono font-bold text-indigo-600">R$ {params.hiringImpact.toLocaleString()}</span>
-              </div>
-              <input 
-                type="range" min="0" max="50000" step="1000" value={params.hiringImpact} 
-                onChange={(e) => setParams(prev => ({ ...prev, hiringImpact: parseInt(e.target.value) }))}
-                className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
-              />
-            </div>
+          <div>
+            <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              Planejamento de Metas & Projeção Realista
+              <span className="bg-indigo-100/60 text-indigo-700 font-mono text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest">
+                Business Intelligence
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Defina metas realistas baseadas nos seus números operacionais históricos e avalie a viabilidade lógica de alcance.
+            </p>
           </div>
         </div>
 
-        {/* Trajectory visualization charts */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-slate-950 border border-slate-900 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h4 className="text-sm font-bold text-white uppercase tracking-tight">Trajetória Forecast {horizon} Meses</h4>
-                <span className="text-[10px] text-slate-400 block font-medium">Modelagem preditiva baseada em taxas compostas</span>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-emerald-400 font-mono font-bold bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-900/50">
-                  Impacto: {growthMultiple.toFixed(1)}x de Crescimento
-                </span>
-              </div>
-            </div>
-
-            <div className="h-[250px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={projectionTimeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorProjRec" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorProjEbit" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                  <XAxis dataKey="stepLabel" tickLine={false} style={{ fontSize: '9px', fill: '#64748b' }} />
-                  <YAxis tickLine={false} axisLine={false} style={{ fontSize: '9px', fill: '#64748b' }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '12px', border: '1px solid #1e293b' }} 
-                    itemStyle={{ fontSize: '11px' }}
-                    labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px', fontWeight: 'bold' }}
-                    formatter={(value) => `R$ ${Number(value).toLocaleString()}`} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '15px' }} />
-                  <Area name="Faturamento Projetado" type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorProjRec)" />
-                  <Area name="EBITDA Projetado" type="monotone" dataKey="ebitda" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorProjEbit)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-              <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Mês Atual (Base)</span>
-              <span className="text-lg font-bold text-slate-800 block mt-1">R$ {baselineSales.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-              <p className="text-[9px] text-slate-500 mt-1">Média histórica de faturamento</p>
-            </div>
-            <div className="p-4 rounded-xl border border-indigo-100 bg-indigo-50/20">
-              <span className="text-[10px] text-indigo-400 block font-bold uppercase tracking-wider">Mês {horizon} (Proj)</span>
-              <span className="text-lg font-bold text-indigo-700 block mt-1">R$ {finalRevenue.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-              <p className="text-[9px] text-indigo-500 mt-1">Receita estimada ao final do ciclo</p>
-            </div>
-            <div className="p-4 rounded-xl border border-emerald-100 bg-emerald-50/20">
-              <span className="text-[10px] text-emerald-400 block font-bold uppercase tracking-wider">Ebitda Final</span>
-              <span className="text-lg font-bold text-emerald-700 block mt-1">R$ {finalEbitda.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-              <p className="text-[9px] text-emerald-500 mt-1">Resultado operacional terminal</p>
-            </div>
-          </div>
+        {/* Master sub tabs */}
+        <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+          <button
+            onClick={() => setActiveSubTab('goals_planner')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+              activeSubTab === 'goals_planner' 
+                ? 'bg-white text-indigo-700 shadow-xs' 
+                : 'text-slate-600 hover:text-slate-850'
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            Meta Realista & Viabilidade
+          </button>
+          <button
+            onClick={() => setActiveSubTab('long_term_forecast')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+              activeSubTab === 'long_term_forecast' 
+                ? 'bg-white text-indigo-700 shadow-xs' 
+                : 'text-slate-600 hover:text-slate-850'
+            }`}
+          >
+            <TrendingUp className="h-4 w-4" />
+            Simulador de Longo Prazo
+          </button>
         </div>
       </div>
 
-      <div className="mt-4 border-t border-slate-100 pt-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Play className="h-4 w-4 text-slate-400" />
-          <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider">Detalhamento Mensal do Forecast</h4>
+      {activeSubTab === 'goals_planner' && (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          
+          {/* COLUNA ESQUERDA: HISTÓRICO DA OPERAÇÃO (BASE REALÍSTICA) */}
+          <div className="xl:col-span-4 flex flex-col gap-6">
+            
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-150 pb-3">
+                <div className="bg-slate-100 p-2 rounded-lg text-slate-700">
+                  <Landmark className="h-4.5 w-4.5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase text-slate-800 tracking-wider">Histórico Real da Operação</h3>
+                  <span className="text-[10px] text-slate-400 block font-medium">Médias derivadas dos seus lançamentos ativos</span>
+                </div>
+              </div>
+
+              <div className="space-y-3.5">
+                <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400">Total Faturado (Médio)</span>
+                    <span className="block text-sm font-extrabold text-slate-800 font-mono mt-0.5">
+                      R$ {baselineSales.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-slate-200/60 text-slate-600 px-2 py-0.5 rounded-full font-bold">100.0%</span>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400">Custo de Mercadoria/Deduções</span>
+                    <span className="block text-sm font-bold text-slate-700 font-mono mt-0.5">
+                      R$ {(baselineCosts + baselineDeductions).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-rose-50 text-rose-600 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
+                    {baselineSales > 0 ? `${(((baselineCosts + baselineDeductions) / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400">Despesas Operacionais (OPEX)</span>
+                    <span className="block text-sm font-bold text-slate-700 font-mono mt-0.5">
+                      R$ {baselineOpex.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-bold font-mono">
+                    {baselineSales > 0 ? `${((baselineOpex / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                  </span>
+                </div>
+
+                <div className="bg-indigo-50/50 border border-indigo-100/50 p-4 rounded-xl flex justify-between items-center shadow-2xs">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-indigo-600">Lucro EBITDA Médio</span>
+                    <span className="block text-base font-black text-indigo-750 font-mono mt-0.5">
+                      R$ {Math.max(0, baselineSales - (baselineCosts + baselineDeductions + baselineOpex)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <span className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-black font-mono shadow-sm">
+                    {baselineSales > 0 ? `${(((baselineSales - (baselineCosts + baselineDeductions + baselineOpex)) / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-100/75 p-3 rounded-xl flex gap-2 text-slate-500">
+                <Info className="h-4 w-4 shrink-0 text-indigo-500 mt-0.5" />
+                <p className="text-[10px] leading-relaxed">
+                  As médias mostradas acima representam a base da sua operação real comercial. Metas saudáveis de faturamento devem tentar expandir entre <strong>5% a 25%</strong> por mês, acompanhadas de proporcional reforço de caixa e budget.
+                </p>
+              </div>
+            </div>
+
+          </div>
+
+          {/* COLUNA CENTRAL & DIREITA: DEFINIÇÃO INTERATIVA DE METAS & ANÁLISE DE VIABILIDADE */}
+          <div className="xl:col-span-8 flex flex-col gap-6">
+
+            {successApplyMsg && (
+              <div className="bg-emerald-55 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl p-4 flex gap-3 shadow-md animate-fade-in">
+                <CheckCircle2 className="h-5.5 w-5.5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <span className="font-extrabold block text-sm">Meta Consolidada Aplicada com Sucesso!</span>
+                  <span className="mt-1 block leading-relaxed font-medium">{successApplyMsg}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-6">
+              
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+                <h3 className="text-sm font-extrabold uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                  <Sliders className="h-4.5 w-4.5 text-indigo-600" /> Configuração do Planejamento
+                </h3>
+                
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-500">Mês do Planejamento:</span>
+                  <select 
+                    value={targetMonth}
+                    onChange={(e) => setTargetMonth(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 text-xs font-mono font-bold rounded py-1 px-2.5 text-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="2026-06">Junho de 2026</option>
+                    <option value="2026-07">Julho de 2026</option>
+                    <option value="2026-08">Agosto de 2026</option>
+                    <option value="2026-09">Setembro de 2026</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* INPUT FIELDS WORKSPACE */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* METAS FINANCEIRAS */}
+                <div className="space-y-4">
+                  <span className="text-[10px] uppercase font-black text-indigo-600 tracking-widest block border-b pb-1">Metas Financeiras</span>
+                  
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-bold text-slate-600">Meta Faturamento Bruto (R$)</span>
+                      <span className="text-slate-400 text-[10px] font-medium font-mono">Média: R$ {Math.round(baselineSales).toLocaleString('pt-BR')}</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold font-mono">R$</span>
+                      <input 
+                        type="number"
+                        value={targetFaturamento}
+                        onChange={(e) => handleTargetFaturamentoChange(Number(e.target.value) || 0)}
+                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-bold text-slate-600">Pretensão de Crescimento (%)</span>
+                      <span className={`font-mono font-black ${growthPretensionPct >= 25 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                        {growthPretensionPct >= 0 ? `+${growthPretensionPct}%` : `${growthPretensionPct}%`}
+                      </span>
+                    </div>
+                    <input 
+                      type="range"
+                      min="-10"
+                      max="60"
+                      step="0.5"
+                      value={growthPretensionPct}
+                      onChange={(e) => handleGrowthPctChange(Number(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-100 rounded-lg appearance-none mt-1"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-450 font-bold font-mono">
+                      <span>-10%</span>
+                      <span>Média (+0%)</span>
+                      <span>Desafiadora (+25%)</span>
+                      <span>Imbatível (+50%)</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-600 block">Dias Úteis Comerciais Estimados (Mês)</label>
+                    <input 
+                      type="number"
+                      min="15"
+                      max="31"
+                      value={workingDays}
+                      onChange={(e) => setWorkingDays(Number(e.target.value) || 22)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-mono font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* ORÇAMENTO SUPORTE */}
+                <div className="space-y-4">
+                  <span className="text-[10px] uppercase font-black text-indigo-600 tracking-widest block border-b pb-1">Orçamento de Suporte Comercial</span>
+                  
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-bold text-slate-600 flex items-center gap-1">Orçamento de Tráfego/Marketing (R$)</span>
+                      <span className="text-[9px] text-slate-400">Google Ads, Meta, Influencers</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold font-mono">R$</span>
+                      <input 
+                        type="number"
+                        value={marketingBudget}
+                        onChange={(e) => setMarketingBudget(Number(e.target.value) || 0)}
+                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-bold text-slate-600">Investimentos Operacionais / Contratações (R$)</span>
+                      <span className="text-[9px] text-slate-400">Novos sistemas, ferramentas e comissões</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold font-mono">R$</span>
+                      <input 
+                        type="number"
+                        value={operationalInvestment}
+                        onChange={(e) => setOperationalInvestment(Number(e.target.value) || 0)}
+                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50/75 border border-slate-100 p-3 rounded-xl mt-4">
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      💡 <strong>Estatística:</strong> Em cenários de crescimento saudável, o <strong>Custo de Aquisição (CAC)</strong> exige que canais comerciais recebam investimentos correspondentes. Propor metas altas sem orçamento de suporte aumenta vertiginosamente o risco de descumprimento.
+                    </p>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* REALISTIC FEASIBILITY ANALYZER CARD */}
+              <div className={`p-5 rounded-2xl border transition-all duration-300 shadow-sm ${feasibilityAnalysis.colorClass}`}>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-indigo-500/10 pb-3 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-white rounded-xl shadow-xs shrink-0">
+                      <Sparkles className="h-5 w-5 text-indigo-600 animate-spin-slow" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest block opacity-75">Avaliação de Viabilidade da Meta</span>
+                      <h4 className="text-sm font-extrabold uppercase">{feasibilityAnalysis.status}</h4>
+                    </div>
+                  </div>
+
+                  {/* Chance Output Circle or Big Badge */}
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold pr-1 block">Sua Chance de Sucesso</span>
+                    <span className="text-3xl font-black font-mono tracking-tight leading-none">
+                      {feasibilityAnalysis.score}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Gauge bar */}
+                  <div className="space-y-1">
+                    <div className="w-full bg-slate-200/50 backdrop-blur-xs rounded-full h-2.5 overflow-hidden border border-slate-300/30">
+                      <div 
+                        className={`h-2.5 rounded-full transition-all duration-500 ${
+                          feasibilityAnalysis.score >= 80 
+                            ? 'bg-emerald-500' 
+                            : feasibilityAnalysis.score >= 50 
+                              ? 'bg-amber-500' 
+                              : 'bg-rose-500'
+                        }`}
+                        style={{ width: `${feasibilityAnalysis.score}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[8px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                      <span>Risco Extremo</span>
+                      <span>Viável / Desafiadora</span>
+                      <span>Consistente / Confortável</span>
+                    </div>
+                  </div>
+
+                  {/* Feedback Details */}
+                  <p className="text-xs leading-relaxed font-medium">
+                    {feasibilityAnalysis.advice}
+                  </p>
+
+                  {/* Operational indicators comparison */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs border-y border-indigo-550/10 py-3 font-sans">
+                    <div>
+                      <span className="text-slate-500 block font-bold">Investimento Comercial (Marketing):</span>
+                      <span className="font-bold text-slate-800">{feasibilityAnalysis.marketingStatus}</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">MIR Atual: {((marketingBudget / Math.max(1, feasibilityAnalysis.requestedGrowth)) * 100).toFixed(1)}% vs Meta Ideal: 13.0%</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block font-bold">Investimento de Infraestrutura (Vendas):</span>
+                      <span className="font-bold text-slate-800">{feasibilityAnalysis.operationalStatus}</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">OIR Atual: {((operationalInvestment / Math.max(1, feasibilityAnalysis.requestedGrowth)) * 100).toFixed(1)}% vs Ideal: 8.0%</p>
+                    </div>
+                  </div>
+
+                  {/* Tactical Action Advice */}
+                  <div className="space-y-1 pt-1">
+                    <span className="text-[9px] uppercase font-black tracking-widest text-slate-550 block">Recomendação Comercial Recomendada:</span>
+                    <p className="text-[11px] leading-relaxed italic text-slate-700">
+                      {feasibilityAnalysis.recommendation}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Final Actions to apply the goal */}
+                <div className="mt-5 pt-4 border-t border-indigo-500/10 flex justify-end gap-3">
+                  <button
+                    onClick={handleApplyGoals}
+                    style={{ cursor: 'pointer' }}
+                    className="px-6 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 flex items-center gap-1.5"
+                  >
+                    <Check className="h-4 w-4" />
+                    Aplicar Meta na Planejamento da DRE
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
         </div>
-        <div className="overflow-x-auto rounded-xl border border-slate-100">
-          <table className="w-full text-left border-collapse text-[11px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100 font-bold uppercase text-slate-500">
-                <th className="py-3 px-4">Mês Proj.</th>
-                <th className="py-3 px-4">Receita (R$)</th>
-                <th className="py-3 px-4">Despesas (R$)</th>
-                <th className="py-3 px-4">EBITDA (R$)</th>
-                <th className="py-3 px-4">Margem (%)</th>
-                <th className="py-3 px-4">Lucro Líq. (R$)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {projectionTimeline.filter((_, i) => i % (horizon / 6) === 0 || i === horizon - 1).map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                  <td className="py-2.5 px-4 font-bold text-slate-700">{row.stepLabel}</td>
-                  <td className="py-2.5 px-4 font-mono font-medium">R$ {row.revenue.toLocaleString()}</td>
-                  <td className="py-2.5 px-4 font-mono text-rose-500">R$ {row.expenses.toLocaleString()}</td>
-                  <td className={`py-2.5 px-4 font-mono font-bold ${row.ebitda >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>R$ {row.ebitda.toLocaleString()}</td>
-                  <td className="py-2.5 px-4 font-mono">{row.margin.toFixed(1)}%</td>
-                  <td className="py-2.5 px-4 font-mono text-indigo-600">R$ {row.netProfit.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      )}
+
+      {activeSubTab === 'long_term_forecast' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+          {/* Simulation triggers */}
+          <div className="lg:col-span-1 bg-slate-50 border border-slate-205 rounded-2xl p-5 space-y-5">
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+              <Sliders className="h-4.5 w-4.5 text-indigo-600" />
+              <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider">Cenário Macroeconômico</h3>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-extrabold text-slate-450 uppercase tracking-widest block">Nível do Cenário</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['conservative', 'normal', 'aggressive'] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setScenario(s)}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border cursor-pointer ${
+                      scenario === s 
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {s === 'conservative' ? 'Pessimista' : s === 'normal' ? 'Normal' : 'Otimista'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <label className="text-[10px] font-extrabold text-slate-455 uppercase tracking-widest block">Horizonte de Simulação</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[12, 24, 36].map((h) => (
+                  <button
+                    key={h}
+                    onClick={() => setHorizon(h as any)}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                      horizon === h
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {h} Meses
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-4 border-t border-slate-200">
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-700">Crescimento Faturamento (a.m.)</span>
+                  <span className="font-mono font-bold text-indigo-600">+{forecastParams.growthRate}%</span>
+                </div>
+                <input 
+                  type="range" min="0" max="30" value={forecastParams.growthRate} 
+                  onChange={(e) => setForecastParams(prev => ({ ...prev, growthRate: parseInt(e.target.value) }))}
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-700">Aumento OPEX (a.m.)</span>
+                  <span className="font-mono font-bold text-indigo-600">+{forecastParams.expenseGrowthRate}%</span>
+                </div>
+                <input 
+                  type="range" min="0" max="20" value={forecastParams.expenseGrowthRate} 
+                  onChange={(e) => setForecastParams(prev => ({ ...prev, expenseGrowthRate: parseInt(e.target.value) }))}
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-700">Contratações/Novos Custos Fixos</span>
+                  <span className="font-mono font-bold text-indigo-600">R$ {forecastParams.hiringImpact.toLocaleString()}</span>
+                </div>
+                <input 
+                  type="range" min="0" max="50000" step="1000" value={forecastParams.hiringImpact} 
+                  onChange={(e) => setForecastParams(prev => ({ ...prev, hiringImpact: parseInt(e.target.value) }))}
+                  className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg appearance-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Trajectory visualization charts */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-slate-950 border border-slate-900 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                  <h4 className="text-xs font-black text-white uppercase tracking-wider">Trajetória Estimada de {horizon} Meses</h4>
+                  <span className="text-[10px] text-slate-400 block font-medium">Modelagem preditiva baseada em taxas compostas</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-emerald-400 font-mono font-extrabold bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-900/50">
+                    Impacto: {growthMultiple.toFixed(1)}x de Crescimento faturamento
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={projectionTimeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorProjRecSel" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorProjEbitSel" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                    <XAxis dataKey="stepLabel" tickLine={false} style={{ fontSize: '9px', fill: '#64748b' }} />
+                    <YAxis tickLine={false} axisLine={false} style={{ fontSize: '9px', fill: '#64748b' }} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '12px', border: '1px solid #1e293b' }} 
+                      itemStyle={{ fontSize: '11px' }}
+                      labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px', fontWeight: 'bold' }}
+                      formatter={(value) => `R$ ${Number(value).toLocaleString()}`} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '15px' }} />
+                    <Area name="Faturamento Projetado" type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorProjRecSel)" />
+                    <Area name="EBITDA Projetado" type="monotone" dataKey="ebitda" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorProjEbitSel)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Mês Atual (Base)</span>
+                <span className="text-sm font-bold text-slate-800 block mt-1">R$ {Math.round(baselineSales).toLocaleString('pt-BR')}</span>
+                <p className="text-[9px] text-slate-500 mt-1">Média histórica real de faturamento</p>
+              </div>
+              <div className="p-4 rounded-xl border border-indigo-150 bg-indigo-50/20">
+                <span className="text-[10px] text-indigo-400 block font-bold uppercase tracking-wider">Mês {horizon} (Proj)</span>
+                <span className="text-sm font-bold text-indigo-700 block mt-1">R$ {Math.round(finalRevenue).toLocaleString('pt-BR')}</span>
+                <p className="text-[9px] text-indigo-500 mt-1">Receita estimada ao final do ciclo</p>
+              </div>
+              <div className="p-4 rounded-xl border border-emerald-150 bg-emerald-50/20">
+                <span className="text-[10px] text-emerald-400 block font-bold uppercase tracking-wider font-sans">EBITDA Terminal (Proj)</span>
+                <span className="text-sm font-bold text-emerald-700 block mt-1">R$ {Math.round(finalEbitda).toLocaleString('pt-BR')}</span>
+                <p className="text-[9px] text-emerald-500 mt-1">Resultado operacional esperado</p>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
     </div>
   );
 }

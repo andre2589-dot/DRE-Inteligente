@@ -1282,10 +1282,11 @@ export default function TransactionList({
         </div>
       )}
 
-      {/* Grid: 3 columns workspace. Left: manual revenues, Center: drag-drop excel, Right: real-time summary indicators */}
+      {/* Grid: Left column (manual entry and excel upload stacked vertically), Right column (consolidation widget) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* BLOCO 1 - RECEITAS */}
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          {/* BLOCO 1 - RECEITAS */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
             <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600">
@@ -1493,6 +1494,8 @@ export default function TransactionList({
             </div>
           )}
         </div>
+
+        </div> {/* END OF LEFT CONTAINER COLUMN */}
 
         {/* RESUMO LATERAL */}
         <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-4">

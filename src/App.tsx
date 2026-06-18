@@ -667,7 +667,7 @@ export default function App() {
             }`}
           >
             <TrendingUp className="h-4 w-4" />
-            Simulador de Projeções
+            Metas & Simulações
           </button>
 
           <button
@@ -747,6 +747,10 @@ export default function App() {
             <ForecastModule 
               transactions={enrichedTransactions}
               categories={categories}
+              categoryGoals={categoryGoals}
+              monthConfigs={monthConfigs}
+              onSaveCategoryGoal={handleSaveCategoryGoal}
+              onSaveMonthConfig={handleSaveMonthConfig}
             />
           )}
 
