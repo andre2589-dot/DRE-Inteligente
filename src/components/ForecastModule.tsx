@@ -326,6 +326,25 @@ export default function ForecastModule({
     }
   };
 
+  const handleClearDailySales = () => {
+    if (!onDeleteTransaction) {
+      alert("Operação de remoção de transações não configurada.");
+      return;
+    }
+    const targetTransactions = transactions.filter(t => t.id.startsWith('daily-sale-') || t.batchId?.startsWith('daily_sales_'));
+    if (targetTransactions.length === 0) {
+      alert("Nenhum lançamento de faturamento diário encontrado para limpar.");
+      return;
+    }
+    if (window.confirm(`Tem certeza de que deseja apagar permanentemente todos os ${targetTransactions.length} registros de faturamento diário (fictícios) lançados no sistema para começar com dados reais?`)) {
+      targetTransactions.forEach(tx => {
+        onDeleteTransaction(tx.id);
+      });
+      setSuccessApplyMsg("Todos os registros de faturamento diário fictício foram apagados com sucesso! Comece a registrar as informações reais.");
+      setTimeout(() => setSuccessApplyMsg(null), 5000);
+    }
+  };
+
   // Calculate FEASIBILITY ANALYZER output (Chances de atingimento da meta)
   const feasibilityAnalysis = useMemo(() => {
     const requestedGrowth = targetFaturamento - referenceSales;
@@ -745,10 +764,18 @@ export default function ForecastModule({
                     onChange={(e) => setTargetMonth(e.target.value)}
                     className="bg-slate-50 border border-slate-200 text-xs font-mono font-bold rounded py-1 px-2.5 text-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
                   >
+                    <option value="2026-01">Janeiro de 2026</option>
+                    <option value="2026-02">Fevereiro de 2026</option>
+                    <option value="2026-03">Março de 2026</option>
+                    <option value="2026-04">Abril de 2026</option>
+                    <option value="2026-05">Maio de 2026</option>
                     <option value="2026-06">Junho de 2026</option>
                     <option value="2026-07">Julho de 2026</option>
                     <option value="2026-08">Agosto de 2026</option>
                     <option value="2026-09">Setembro de 2026</option>
+                    <option value="2026-10">Outubro de 2026</option>
+                    <option value="2026-11">Novembro de 2026</option>
+                    <option value="2026-12">Dezembro de 2026</option>
                   </select>
                 </div>
               </div>
@@ -1017,6 +1044,13 @@ export default function ForecastModule({
                   {registeredDaysCount} de {daysInMonth} dias
                 </span>
               </div>
+              <button
+                type="button"
+                onClick={handleClearDailySales}
+                className="bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-700 font-sans text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs shadow-rose-600/5 flex items-center gap-1 self-center"
+              >
+                Limpar Faturamento Fictício
+              </button>
             </div>
           </div>
 
