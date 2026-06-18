@@ -155,10 +155,10 @@ export default function ForecastModule({
     return sumTotal / activeMonths.length;
   };
 
-  const baselineSales = useMemo(() => getAverageValue('total_sales') || 150000, [months, selectedHistoricalMonths, transactions]);
-  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 10000, [months, selectedHistoricalMonths, transactions]);
-  const baselineCosts = useMemo(() => getAverageValue('costs') || 40000, [months, selectedHistoricalMonths, transactions]);
-  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 60000, [months, selectedHistoricalMonths, transactions]);
+  const baselineSales = useMemo(() => getAverageValue('total_sales') || 0, [months, selectedHistoricalMonths, transactions]);
+  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 0, [months, selectedHistoricalMonths, transactions]);
+  const baselineCosts = useMemo(() => getAverageValue('costs') || 0, [months, selectedHistoricalMonths, transactions]);
+  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 0, [months, selectedHistoricalMonths, transactions]);
 
   // Helpers to fetch previous month and calculate historical/comparison values
   const getPreviousMonthStr = (monthStr: string): string => {
@@ -349,6 +349,22 @@ export default function ForecastModule({
   const feasibilityAnalysis = useMemo(() => {
     const requestedGrowth = targetFaturamento - referenceSales;
     
+    // Guard for initial business state with no previous sales/data recorded
+    if (referenceSales <= 0) {
+      return {
+        score: 100,
+        status: 'Início de Operação Real',
+        colorClass: 'text-indigo-700 bg-indigo-50 border-indigo-150',
+        progressBarClass: 'bg-indigo-600',
+        advice: 'Nenhum faturamento real foi registrado no período anterior para servir de base. Defina sua meta para este mês, e o simulador calculará os recursos recomendados para sua nova operação.',
+        marketingStatus: 'N/A (Nova Base)',
+        operationalStatus: 'Adequado',
+        recommendation: 'Cadastre suas primeiras vendas ou dados históricos retroativos para estabelecer sua linha de base (baseline) operacional real.',
+        requestedGrowth,
+        growthPercent: 0
+      };
+    }
+
     // 1. Meta conservadora (menor ou igual ao faturamento real do mês anterior)
     if (requestedGrowth <= 0) {
       return {
