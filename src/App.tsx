@@ -415,9 +415,12 @@ export default function App() {
   };
 
   const handleImportTransactions = (txs: Transaction[]) => {
-    // Overwrite to be a 100% faithful mirror of the imported spreadsheet
-    setTransactions(txs);
-    saveTransactionsToServer(activeCompany.id, txs);
+    // Append imported transaction records instead of overwriting, ensuring files/batches accumulate together.
+    setTransactions(prev => {
+      const updated = [...txs, ...prev];
+      saveTransactionsToServer(activeCompany.id, updated);
+      return updated;
+    });
   };
 
   const handleDeleteTransaction = (id: string) => {

@@ -317,6 +317,24 @@ export default function TransactionList({
   const [manualRevValue, setManualRevValue] = useState<number>(0);
   const [manualRevType, setManualRevType] = useState<string>('sales_products');
 
+  // Multi-option / manual expense form states matching Excel imports
+  const [activeImportTab, setActiveImportTab] = useState<'upload' | 'manual'>('upload');
+  const [manualDate, setManualDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [manualVencDate, setManualVencDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [manualMes, setManualMes] = useState<string>(() => {
+    const parts = new Date().toISOString().split('T')[0].split('-');
+    return `${parts[1]}/${parts[0]}`; // MM/YYYY
+  });
+  const [manualPlanoContasId, setManualPlanoContasId] = useState<string>('');
+  const [manualContaCode, setManualContaCode] = useState<string>('');
+  const [manualContaLabel, setManualContaLabel] = useState<string>('');
+  const [manualClassification, setManualClassification] = useState<string>('opex_admin');
+  const [manualSubCategory, setManualSubCategory] = useState<string>('');
+  const [manualCostType, setManualCostType] = useState<'Fixo' | 'Variável' | 'N/A' | 'MEO'>('Fixo');
+  const [manualDocument, setManualDocument] = useState<string>('');
+  const [manualHistorico, setManualHistorico] = useState<string>('');
+  const [manualValor, setManualValor] = useState<number>(0);
+
   // Column mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [colMapping, setColMapping] = useState<{
@@ -1021,6 +1039,95 @@ export default function TransactionList({
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
+  const handlePlanoContasChange = (pId: string) => {
+    setManualPlanoContasId(pId);
+    if (pId === 'custom' || pId === '') {
+      setManualContaCode('');
+      setManualContaLabel('');
+      setManualClassification('opex_admin');
+      setManualSubCategory('');
+      setManualCostType('Fixo');
+    } else {
+      const match = planoContas.find(pc => pc.id === pId);
+      if (match) {
+        setManualContaCode(match.code);
+        setManualContaLabel(match.name);
+        setManualClassification(match.classificationId);
+        setManualSubCategory(match.subCategory);
+        setManualCostType(match.costType);
+      }
+    }
+  };
+
+  const handleManualDateChange = (newDate: string) => {
+    setManualDate(newDate);
+    if (newDate) {
+      const parts = newDate.split('-');
+      if (parts.length === 3) {
+        setManualMes(`${parts[1]}/${parts[0]}`);
+      }
+    }
+  };
+
+  const handleSaveManualExpense = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (manualValor <= 0) {
+      alert("Por favor, preencha o valor da despesa com um número positivo maior que R$ 0,00.");
+      return;
+    }
+    if (!manualContaCode && !manualContaLabel) {
+      alert("Por favor, selecione uma conta do Plano de Contas ou preencha o código/descrição manualmente.");
+      return;
+    }
+
+    const isIncome = manualClassification === 'sales_products' || 
+                     manualClassification === 'sales_services' || 
+                     manualClassification === 'shareholder_contribution';
+
+    const mathematicalValue = isIncome ? Math.abs(manualValor) : -Math.abs(manualValor);
+
+    const newTx: Transaction = {
+      id: `man-exp-${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      date: manualDate,
+      vencimento: manualVencDate,
+      account: manualContaLabel || `CONTA ${manualContaCode}`,
+      description: manualSubCategory || 'Lançamento Manual',
+      document: manualDocument || undefined,
+      classification: manualClassification,
+      costType: manualCostType,
+      value: mathematicalValue,
+      isManual: true,
+      batchId: 'manual',
+      batchName: 'Lançamentos Avulsos',
+
+      // 100% parity with Excel import format
+      operacao: manualDate,
+      mes: manualMes,
+      conta: manualContaCode,
+      descricaoConta: manualContaLabel,
+      classificacaoOriginal: categories.find(c => c.id === manualClassification)?.name || manualClassification,
+      descricaoOriginal: manualSubCategory,
+      custoOriginal: manualCostType,
+      historico: manualHistorico,
+      documentoOriginal: manualDocument,
+      valorOriginal: manualValor
+    };
+
+    onAddTransaction(newTx);
+
+    // Reset fields except date and monthly competency for sequential ergonomic registrations
+    setManualPlanoContasId('');
+    setManualContaCode('');
+    setManualContaLabel('');
+    setManualSubCategory('');
+    setManualDocument('');
+    setManualHistorico('');
+    setManualValor(0);
+
+    setSuccessMsg("Lançamento manual registrado com sucesso no sistema!");
+    setTimeout(() => setSuccessMsg(null), 4000);
+  };
+
   // Re-evaluated Sum total for manual revenue block
   // (Obsolete code removed)
 
@@ -1287,149 +1394,385 @@ export default function TransactionList({
         
         <div className="lg:col-span-2 flex flex-col gap-6">
           
-        {/* BLOCO 2 - IMPORTAÇÃO DE DESPESAS */}
+        {/* BLOCO 2 - IMPORTAÇÃO E SEPARAÇÃO DE DESPESAS */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600">
-              <FileSpreadsheet className="h-4.5 w-4.5" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600">
+                <FileSpreadsheet className="h-4.5 w-4.5" />
+              </div>
+              <div>
+                <h3 className="text-xs uppercase font-extrabold text-slate-800 tracking-wider">Bloco 2 - Lançamentos Corporativos</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Importação via Excel ou inclusão manual de despesas com o mesmo leiaute</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-xs uppercase font-extrabold text-slate-800 tracking-wider">Bloco 2 - Despesas via Excel</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Importação estrita de despesas corporativas (.xlsx)</p>
+            
+            {/* Tab switch control */}
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/50 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setActiveImportTab('upload')}
+                className={`py-1.5 px-3.5 rounded-lg font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                  activeImportTab === 'upload' 
+                    ? 'bg-white text-indigo-600 shadow-xs' 
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Upload className="h-3 w-3" />
+                Importar Planilha
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveImportTab('manual')}
+                className={`py-1.5 px-3.5 rounded-lg font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                  activeImportTab === 'manual' 
+                    ? 'bg-white text-indigo-600 shadow-xs' 
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Edit3 className="h-3 w-3" />
+                Incluir Manualmente
+              </button>
             </div>
           </div>
 
-          {/* Drag and Drop Container */}
-          <div 
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-5 text-center transition-all flex flex-col items-center justify-center cursor-pointer ${
-              dragActive 
-                ? 'border-indigo-550 bg-indigo-50/60' 
-                : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50'
-            }`}
-          >
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  const file = e.target.files[0];
-                  if (!file.name.endsWith('.xlsx')) {
-                    setValidationError("Tipo de arquivo não permitido. Apenas arquivos Excel (.xlsx) são aceitos para despesas.");
-                    return;
-                  }
-                  handleExcelUpload(file);
-                }
-              }}
-              accept=".xlsx" 
-              className="hidden" 
-            />
-            <div className="bg-indigo-100/50 p-2.5 rounded-full mb-2 text-indigo-600">
-              <Upload className="h-5 w-5" />
-            </div>
-            <p className="text-xs font-bold text-slate-700">Arraste ou selecione a planilha Excel</p>
-            <p className="text-[10px] text-slate-400 mt-1 max-w-[180px] mx-auto">
-              Selecione o arquivo Excel do MVP de despesas (formato .xlsx rígido)
-            </p>
-          </div>
-
-          {/* Excel current sheet metadata presentation & strictly compliant Audit Log */}
-          {tempFile ? (
-            <div className="bg-slate-50 border border-slate-150 rounded-xl p-3.5 space-y-3.5 shadow-2xs">
-              <span className="text-[10px] uppercase font-black text-indigo-700 block tracking-wider">📁 Planilha Carregada</span>
-              <div className="text-xs space-y-1 text-slate-600 border-b border-slate-200/50 pb-2">
-                <div className="flex justify-between truncate">
-                  <span className="font-semibold text-slate-500">Arquivo:</span>
-                  <span className="font-mono font-bold text-slate-800 truncate max-w-[140px]" title={tempFile.name}>{tempFile.name}</span>
+          {activeImportTab === 'upload' ? (
+            <div className="space-y-4">
+              {/* Drag and Drop Container */}
+              <div 
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center transition-all flex flex-col items-center justify-center cursor-pointer ${
+                  dragActive 
+                    ? 'border-indigo-550 bg-indigo-50/60' 
+                    : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50'
+                }`}
+              >
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      const file = e.target.files[0];
+                      if (!file.name.endsWith('.xlsx')) {
+                        setValidationError("Tipo de arquivo não permitido. Apenas arquivos Excel (.xlsx) são aceitos para despesas.");
+                        return;
+                      }
+                      handleExcelUpload(file);
+                    }
+                  }}
+                  accept=".xlsx" 
+                  className="hidden" 
+                />
+                <div className="bg-indigo-100/50 p-2.5 rounded-full mb-2 text-indigo-600">
+                  <Upload className="h-5 w-5" />
                 </div>
-                <div className="flex justify-between">
-                  <span className="font-semibold text-slate-500">Importação:</span>
-                  <span className="font-medium text-slate-700">{tempFile.importDate}</span>
-                </div>
+                <p className="text-xs font-bold text-slate-700">Arraste ou selecione a planilha Excel</p>
+                <p className="text-[10px] text-slate-400 mt-1 max-w-[180px] mx-auto">
+                  Selecione o arquivo Excel do MVP de despesas (formato .xlsx rígido)
+                </p>
               </div>
 
-              {/* Strict Audit Log Section */}
-              {auditLog && (
-                <div className={`rounded-lg border p-3 space-y-2.5 ${
-                  auditLog.status === 'SUCCESS' 
-                    ? 'bg-emerald-50/50 border-emerald-150 text-emerald-950' 
-                    : 'bg-rose-50/50 border-rose-150 text-rose-950'
-                }`}>
-                  <div className="flex items-center justify-between border-b pb-1.5 border-emerald-250/20">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-900">
-                      📋 LOG DE AUDITORIA
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-600 text-white shadow-xs">
-                      {auditLog.status === 'SUCCESS' ? 'APROVADO' : 'BLOQUEADO'}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between items-center py-0.5">
-                      <span className="text-slate-500 font-medium">Linhas Excel:</span>
-                      <span className="font-mono font-bold text-slate-700">{auditLog.excelRowsCount}</span>
+              {/* Excel current sheet metadata presentation & strictly compliant Audit Log */}
+              {tempFile ? (
+                <div className="bg-slate-50 border border-slate-150 rounded-xl p-3.5 space-y-3.5 shadow-2xs">
+                  <span className="text-[10px] uppercase font-black text-indigo-700 block tracking-wider">📁 Planilha Carregada</span>
+                  <div className="text-xs space-y-1 text-slate-600 border-b border-slate-200/50 pb-2">
+                    <div className="flex justify-between truncate">
+                      <span className="font-semibold text-slate-500">Arquivo:</span>
+                      <span className="font-mono font-bold text-slate-800 truncate max-w-[140px]" title={tempFile.name}>{tempFile.name}</span>
                     </div>
-                    <div className="flex justify-between items-center py-0.5">
-                      <span className="text-slate-500 font-medium">Linhas Importadas:</span>
-                      <span className="font-mono font-bold text-slate-700">{auditLog.importedRowsCount}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-0.5 border-t border-slate-200/30 pt-1">
-                      <span className="text-slate-500 font-medium">Total Excel:</span>
-                      <span className="font-mono font-bold text-slate-700">
-                        R$ {auditLog.excelTotalSum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-0.5">
-                      <span className="text-slate-500 font-medium">Total Importado:</span>
-                      <span className="font-mono font-bold text-slate-700">
-                        R$ {auditLog.importedTotalSum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-1 border-t border-emerald-450/20 pt-1 text-emerald-900">
-                      <span className="font-bold">Divergência:</span>
-                      <span className="font-mono font-extrabold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded text-[11px]">
-                        R$ {auditLog.diff.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
+                    <div className="flex justify-between">
+                      <span className="font-semibold text-slate-500">Importação:</span>
+                      <span className="font-medium text-slate-700">{tempFile.importDate}</span>
                     </div>
                   </div>
+
+                  {/* Strict Audit Log Section */}
+                  {auditLog && (
+                    <div className={`rounded-lg border p-3 space-y-2.5 ${
+                      auditLog.status === 'SUCCESS' 
+                        ? 'bg-emerald-50/50 border-emerald-150 text-emerald-950' 
+                        : 'bg-rose-50/50 border-rose-150 text-rose-950'
+                    }`}>
+                      <div className="flex items-center justify-between border-b pb-1.5 border-emerald-250/20">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-900 font-bold">
+                          📋 LOG DE AUDITORIA
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-600 text-white shadow-xs">
+                          {auditLog.status === 'SUCCESS' ? 'APROVADO' : 'BLOQUEADO'}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="text-slate-500 font-medium">Linhas Excel:</span>
+                          <span className="font-mono font-bold text-slate-700">{auditLog.excelRowsCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="text-slate-500 font-medium">Linhas Importadas:</span>
+                          <span className="font-mono font-bold text-slate-700">{auditLog.importedRowsCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-0.5 border-t border-slate-200/30 pt-1">
+                          <span className="text-slate-500 font-medium">Total Excel:</span>
+                          <span className="font-mono font-bold text-slate-700">
+                            R$ {auditLog.excelTotalSum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="text-slate-500 font-medium">Total Importado:</span>
+                          <span className="font-mono font-bold text-slate-700">
+                            R$ {auditLog.importedTotalSum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-t border-emerald-450/20 pt-1 text-emerald-900">
+                          <span className="font-bold">Divergência:</span>
+                          <span className="font-mono font-extrabold text-emerald-700 bg-emerald-100/50 px-1.5 py-0.5 rounded text-[11px]">
+                            R$ {auditLog.diff.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleProcessImport}
+                      disabled={auditLog?.status !== 'SUCCESS'}
+                      className={`flex-1 font-bold py-2 px-3 rounded-lg text-xs transition-all cursor-pointer text-center ${
+                        auditLog?.status === 'SUCCESS'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shadow-emerald-600/10'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Confirmar Importação
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTempFile(null);
+                        setAuditLog(null);
+                        setImportErrors(null);
+                      }}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg p-2 transition-colors cursor-pointer"
+                      title="Remover arquivo"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 text-center text-[10px] text-slate-400 font-sans">
+                  Nenhuma planilha carregada para processamento no momento.
                 </div>
               )}
-
-              <div className="pt-1 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleProcessImport}
-                  disabled={auditLog?.status !== 'SUCCESS'}
-                  className={`flex-1 font-bold py-2 px-3 rounded-lg text-xs transition-all cursor-pointer text-center ${
-                    auditLog?.status === 'SUCCESS'
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shadow-emerald-600/10'
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-                >
-                  Confirmar Importação
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTempFile(null);
-                    setAuditLog(null);
-                    setImportErrors(null);
-                  }}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg p-2 transition-colors cursor-pointer"
-                  title="Remover arquivo"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
             </div>
           ) : (
-            <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 text-center text-[10px] text-slate-400">
-              Nenhuma planilha carregada para processamento no momento.
-            </div>
+            /* FORMULÁRIO COMPLETO DE LANÇAMENTO MANUAL (MESMOS CAMPOS DA PLANILHA EXCEL) */
+            <form onSubmit={handleSaveManualExpense} className="space-y-4 animate-fade-in text-slate-755 text-xs">
+              <div className="bg-slate-55 border border-slate-200 p-3.5 rounded-xl text-[10.5px] leading-relaxed text-slate-500 flex items-start gap-2.5">
+                <HelpCircle className="h-4.5 w-4.5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                <span>
+                  <strong>Ergonomia Avançada:</strong> Ao selecionar uma conta de origem do seu <strong>Plano de Contas Oficial</strong>, os campos de código, descrição da conta, agrupador DRE e tipo de custo serão preenchidos automaticamente. Você também pode preencher tudo livremente selecionando a segunda opção.
+                </span>
+              </div>
+
+              {/* 0. Seleção do Plano de Contas */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Conta de Origem (Plano de Contas)</label>
+                <select
+                  value={manualPlanoContasId}
+                  onChange={(e) => handlePlanoContasChange(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-750 cursor-pointer focus:outline-none focus:border-indigo-500 font-bold focus:ring-1 focus:ring-indigo-500 text-xs"
+                >
+                  <option value="">-- Vincular a uma Conta de Origem Existente (Opcional) --</option>
+                  {planoContas.map(pc => (
+                    <option key={pc.id} value={pc.id}>
+                      [{pc.code}] - {pc.name} ({pc.subCategory})
+                    </option>
+                  ))}
+                  <option value="custom">✍️ Lançamento Avulso Livre (Sem vínculo ao Plano de Contas)</option>
+                </select>
+              </div>
+
+              {/* Grid: Excel physical details (Data Operação, Vencimento, Mês Competência) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 1. Operação (Data) */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Data de Operação (Operação) *</label>
+                  <input
+                    type="date"
+                    required
+                    value={manualDate}
+                    onChange={(e) => handleManualDateChange(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-750 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-semibold"
+                  />
+                </div>
+
+                {/* 2. Vencimento */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Vencimento (Opcional)</label>
+                  <input
+                    type="date"
+                    required
+                    value={manualVencDate}
+                    onChange={(e) => setManualVencDate(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-semibold"
+                  />
+                </div>
+
+                {/* 3. Mês Competência */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Mês Competência (Mês) *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="MM/AAAA"
+                    value={manualMes}
+                    onChange={(e) => setManualMes(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Grid: Accounts identification */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 4. Conta Code */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Código de Conta (Conta) *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: 40101"
+                    disabled={manualPlanoContasId !== '' && manualPlanoContasId !== 'custom'}
+                    value={manualContaCode}
+                    onChange={(e) => setManualContaCode(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 disabled:opacity-60 font-mono font-bold"
+                  />
+                </div>
+
+                {/* 5. Descrição - Conta */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Descrição - Conta *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: AWS SERVIDORES CLOUD"
+                    disabled={manualPlanoContasId !== '' && manualPlanoContasId !== 'custom'}
+                    value={manualContaLabel}
+                    onChange={(e) => setManualContaLabel(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 disabled:opacity-60 font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Grid: DRE structure correlation */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 6. Classificação */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Agrupador DRE (Classificação) *</label>
+                  <select
+                    disabled={manualPlanoContasId !== '' && manualPlanoContasId !== 'custom'}
+                    value={manualClassification}
+                    onChange={(e) => setManualClassification(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 disabled:opacity-60 font-semibold cursor-pointer"
+                  >
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 7. Descrição */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Subcategoria (Descrição)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Sistemas & Cloud"
+                    disabled={manualPlanoContasId !== '' && manualPlanoContasId !== 'custom'}
+                    value={manualSubCategory}
+                    onChange={(e) => setManualSubCategory(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 disabled:opacity-60 font-semibold"
+                  />
+                </div>
+
+                {/* 8. Custo */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Tipo de Custo (Custo) *</label>
+                  <select
+                    disabled={manualPlanoContasId !== '' && manualPlanoContasId !== 'custom'}
+                    value={manualCostType}
+                    onChange={(e) => setManualCostType(e.target.value as any)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 disabled:opacity-60 font-semibold cursor-pointer"
+                  >
+                    <option value="Fixo">Despesa Fixa</option>
+                    <option value="Variável">Despesa Variável</option>
+                    <option value="N/A">N/A (Não aplicável)</option>
+                    <option value="MEO font-bold">MEO</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row: Documento, Histórico */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 9. Documento */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Documento / Nota Fiscal (Documento)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: NF-e 25420"
+                    value={manualDocument}
+                    onChange={(e) => setManualDocument(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+
+                {/* 10. Histórico */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Histórico de Observação (Histórico)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Pagamento da licença de servidores mensais"
+                    value={manualHistorico}
+                    onChange={(e) => setManualHistorico(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-755 focus:outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Row: Valor original (numeric positive) */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Valor do Lançamento (Valor) *</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-extrabold text-slate-400">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    placeholder="0,00"
+                    value={manualValor || ''}
+                    onChange={(e) => setManualValor(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-slate-800 text-xs font-mono font-black focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Form submit action */}
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2 font-sans tracking-wide uppercase font-black"
+                >
+                  <Save className="h-4 w-4" />
+                  Salvar Lançamento Manual
+                </button>
+              </div>
+            </form>
           )}
         </div>
 
