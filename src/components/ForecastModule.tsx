@@ -105,6 +105,23 @@ export default function ForecastModule({
     ).sort();
   }, [transactions]);
 
+  // Sidebar toggle state (Default to selected planning month, per user instructions)
+  const [leftSidebarMode, setLeftSidebarMode] = useState<'selected_month' | 'historical_averages'>('selected_month');
+
+  // Month label in Portuguese helper
+  const getMonthLabel = (monthStr: string): string => {
+    const parts = monthStr.split('-');
+    if (parts.length === 2) {
+      const monthsMap: { [key: string]: string } = {
+        '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março', '04': 'Abril',
+        '05': 'Maio', '06': 'Junho', '07': 'Julho', '08': 'Agosto',
+        '09': 'Setembro', '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
+      };
+      return `${monthsMap[parts[1]]} de ${parts[0]}`;
+    }
+    return monthStr;
+  };
+
   // Keep selectedHistoricalMonths initialized to all available months when months list changes
   useEffect(() => {
     if (months.length > 0 && selectedHistoricalMonths.length === 0) {
@@ -121,6 +138,43 @@ export default function ForecastModule({
       })
       .reduce((sum, t) => sum + (Number(t.value) || 0), 0);
   };
+
+  // Helper to aggregate category groups for any specific month
+  const getActualSum = (catId: string, month: string): number => {
+    if (catId === 'total_sales') {
+      return Math.abs(getCatSum('sales_products', month) + getCatSum('sales_services', month));
+    } else if (catId === 'deductions') {
+      return Math.abs(
+        getCatSum('deduction_icms', month) + getCatSum('deduction_pis', month) + getCatSum('deduction_cofins', month) + getCatSum('deduction_iss', month)
+      );
+    } else if (catId === 'costs') {
+      return Math.abs(
+        getCatSum('costs_materials', month) + getCatSum('costs_resell', month) + getCatSum('costs_production', month)
+      );
+    } else if (catId === 'operating_expenses') {
+      return Math.abs(
+        getCatSum('opex_people', month) + getCatSum('opex_marketing', month) + getCatSum('opex_systems', month) + getCatSum('opex_contractors', month) + getCatSum('opex_maintenance', month) + getCatSum('opex_admin', month)
+      );
+    } else {
+      return Math.abs(getCatSum(catId, month));
+    }
+  };
+
+  // Target month real numbers derivations
+  const actualMonthSales = useMemo(() => getActualSum('total_sales', targetMonth), [targetMonth, transactions]);
+  const actualMonthDeductions = useMemo(() => getActualSum('deductions', targetMonth), [targetMonth, transactions]);
+  const actualMonthCosts = useMemo(() => getActualSum('costs', targetMonth), [targetMonth, transactions]);
+  const actualMonthOpex = useMemo(() => getActualSum('operating_expenses', targetMonth), [targetMonth, transactions]);
+  const actualMonthEbitda = useMemo(() => {
+    return actualMonthSales - (actualMonthCosts + actualMonthDeductions + actualMonthOpex);
+  }, [actualMonthSales, actualMonthCosts, actualMonthDeductions, actualMonthOpex]);
+
+  const transactionsInSelectedMonth = useMemo(() => {
+    return transactions.filter(t => {
+      const parts = t.date.split('-');
+      return `${parts[0]}-${parts[1]}` === targetMonth;
+    });
+  }, [targetMonth, transactions]);
 
   // Helper inside Forecast to calculate historical average (filtering by active selected period)
   const getAverageValue = (catId: string): number => {
@@ -617,18 +671,49 @@ export default function ForecastModule({
           <div className="xl:col-span-4 flex flex-col gap-6">
             
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-150 pb-3">
+              <div className="flex items-center gap-2 border-b border-slate-150 pb-3 font-sans">
                 <div className="bg-slate-100 p-2 rounded-lg text-slate-700">
-                  <Landmark className="h-4.5 w-4.5" />
+                  <Landmark className="h-4.5 w-4.5 text-indigo-600" />
                 </div>
                 <div>
                   <h3 className="text-xs font-extrabold uppercase text-slate-800 tracking-wider">Histórico Real da Operação</h3>
-                  <span className="text-[10px] text-slate-400 block font-medium">Médias derivadas dos seus lançamentos ativos</span>
+                  <span className="text-[10px] text-slate-400 block font-medium">
+                    {leftSidebarMode === 'selected_month'
+                      ? `Lançamentos reais em ${getMonthLabel(targetMonth)}`
+                      : 'Médias derivadas dos seus lançamentos retroativos ativos'}
+                  </span>
                 </div>
               </div>
 
-              {/* Filtro de Período Multi-mês */}
-              <div className="space-y-2 border-b border-slate-150 pb-3">
+              {/* Mês Selecionado vs Média Multi-mês visual tab selectors */}
+              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 text-[10px] font-sans">
+                <button
+                  type="button"
+                  onClick={() => setLeftSidebarMode('selected_month')}
+                  className={`flex-1 py-1.5 px-1 rounded-lg font-black uppercase tracking-wider transition-all text-center cursor-pointer ${
+                    leftSidebarMode === 'selected_month'
+                      ? 'bg-white text-indigo-600 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 font-bold'
+                  }`}
+                >
+                  Mês de Planejamento
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeftSidebarMode('historical_averages')}
+                  className={`flex-1 py-1.5 px-1 rounded-lg font-black uppercase tracking-wider transition-all text-center cursor-pointer ${
+                    leftSidebarMode === 'historical_averages'
+                      ? 'bg-white text-indigo-600 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 font-bold'
+                  }`}
+                >
+                  Médias do Período
+                </button>
+              </div>
+
+              {leftSidebarMode === 'historical_averages' ? (
+                /* Filtro de Período Multi-mês */
+                <div className="space-y-2 border-b border-slate-150 pb-3">
                 <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                   <span>Filtrar Período de Análise</span>
                   <div className="flex gap-2">
@@ -694,13 +779,21 @@ export default function ForecastModule({
                   </p>
                 )}
               </div>
+              ) : (
+                /* Chamada informativa do mês atual selecionado */
+                <div className="bg-slate-50 border border-slate-150 p-3 rounded-xl text-slate-500 text-[10px] leading-relaxed">
+                  Mostrando os resultados consolidados coletados a partir de filtros estritos do planejamento ativo no mês de <strong>{getMonthLabel(targetMonth)}</strong>. Use para auditar de forma granular.
+                </div>
+              )}
 
               <div className="space-y-3.5">
                 <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400">Total Faturado (Médio)</span>
+                    <span className="text-[9px] uppercase font-bold text-slate-400">
+                      {leftSidebarMode === 'selected_month' ? 'Total Faturado no Mês' : 'Total Faturado (Médio)'}
+                    </span>
                     <span className="block text-sm font-extrabold text-slate-800 font-mono mt-0.5">
-                      R$ {baselineSales.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {(leftSidebarMode === 'selected_month' ? actualMonthSales : baselineSales).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <span className="text-[10px] bg-slate-200/60 text-slate-600 px-2 py-0.5 rounded-full font-bold">100.0%</span>
@@ -708,40 +801,98 @@ export default function ForecastModule({
 
                 <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400">Custo de Mercadoria/Deduções</span>
+                    <span className="text-[9px] uppercase font-bold text-slate-400">
+                      {leftSidebarMode === 'selected_month' ? 'Custos & Deduções no Mês' : 'Custo de Mercadoria/Deduções'}
+                    </span>
                     <span className="block text-sm font-bold text-slate-700 font-mono mt-0.5">
-                      R$ {(baselineCosts + baselineDeductions).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      R$ {(leftSidebarMode === 'selected_month' ? (actualMonthCosts + actualMonthDeductions) : (baselineCosts + baselineDeductions)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <span className="text-[10px] bg-rose-50 text-rose-600 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
-                    {baselineSales > 0 ? `${(((baselineCosts + baselineDeductions) / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                    {(() => {
+                      const faturamento = leftSidebarMode === 'selected_month' ? actualMonthSales : baselineSales;
+                      const custoTotal = leftSidebarMode === 'selected_month' ? (actualMonthCosts + actualMonthDeductions) : (baselineCosts + baselineDeductions);
+                      return faturamento > 0 ? `${((custoTotal / faturamento) * 100).toFixed(1)}%` : '0%';
+                    })()}
                   </span>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-100/75 p-3 rounded-xl flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400">Despesas Operacionais (OPEX)</span>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 font-bold">
+                      {leftSidebarMode === 'selected_month' ? 'Despesas Operacionais (OPEX)' : 'Despesas Operacionais (OPEX)'}
+                    </span>
                     <span className="block text-sm font-bold text-slate-700 font-mono mt-0.5">
-                      R$ {baselineOpex.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      R$ {(leftSidebarMode === 'selected_month' ? actualMonthOpex : baselineOpex).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-bold font-mono">
-                    {baselineSales > 0 ? `${((baselineOpex / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                    {(() => {
+                      const faturamento = leftSidebarMode === 'selected_month' ? actualMonthSales : baselineSales;
+                      const opex = leftSidebarMode === 'selected_month' ? actualMonthOpex : baselineOpex;
+                      return faturamento > 0 ? `${((opex / faturamento) * 100).toFixed(1)}%` : '0%';
+                    })()}
                   </span>
                 </div>
 
                 <div className="bg-indigo-50/50 border border-indigo-100/50 p-4 rounded-xl flex justify-between items-center shadow-2xs">
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-indigo-600">Lucro EBITDA Médio</span>
+                    <span className="text-[9px] uppercase font-bold text-indigo-600">
+                      {leftSidebarMode === 'selected_month' ? 'Lucro EBITDA no Mês' : 'Lucro EBITDA Médio'}
+                    </span>
                     <span className="block text-base font-black text-indigo-750 font-mono mt-0.5">
-                      R$ {Math.max(0, baselineSales - (baselineCosts + baselineDeductions + baselineOpex)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      R$ {(leftSidebarMode === 'selected_month' ? actualMonthEbitda : Math.max(0, baselineSales - (baselineCosts + baselineDeductions + baselineOpex))).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
-                  <span className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-black font-mono shadow-sm">
-                    {baselineSales > 0 ? `${(((baselineSales - (baselineCosts + baselineDeductions + baselineOpex)) / baselineSales) * 100).toFixed(1)}%` : '0%'}
+                  <span className={`text-xs px-2.5 py-1 rounded-lg font-black font-mono shadow-sm ${
+                    (leftSidebarMode === 'selected_month' ? actualMonthEbitda : baselineSales - (baselineCosts + baselineDeductions + baselineOpex)) >= 0
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-rose-600 text-white'
+                  }`}>
+                    {(() => {
+                      const faturamento = leftSidebarMode === 'selected_month' ? actualMonthSales : baselineSales;
+                      const ebitda = leftSidebarMode === 'selected_month' ? actualMonthEbitda : (baselineSales - (baselineCosts + baselineDeductions + baselineOpex));
+                      return faturamento > 0 ? `${((ebitda / faturamento) * 100).toFixed(1)}%` : '0%';
+                    })()}
                   </span>
                 </div>
               </div>
+
+              {/* Detalhes de Categorias do Período no modo Mês Selecionado (Excepcionalmente Útil para Auditoria do Mês) */}
+              {leftSidebarMode === 'selected_month' && (
+                <div className="border-t border-slate-100 pt-3.5 mt-3.5 space-y-2 font-sans overflow-hidden">
+                  <div className="flex justify-between items-center text-[10px] font-black uppercase text-indigo-800 tracking-wider">
+                    <span>Detalhamento do Período</span>
+                    <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[8.5px]">
+                      {transactionsInSelectedMonth.length} Lançamentos
+                    </span>
+                  </div>
+                  <div className="max-h-[220px] overflow-y-auto space-y-1.5 pr-1 font-sans">
+                    {categories.map(cat => {
+                      const catSum = Math.abs(getCatSum(cat.id, targetMonth));
+                      if (catSum === 0) return null; // Only show categories with activity for cleaner minimalist layout
+                      const isIncome = cat.id.startsWith('sales_') || cat.id === 'shareholder_contribution';
+                      
+                      return (
+                        <div key={cat.id} className="flex justify-between items-center text-[10.5px] bg-slate-50 border border-slate-100 p-2 rounded-lg hover:bg-slate-100/70 transition-all">
+                          <div className="truncate max-w-[175px]" title={cat.name}>
+                            <span className="font-extrabold text-slate-700 block text-[10px] leading-tight shrink-0">{cat.name}</span>
+                            <span className="text-[9px] text-slate-400 capitalize">{cat.type === 'incoming' ? 'Receita' : cat.type === 'outgoing' ? 'Despesa' : cat.type === 'deduction' ? 'Dedução' : 'Fórmula'}</span>
+                          </div>
+                          <span className={`font-mono font-black shrink-0 ${isIncome ? 'text-emerald-600' : 'text-slate-600'}`}>
+                            R$ {catSum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {categories.every(cat => getCatSum(cat.id, targetMonth) === 0) && (
+                      <p className="text-[10px] text-slate-400 italic text-center py-4 font-sans">
+                        Nenhum faturamento ou despesa registrado nesta competência.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="bg-slate-100/75 p-3 rounded-xl flex gap-2 text-slate-500">
                 <Info className="h-4 w-4 shrink-0 text-indigo-500 mt-0.5" />
