@@ -83,6 +83,8 @@ export default function ForecastModule({
     }
   }, [logDay, targetMonth, transactions]);
 
+
+
   // Existing compound forecast parameters
   const [horizon, setHorizon] = useState<12 | 24 | 36>(12);
   const [scenario, setScenario] = useState<'conservative' | 'normal' | 'aggressive'>('normal');
@@ -209,10 +211,33 @@ export default function ForecastModule({
     return sumTotal / activeMonths.length;
   };
 
-  const baselineSales = useMemo(() => getAverageValue('total_sales') || 0, [months, selectedHistoricalMonths, transactions]);
-  const baselineDeductions = useMemo(() => getAverageValue('deductions') || 0, [months, selectedHistoricalMonths, transactions]);
-  const baselineCosts = useMemo(() => getAverageValue('costs') || 0, [months, selectedHistoricalMonths, transactions]);
-  const baselineOpex = useMemo(() => getAverageValue('operating_expenses') || 0, [months, selectedHistoricalMonths, transactions]);
+  const baselineSales = useMemo(() => {
+    if (leftSidebarMode === 'selected_month') {
+      return actualMonthSales > 0 ? actualMonthSales : (getAverageValue('total_sales') || 0);
+    }
+    return getAverageValue('total_sales') || 0;
+  }, [leftSidebarMode, actualMonthSales, months, selectedHistoricalMonths, transactions]);
+
+  const baselineDeductions = useMemo(() => {
+    if (leftSidebarMode === 'selected_month') {
+      return actualMonthDeductions > 0 ? actualMonthDeductions : (getAverageValue('deductions') || 0);
+    }
+    return getAverageValue('deductions') || 0;
+  }, [leftSidebarMode, actualMonthDeductions, months, selectedHistoricalMonths, transactions]);
+
+  const baselineCosts = useMemo(() => {
+    if (leftSidebarMode === 'selected_month') {
+      return actualMonthCosts > 0 ? actualMonthCosts : (getAverageValue('costs') || 0);
+    }
+    return getAverageValue('costs') || 0;
+  }, [leftSidebarMode, actualMonthCosts, months, selectedHistoricalMonths, transactions]);
+
+  const baselineOpex = useMemo(() => {
+    if (leftSidebarMode === 'selected_month') {
+      return actualMonthOpex > 0 ? actualMonthOpex : (getAverageValue('operating_expenses') || 0);
+    }
+    return getAverageValue('operating_expenses') || 0;
+  }, [leftSidebarMode, actualMonthOpex, months, selectedHistoricalMonths, transactions]);
 
   // Helpers to fetch previous month and calculate historical/comparison values
   const getPreviousMonthStr = (monthStr: string): string => {
@@ -239,13 +264,36 @@ export default function ForecastModule({
     return previousMonthSales > 0 ? previousMonthSales : baselineSales;
   }, [previousMonthSales, baselineSales]);
 
-  // Set default target faturamento on base calculation change or month select
+  // Synchronize interactive inputs to loaded/historical config of the selected Month and active trends
   useEffect(() => {
-    if (referenceSales > 0) {
-      const calculatedInitialValue = Math.round(referenceSales * (1 + growthPretensionPct / 100));
-      setTargetFaturamento(calculatedInitialValue);
+    const salesGoal = categoryGoals.find(g => g.categoryId === 'total_sales' && g.month === targetMonth);
+    if (salesGoal) {
+      setTargetFaturamento(salesGoal.targetValue);
+      if (referenceSales > 0) {
+        const calculatedPct = ((salesGoal.targetValue - referenceSales) / referenceSales) * 100;
+        setGrowthPretensionPct(Number(calculatedPct.toFixed(1)));
+      }
+    } else {
+      if (referenceSales > 0) {
+        const calculatedInitialValue = Math.round(referenceSales * (1 + growthPretensionPct / 100));
+        setTargetFaturamento(calculatedInitialValue);
+      }
     }
-  }, [referenceSales]);
+
+    const mktGoal = categoryGoals.find(g => g.categoryId === 'opex_marketing' && g.month === targetMonth);
+    if (mktGoal) {
+      setMarketingBudget(mktGoal.targetValue);
+    } else {
+      setMarketingBudget(4500);
+    }
+
+    const config = monthConfigs.find(c => c.month === targetMonth);
+    if (config) {
+      setWorkingDays(config.totalWorkingDays);
+    } else {
+      setWorkingDays(22);
+    }
+  }, [targetMonth, categoryGoals, monthConfigs, referenceSales]);
 
   // Sync Growth rate input change with target faturamento
   const handleGrowthPctChange = (pct: number) => {

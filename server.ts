@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
+import { whatsappService } from "./src/services/whatsapp/whatsappService";
 
 dotenv.config();
 
@@ -43,8 +44,14 @@ const initServer = async () => {
       supabase = createClient(supabaseUrl, supabaseAnonKey);
       supabaseActive = true;
       console.log("🚀 Supabase Client initialized successfully.");
+      whatsappService.setSupabase(supabase);
     }
     
+    // Initialize the WhatsApp service (it will run with real Puppeteer if possible, or fall back immediately and safely)
+    whatsappService.initialize().catch(err => {
+      console.error("❌ Failed to initialize WhatsApp service asynchronously:", err);
+    });
+
     // 2. Resolve DB promise
     resolveDbReady(true);
   } catch (err) {
@@ -297,14 +304,94 @@ app.get("/api/status", async (req, res) => {
   });
 });
 
-// API endpoint for Gemini-powered financial helper
+// ==========================================
+// WHATSAPP INTEGRATION ENDPOINTS
+// ==========================================
+app.get("/api/whatsapp/status", (req, res) => {
+  try {
+    const statusInfo = whatsappService.getStatus();
+    res.json(statusInfo);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/whatsapp/qrcode", (req, res) => {
+  try {
+    const statusInfo = whatsappService.getStatus();
+    res.json({
+      status: statusInfo.status,
+      mode: statusInfo.mode,
+      qrCodeUrl: statusInfo.qrCodeUrl || null
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/whatsapp/send", async (req, res) => {
+  const { companyId, phone, text, supplierId } = req.body;
+  if (!phone || !text) {
+    return res.status(400).json({ error: "Parâmetros 'phone' e 'text' são obrigatórios." });
+  }
+  try {
+    const msg = await whatsappService.sendMessage(companyId || 'c1', phone, text, supplierId);
+    res.json({ success: true, message: msg });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/whatsapp/messages", async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'c1';
+  try {
+    const messages = await whatsappService.getMessages(companyId);
+    const conversations = await whatsappService.getConversations(companyId);
+    const contacts = await whatsappService.getContacts(companyId);
+    res.json({ messages, conversations, contacts });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/whatsapp/simulate-scan", async (req, res) => {
+  try {
+    await whatsappService.simulateScan();
+    res.json({ success: true, status: whatsappService.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/whatsapp/disconnect", async (req, res) => {
+  try {
+    await whatsappService.disconnect();
+    res.json({ success: true, status: whatsappService.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/whatsapp/clear-unreads", async (req, res) => {
+  const { companyId, conversationId } = req.body;
+  try {
+    await whatsappService.clearUnreads(companyId || 'c1', conversationId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API endpoint for Gemini-powered financial and supply chain helper
 app.post("/api/gemini/chat", async (req, res) => {
-  const { prompt, dreContext, history, attachedContext } = req.body;
+  const { prompt, dreContext, history, attachedContext, assistantType, procurementContext } = req.body;
 
   if (!prompt) {
     res.status(400).json({ error: "O campo 'prompt' é obrigatório." });
     return;
   }
+
+  const isProcurement = assistantType === "procurement";
 
   try {
     // Simulation mode if API Key is missing
@@ -312,19 +399,59 @@ app.post("/api/gemini/chat", async (req, res) => {
       const lowerPrompt = prompt.toLowerCase();
       let simulatedResponse = "";
       
-      if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
-        simulatedResponse = "Olá! Como seu CFO Virtual, estou aqui para analisarmos juntos os números da sua empresa. Como posso ajudar no diagnóstico de hoje?";
-      } else if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
-        simulatedResponse = "Analisei aqui e notei que seu lucro teve uma compressão expressiva. O principal motivo foi o aumento em 'Marketing', que saltou para R$ 93.000. Isso consumiu 26% da sua receita, o que é um sinal crítico para sua margem EBITDA.\n\nMinha recomendação como seu CFO: precisamos validar se esse investimento trouxe um aumento proporcional nas vendas. Caso contrário, devemos recuar para o teto de R$ 40.000 para preservar o caixa.";
+      if (isProcurement) {
+        if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
+          simulatedResponse = "Olá! Como seu Diretor Sênior de Compras e Supply Chain, estou pronto para gerenciar suas cotações, otimizar lead times e reduzir custos de aquisição. Em qual desafio de suprimentos ou negociação posso te apoiar hoje?";
+        } else if (lowerPrompt.includes("estoque") || lowerPrompt.includes("comprar") || lowerPrompt.includes("ruptura") || lowerPrompt.includes("reposição")) {
+          simulatedResponse = "Analisei seu painel de suprimentos e notei um risco crítico de ruptura:\n\n1. **Café Especial Torrado** está com estoque em **4 unidades**, sendo que o mínimo estipulado é **12**. Recomendo comprar **15.5 unidades** para suprir a demanda.\n2. **Embalagens Take-Away** está crítico com **250 unidades** de estoque atual frente ao estoque mínimo de **800**. Demanda uma compra urgente de **1016 unidades** baseado no lead time de 14 dias.\n\nQuer que eu crie uma simulação de envio de pedido de cotação para nossos fornecedores parceiros?";
+        } else if (lowerPrompt.includes("cotar") || lowerPrompt.includes("cotação") || lowerPrompt.includes("economia") || lowerPrompt.includes("saving")) {
+          simulatedResponse = "Sua matriz comparativa demonstra que o **Fornecedor A** costuma oferecer os melhores preços unitários, mas o **Fornecedor B** bate o prazo (Lead Time de 5 dias contra 15 dias). \n\nAnalisando o lote econômico: para itens de alta frequência, vale a pena segmentar e manter 70% do volume com o Fornecedor A, e acionar o Fornecedor B apenas em pedidos emergenciais para economizar em capital de giro. Isso trará um **Saving adicional de até 8%**.";
+        } else {
+          simulatedResponse = "Compreendido. Revisando seus indicadores de Supply Chain: o seu **Lead Time Médio** atual é de **12.2 dias** e o **Saving Acumulado** nas cotações registradas está em torno de **12.5%**. Recomendo fazermos uma rodada de compras consolidadas ao final do mês para aumentar nossa margem bruta (DRE). Gostaria que eu simulasse os novos preços?";
+        }
       } else {
-        simulatedResponse = "Verificando os dados agora... Sua receita está estável, mas os custos operacionais (OPEX) estão subindo acima do previsto. Como seu consultor, recomendo revisarmos as despesas administrativas. Quer que eu detalhe onde podemos otimizar sem ferir a operação?";
+        if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
+          simulatedResponse = "Olá! Como seu CFO Virtual, estou aqui para analisarmos juntos os números da sua empresa. Como posso ajudar no diagnóstico de hoje?";
+        } else if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
+          simulatedResponse = "Analisei aqui e notei que seu lucro teve uma compressão expressiva. O principal motivo foi o aumento em 'Marketing', que saltou para R$ 93.000. Isso consumiu 26% da sua receita, o que é um sinal crítico para sua margem EBITDA.\n\nMinha recomendação como seu CFO: precisamos validar se esse investimento trouxe um aumento proporcional nas vendas. Caso contrário, devemos recuar para o teto de R$ 40.000 para preservar o caixa.";
+        } else {
+          simulatedResponse = "Verificando os dados agora... Sua receita está estável, mas os custos operacionais (OPEX) estão subindo acima do previsto. Como seu consultor, recomendo revisarmos as despesas administrativas. Quer que eu detalhe onde podemos otimizar sem ferir a operação?";
+        }
       }
 
       res.json({ text: simulatedResponse });
       return;
     }
 
-    const contextPrompt = `
+    let contextPrompt = "";
+
+    if (isProcurement) {
+      contextPrompt = `
+Você é o "Gerente Sênior de Compras, Sourcing e Supply Chain", atuando com altíssima experiência técnica em cadeias de suprimentos de micro, pequenas e médias empresas. Sua missão é apoiar de forma assertiva e consultiva.
+
+DIRETRIZES DE PERSONALIDADE E COMPORTAMENTO:
+1. SEJA COOPERATIVO, HUMANO E ANALÍTICO: Fale com proximidade sobre o negócio. Dê as boas-vindas com entusiasmo, tratando o proprietário como parceiro.
+2. FOCO EM EFICIÊNCIA DE CAIXA: Em compras, o caixa é rei. Analise se vale a pena comprar volumes maiores para ter desconto (saving), pesando o espaço de estoque e custo de capital de giro.
+3. ENTREGUE ESTRATÉGIAS DE SUPRIMENTOS: Interprete os indicadores (Giro de estoque, Lead time, Saving).
+4. AUXILIE COM COTAÇÕES: Diga qual fornecedor é melhor financeiramente ou por lead time para cada item.
+
+DADOS ATUAIS DE SUPPLY CHAIN (COTAÇÕES E REPOSIÇÃO):
+${JSON.stringify(procurementContext, null, 2)}
+
+CONEXÃO FINANCEIRA DRE:
+- Lembre-se que as compras afetam diretamente o CMV (Custos de Matéria-Prima e Produção) do faturamento da empresa.
+${JSON.stringify(dreContext, null, 2)}
+
+${attachedContext ? `DADOS DO ARQUIVO ANEXO:\n${attachedContext}\n` : ''}
+
+HISTÓRICO DA CONVERSA:
+${history ? JSON.stringify(history) : 'Início da conversa.'}
+
+SOLICITAÇÃO DO USUÁRIO EM SUPRIMENTOS / COMPRAS:
+${prompt}
+`;
+    } else {
+      contextPrompt = `
 Você é o "CFO Virtual Inteligente", agindo como um Diretor Financeiro e Estratégico (CFO/CEO) de alta senioridade. Sua missão é ser o parceiro estratégico do dono da empresa "${dreContext?.companyName || 'Empresa Ativa'}".
 
 DIRETRIZES DE PERSONALIDADE E COMPORTAMENTO:
@@ -350,6 +477,7 @@ ${history ? JSON.stringify(history) : 'Início da conversa.'}
 SOLICITAÇÃO DO USUÁRIO:
 ${prompt}
 `;
+    }
 
     const modelName = "gemini-3.5-flash";
     const result = await ai.models.generateContent({
@@ -366,12 +494,107 @@ ${prompt}
     const isTransientError = errMsg.includes("503") || error?.status === 503;
 
     if (isTransientError) {
-      res.json({ text: "📊 **Análise CFO (Contingência)**\n\nReceita estável, mas identifiquei compressão de margem EBITDA devido a custos variáveis não planejados. Recomendo cautela nos próximos 15 dias enquanto as APIs de análise profunda se estabilizam." });
+      res.json({ text: isProcurement 
+        ? "📦 **Diagnóstico Supply Chain (Contingência)**\n\nIdentifiquei gargalo de suprimentos preventivo devido a oscilações em prazos globais de frete compra. Recomendo manter estoque mínimo de segurança de 15 dias adicional para amortizar perturbações sazonais enquanto restauramos análises profundas."
+        : "📊 **Análise CFO (Contingência)**\n\nReceita estável, mas identifiquei compressão de margem EBITDA devido a custos variáveis não planejados. Recomendo cautela nos próximos 15 dias enquanto as APIs de análise profunda se estabilizam."
+      });
       return;
     }
 
-    res.json({ text: "⚠️ O Assistente está temporariamente focado em processamento interno. Por favor, tente novamente em alguns instantes." });
+    res.json({ text: "⚠️ O Assistente está temporariamente focado em processamento interno de suprimentos. Por favor, tente novamente em alguns instantes." });
   }
+});
+
+
+// ==========================================
+// PROCUREMENT AND SUPPLY CHAIN CONTROL ENDPOINTS
+// ==========================================
+
+app.get("/api/procurement/quotes", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+  const db = getDb();
+  if (!(db as any).quotes) (db as any).quotes = [];
+  const list = (db as any).quotes.filter((q: any) => q.company_id === String(company_id));
+  res.json(list);
+});
+
+app.post("/api/procurement/quotes", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, quotes } = req.body;
+  if (!company_id || !Array.isArray(quotes)) {
+    res.status(400).json({ error: "company_id ou array de cotações inválido." });
+    return;
+  }
+  const db = getDb();
+  if (!(db as any).quotes) (db as any).quotes = [];
+  
+  // Overwrite for this company to allow clean reporting
+  const filtered = (db as any).quotes.filter((q: any) => q.company_id !== String(company_id));
+  const newQuotes = quotes.map((q: any) => ({
+    ...q,
+    id: q.id || `quote_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id),
+    created_at: q.created_at || new Date().toISOString()
+  }));
+  
+  (db as any).quotes = [...filtered, ...newQuotes];
+  saveDb(db);
+  res.json({ success: true, count: newQuotes.length, data: newQuotes });
+});
+
+app.get("/api/procurement/inventory", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+  const db = getDb();
+  if (!(db as any).inventory_items) (db as any).inventory_items = [];
+  const list = (db as any).inventory_items.filter((item: any) => item.company_id === String(company_id));
+  
+  // Pre-seed some realistic supply chain materials so the module looks incredible out of the box!
+  if (list.length === 0) {
+    const defaults = [
+      { id: 'inv_1', item_name: 'Café Especial Torrado (Saca 60kg)', current_stock: 4, min_stock: 12, avg_consumption: 15, lead_time: 15, company_id: String(company_id) },
+      { id: 'inv_2', item_name: 'Copos Descartáveis Personalizados (Cxs)', current_stock: 45, min_stock: 40, avg_consumption: 60, lead_time: 20, company_id: String(company_id) },
+      { id: 'inv_3', item_name: 'Açúcar de Confeiteiro (Fardos 20kg)', current_stock: 15, min_stock: 10, avg_consumption: 12, lead_time: 7, company_id: String(company_id) },
+      { id: 'inv_4', item_name: 'Leite Integral UHT (Caixas de 12L)', current_stock: 35, min_stock: 30, avg_consumption: 50, lead_time: 5, company_id: String(company_id) },
+      { id: 'inv_5', item_name: 'Embalagens Take-Away (Unidades)', current_stock: 250, min_stock: 800, avg_consumption: 1000, lead_time: 14, company_id: String(company_id) }
+    ];
+    (db as any).inventory_items = [...(db as any).inventory_items, ...defaults];
+    saveDb(db);
+    res.json(defaults);
+    return;
+  }
+  res.json(list);
+});
+
+app.post("/api/procurement/inventory", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, inventory_items } = req.body;
+  if (!company_id || !Array.isArray(inventory_items)) {
+    res.status(400).json({ error: "company_id ou array de estoque inválido." });
+    return;
+  }
+  const db = getDb();
+  if (!(db as any).inventory_items) (db as any).inventory_items = [];
+  
+  const filtered = (db as any).inventory_items.filter((item: any) => item.company_id !== String(company_id));
+  const newItems = inventory_items.map((item: any) => ({
+    ...item,
+    id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id)
+  }));
+  
+  (db as any).inventory_items = [...filtered, ...newItems];
+  saveDb(db);
+  res.json({ success: true, count: newItems.length, data: newItems });
 });
 
 
@@ -1266,6 +1489,7 @@ async function setupViteOrStatic() {
       } else {
         console.log("✅ Conexão com as tabelas do Supabase estabelecida com sucesso! Integração ativa.");
         supabaseActive = true;
+        whatsappService.setSupabase(supabase);
 
         // Pro-active automatic seeding if database is connected but empty
         try {

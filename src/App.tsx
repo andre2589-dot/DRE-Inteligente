@@ -20,6 +20,7 @@ import DashboardCharts from './components/DashboardCharts';
 import ForecastModule from './components/ForecastModule';
 import PlanoContas from './components/PlanoContas';
 import AiAssistant from './components/AiAssistant';
+import ProcurementModule from './components/ProcurementModule';
 
 // Icons
 import { 
@@ -37,8 +38,15 @@ import {
   Sliders,
   ShieldAlert,
   Info,
-  Database
+  Database,
+  Menu,
+  X,
+  ShoppingCart,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
+
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   // Multitenant companies
@@ -47,6 +55,9 @@ export default function App() {
   
   // Security simulation configurations
   const [activeRole, setActiveRole] = useState<'Administrador' | 'Gestor Financeiro' | 'Analista' | 'Visualizador'>('Administrador');
+
+  // Sidebar toggle for mobile devices
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Core Financial states
   const [transactions, setTransactions] = useState<Transaction[]>(DEFAULT_TRANSACTIONS[DEFAULT_COMPANIES[0].id]);
@@ -60,8 +71,15 @@ export default function App() {
   const [categoryGoals, setCategoryGoals] = useState<CategoryGoal[]>([]);
   const [monthConfigs, setMonthConfigs] = useState<MonthConfig[]>([]);
 
-  // Tab control state
-  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai'>('dre');
+  // Tab control state (Unifying financial DRE, BI charts, and procurement-supply chain)
+  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'procurement'>('dre');
+
+  // Sidebar expanded / collapsed states
+  const [isDreExpanded, setIsDreExpanded] = useState(true);
+  const [isCompraExpanded, setIsCompraExpanded] = useState(true);
+
+  // Active subtab inside procurement module
+  const [procurementSubTab, setProcurementSubTab] = useState<'indicators' | 'quotes' | 'whatsapp'>('indicators');
 
   // Load category goals and month configs based on active company
   useEffect(() => {
@@ -530,39 +548,291 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 font-sans antialiased text-slate-800 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans antialiased text-slate-800">
       
-      {/* Premium Header Banner */}
-      <header className="bg-white border-b border-slate-100 shadow-xs px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* SaaS Identity */}
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 text-white p-2.5 rounded-2xl flex items-center justify-center shadow-md shadow-indigo-600/20">
-            <Layers className="h-6 w-6" />
+      {/* MOBILE HEADER BAR */}
+      <div className="md:hidden bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between z-40 text-slate-350">
+        <div className="flex items-center gap-2">
+          <Layers className="h-5 w-5 text-indigo-400" />
+          <span className="text-sm font-black tracking-widest uppercase text-white">DRE Inteligente</span>
+        </div>
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="text-slate-200 hover:text-white p-1 hover:bg-slate-800 rounded-lg focus:outline-none"
+        >
+          {isSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </div>
+
+      {/* DETACHED PERSISTENT SIDEBAR - COLLAPSIBLE ON MOBILE */}
+      <aside className={`
+        fixed inset-y-0 left-0 bg-slate-900 text-slate-350 z-50 w-64 border-r border-slate-800 flex flex-col transition-transform duration-300 transform shrink-0
+        md:relative md:translate-x-0
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        {/* Sidebar Header */}
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-slate-950/40">
+          <div className="flex items-center gap-2.5">
+            <div className="bg-indigo-600 text-white p-1.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/30">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-sm font-black tracking-tight text-white uppercase flex items-center gap-1">
+                Gestão Inteligente
+              </h1>
+              <p className="text-[9px] text-indigo-400 font-extrabold uppercase">Business Suite SaaS</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-extrabold tracking-tight text-slate-900 flex items-center gap-1.5 leading-none">
-              DRE Inteligente
-              <span className="bg-indigo-50 border border-indigo-150 text-indigo-700 font-mono text-[9px] font-black uppercase px-2 py-0.5 rounded-full tracking-widest animate-pulse">SaaS BI</span>
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">Plataforma Integrada de Demonstrações Financeiras e CFO Virtual</p>
+          <button 
+            onClick={() => setIsSidebarOpen(false)}
+            className="md:hidden text-slate-400 hover:text-white p-1"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Sidebar Tenant Switcher (Multi-Tenant RLS Simulation) */}
+        <div className="p-4 border-b border-slate-800 space-y-1.5 bg-slate-950/20">
+          <div className="flex justify-between items-center">
+            <span className="text-[9px] uppercase font-black text-slate-500 tracking-wider">Multi-Empresa (Tenant)</span>
+            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase px-1.5 py-0.2 rounded font-mono">RLS</span>
+          </div>
+          <select
+            value={activeCompany.id}
+            onChange={(e) => {
+              const found = companies.find(c => c.id === e.target.value);
+              if (found) {
+                setActiveCompany(found);
+                setTransactions(DEFAULT_TRANSACTIONS[found.id] || []);
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+            className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl py-2 px-3 text-xs font-bold font-sans cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+          >
+            {companies.map(c => (
+              <option key={c.id} value={c.id} className="bg-slate-950 text-slate-200">
+                🏢 {c.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex justify-between text-[9px] text-slate-400/80 font-mono pl-1">
+            <span>CNPJ: {activeCompany.cnpj}</span>
           </div>
         </div>
 
-        {/* Multitenant Control & Active Role selectors */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Active Company Name (Static, single tenant) */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100/80 rounded-xl px-3 py-1.5">
-            <Building className="h-4 w-4 text-indigo-500" />
-            <span className="text-xs font-bold text-slate-700">{activeCompany.name}</span>
+        {/* Categories / Tabs Sections Group */}
+        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
+          
+          {/* Main Module 1: DRE Inteligente Accordion Header */}
+          <div className="space-y-1">
+            <button
+              onClick={() => setIsDreExpanded(!isDreExpanded)}
+              style={{ cursor: 'pointer' }}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center gap-2.5 transition-all border cursor-pointer select-none ${
+                activeTab !== 'procurement'
+                  ? 'bg-indigo-950/40 border-indigo-500/20 text-white font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/15'
+              }`}
+            >
+              <div className="p-1 rounded bg-indigo-505/10">
+                <Layers className={`h-4 w-4 shrink-0 ${activeTab !== 'procurement' ? 'text-indigo-400' : 'text-slate-500'}`} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider">DRE Inteligente</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="bg-indigo-500/15 text-indigo-300 text-[8px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide font-mono">Controladoria</span>
+                {isDreExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                )}
+              </div>
+            </button>
+
+            {/* Sub-applications nested under DRE Inteligente (Collapsible) */}
+            <AnimatePresence initial={false}>
+              {isDreExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="overflow-hidden pl-3.5 border-l border-slate-800/70 ml-3.5 mt-1 space-y-1"
+                >
+                  <button
+                    onClick={() => { setActiveTab('dre'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'dre'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'dre' ? 'bg-white' : 'bg-transparent'}`} />
+                    DRE Dinâmica
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('charts'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'charts'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'charts' ? 'bg-white' : 'bg-transparent'}`} />
+                    BI Dashboards
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('import'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'import'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'import' ? 'bg-white' : 'bg-transparent'}`} />
+                    Lançamentos & CSV
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('plano'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'plano'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'plano' ? 'bg-white' : 'bg-transparent'}`} />
+                    Plano de Contas
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('projections'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'projections'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'projections' ? 'bg-white' : 'bg-transparent'}`} />
+                    Metas & Simulações
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('ai'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'ai'
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'ai' ? 'bg-white' : 'bg-emerald-400'}`} />
+                    CFO Virtual IA
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* Active User Security Role */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100/80 rounded-xl px-3 py-1.5">
-            <User className="h-4 w-4 text-slate-400" />
+          {/* Main Module 2: Compra Inteligente Accordion Header */}
+          <div className="space-y-1 pt-3 border-t border-slate-850">
+            <button
+              onClick={() => setIsCompraExpanded(!isCompraExpanded)}
+              style={{ cursor: 'pointer' }}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center gap-2.5 transition-all border cursor-pointer select-none ${
+                activeTab === 'procurement'
+                  ? 'bg-indigo-950/40 border-indigo-500/20 text-white font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/15'
+              }`}
+            >
+              <div className="p-1 rounded bg-indigo-505/10">
+                <ShoppingCart className={`h-4 w-4 shrink-0 ${activeTab === 'procurement' ? 'text-emerald-400 font-bold' : 'text-slate-500'}`} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider">Compra Inteligente</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="bg-emerald-500/15 text-emerald-300 text-[8px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide font-mono">Suprimentos</span>
+                {isCompraExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                )}
+              </div>
+            </button>
+            
+            {/* Sub-applications nested under Compra Inteligente (Collapsible) */}
+            <AnimatePresence initial={false}>
+              {isCompraExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="overflow-hidden pl-3.5 border-l border-slate-800/70 ml-3.5 mt-1 space-y-1"
+                >
+                  <button
+                    onClick={() => { setActiveTab('procurement'); setProcurementSubTab('indicators'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'procurement' && procurementSubTab === 'indicators'
+                        ? 'bg-emerald-650 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'indicators' ? 'bg-white' : 'bg-transparent'}`} />
+                    Painel de Indicadores
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('procurement'); setProcurementSubTab('quotes'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'procurement' && procurementSubTab === 'quotes'
+                        ? 'bg-emerald-650 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'quotes' ? 'bg-white' : 'bg-transparent'}`} />
+                    Cotações Inteligentes (IA)
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('procurement'); setProcurementSubTab('whatsapp'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'procurement' && procurementSubTab === 'whatsapp'
+                        ? 'bg-emerald-650 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'whatsapp' ? 'bg-white' : 'bg-transparent'}`} />
+                    Zap de Fornecedores
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+        </div>
+
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-slate-800 bg-slate-950/45 space-y-3 shrink-0">
+          <div className="flex items-center gap-2 px-1">
+            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[10px] font-bold text-slate-400">Banco de Dados Ativo</span>
+          </div>
+          
+          <div className="space-y-1">
+            <label className="text-[8.5px] uppercase font-black tracking-wider text-slate-500 block pl-1">Perfil de Acesso</label>
             <select
               value={activeRole}
               onChange={(e) => setActiveRole(e.target.value as any)}
-              className="bg-transparent text-xs font-bold text-slate-700 border-none cursor-pointer focus:outline-none focus:ring-0"
+              className="w-full bg-slate-800 border border-slate-705 text-slate-300 rounded-xl py-1.5 px-2.5 text-[10.5px] font-bold cursor-pointer focus:outline-none"
             >
               <option value="Administrador">👑 Administrador</option>
               <option value="Gestor Financeiro">💼 Gestor Financeiro</option>
@@ -570,211 +840,181 @@ export default function App() {
               <option value="Visualizador">👁️ Visualizador</option>
             </select>
           </div>
-
-          {/* Dynamic tenant security profile visualization */}
-          <div className="hidden xl:flex items-center gap-1 bg-indigo-50/50 border border-indigo-100 rounded-xl px-3 py-1.5 text-[10px] font-semibold text-indigo-800">
-            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping"></span>
-            RLS Ativo • Isolado
-          </div>
         </div>
-      </header>
+      </aside>
 
-      {/* Main Container Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+      {/* OVERLAY FOR OPEN MOBILE SIDEBAR */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+        />
+      )}
+
+      {/* MAIN CONTENT VIEWPORT */}
+      <main className="flex-1 flex flex-col min-w-0 min-h-screen">
         
-        {/* Multi-Tenant Metadata Info Header */}
-        <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 opacity-[0.02] pointer-events-none">
-            <Layers className="h-48 w-48 text-white" />
-          </div>
+        {/* PREMIUM UPPER NAVBAR */}
+        <header className="bg-white border-b border-slate-100 shadow-2xs px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-indigo-650 text-indigo-100 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md">Ativo</span>
-              <span className="text-xs text-slate-400 font-mono">CNPJ: {activeCompany.cnpj} • Setor: {activeCompany.sector}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-indigo-600 block uppercase tracking-wider">
+                {activeTab === 'dre' && 'DRE Inteligente • Consolidação Periódica'}
+                {activeTab === 'charts' && 'DRE Inteligente • BI Dashboards • Análise Visual de Balanço'}
+                {activeTab === 'import' && 'DRE Inteligente • Planilha & Lançamentos • Gestão Operacional'}
+                {activeTab === 'plano' && 'DRE Inteligente • Plano de Contas • Configuração Estrutural'}
+                {activeTab === 'projections' && 'DRE Inteligente • Metas & Simulações • Viabilidade e Pacing'}
+                {activeTab === 'ai' && 'DRE Inteligente • CFO Virtual • Assistência e Auditoria IA'}
+                {activeTab === 'procurement' && 'Compra Inteligente • Gestão de Compras, Estoques e Sourcing'}
+              </span>
             </div>
-            <h2 className="text-xl font-bold mt-1 tracking-tight text-white">{activeCompany.name}</h2>
-            <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              Consolide sua DRE, gerencie subcategorias do seu plano de contas, e obtenha previsões matemáticas avançadas baseadas em múltiplos de EBITDA.
-            </p>
+            <h2 className="text-base font-extrabold text-slate-900 tracking-tight mt-0.5">
+              Workspace Corporativo • {activeCompany.name}
+            </h2>
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700/40 rounded-xl p-3">
-            <div className="text-right">
-              <span className="text-[10px] text-slate-400 block font-semibold uppercase">Lançamentos</span>
-              <span className="text-sm font-bold text-emerald-400 block mt-0.5">{enrichedTransactions.length} Lançamentos</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-1.5 text-[10px] font-black text-indigo-800 uppercase tracking-wider">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping"></span>
+              Isolamento RLS Ativo
             </div>
-            <div className="h-8 w-[1px] bg-slate-700" />
+          </div>
+        </header>
+
+        {/* WORKSPACE AREA BODY CONTAINER */}
+        <div className="flex-1 p-4 md:p-6 space-y-6 max-w-7xl w-full mx-auto overflow-y-auto">
+          
+          {/* Header Metadata Info Banner */}
+          <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-8 opacity-[0.02] pointer-events-none">
+              <Layers className="h-48 w-48 text-white" />
+            </div>
             <div>
-              <span className="text-[10px] text-slate-400 block font-semibold uppercase">Permissões</span>
-              <span className="text-xs text-indigo-300 font-bold block mt-0.5">Escrita & Leitura</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="bg-indigo-650 text-indigo-100 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md">Tenant Isolado</span>
+                <span className="text-xs text-slate-400 font-mono">CNPJ: {activeCompany.cnpj} • Setor: {activeCompany.sector}</span>
+              </div>
+              <h3 className="text-lg font-bold mt-1 tracking-tight text-white">{activeCompany.name}</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                {activeTab === 'procurement' 
+                  ? 'Análise de compras e cotações sob demanda, auditoria de estoque de reposição e integridade da sua cadeia de suprimentos sob tutela de IA Senior.'
+                  : 'Consolide sua DRE, gerencie subcategorias do seu plano de contas, e obtenha previsões matemáticas avançadas baseadas em múltiplos de EBITDA.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700/40 rounded-xl p-3">
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 block font-semibold uppercase">Lançamentos</span>
+                <span className="text-sm font-bold text-emerald-400 block mt-0.5">{enrichedTransactions.length} Itens</span>
+              </div>
+              <div className="h-8 w-[1px] bg-slate-700" />
+              <div>
+                <span className="text-[10px] text-slate-400 block font-semibold uppercase">Perfil Atual</span>
+                <span className="text-xs text-indigo-300 font-bold block mt-0.5">{activeRole}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Tab Selection Row */}
-        <div className="flex flex-wrap gap-1.5 border-b border-slate-200/60 pb-1">
-          <button
-            onClick={() => setActiveTab('dre')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'dre'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <Layers className="h-4 w-4" />
-            DRE Dinâmica
-          </button>
-
-          <button
-            onClick={() => setActiveTab('charts')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'charts'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <BarChart2 className="h-4 w-4" />
-            BI Dashboards
-          </button>
-
-          <button
-            onClick={() => setActiveTab('import')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'import'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            Planilhas & Lançamentos
-          </button>
-
-          <button
-            onClick={() => setActiveTab('plano')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'plano'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <Settings2 className="h-4 w-4" />
-            Plano de Contas
-          </button>
-
-          <button
-            onClick={() => setActiveTab('projections')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'projections'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <TrendingUp className="h-4 w-4" />
-            Metas & Simulações
-          </button>
-
-          <button
-            onClick={() => setActiveTab('ai')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'ai'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-155 hover:text-slate-900'
-            }`}
-          >
-            <Bot className="h-4 w-4 text-emerald-500 animate-bounce" />
-            Assistente IA
-          </button>
-        </div>
-
-        {/* Tab Body Contents Rendering */}
-        <div className="transition-all duration-300">
-          {activeTab === 'dre' && (
-            <div className="space-y-4">
-              {enrichedTransactions.length === 0 && (
-                <div className="bg-amber-50 border border-amber-200/50 rounded-2xl p-4 flex items-start gap-3 text-amber-800">
-                  <ShieldAlert className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-bold text-xs uppercase tracking-wider">Aviso de Limites de Consolidação</h5>
-                    <p className="text-xs mt-0.5">Seu faturamento e custos para esta empresa estão zerados. Acesse a aba <strong>"Planilhas & Lançamentos"</strong> para importar o layout CSV padrão do MVP ou inclua lançamentos demonstrativos com um clique.</p>
+          {/* Module Content Rendering Router */}
+          <div className="transition-all duration-300">
+            {activeTab === 'dre' && (
+              <div className="space-y-4">
+                {enrichedTransactions.length === 0 && (
+                  <div className="bg-amber-50 border border-amber-200/50 rounded-2xl p-4 flex items-start gap-3 text-amber-800">
+                    <ShieldAlert className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h5 className="font-bold text-xs uppercase tracking-wider">Aviso de Limites de Consolidação</h5>
+                      <p className="text-xs mt-0.5">Seu faturamento e custos para esta empresa estão zerados. Acesse a aba <strong>"Planilhas & Lançamentos"</strong> para importar o layout CSV padrão do MVP ou inclua lançamentos demonstrativos com um clique.</p>
+                    </div>
                   </div>
-                </div>
-              )}
-              <DreGrid 
+                )}
+                <DreGrid 
+                  transactions={enrichedTransactions} 
+                  categories={categories}
+                  onUpdateTransactionCategory={handleUpdateTransactionCategory}
+                  onUpdateCategoryName={handleUpdateCategoryName}
+                  categoryGoals={categoryGoals}
+                  monthConfigs={monthConfigs}
+                  onSaveCategoryGoal={handleSaveCategoryGoal}
+                  onSaveMonthConfig={handleSaveMonthConfig}
+                />
+              </div>
+            )}
+
+            {activeTab === 'charts' && (
+              <DashboardCharts 
                 transactions={enrichedTransactions} 
+                categories={categories} 
+              />
+            )}
+
+            {activeTab === 'import' && (
+              <TransactionList 
+                transactions={enrichedTransactions}
                 categories={categories}
-                onUpdateTransactionCategory={handleUpdateTransactionCategory}
-                onUpdateCategoryName={handleUpdateCategoryName}
+                rules={rules}
+                planoContas={planoContas}
+                pendingUnregisteredAccounts={pendingUnregisteredAccounts}
+                onAddAccount={handleAddPlanoContasItem}
+                onAddTransaction={handleAddTransaction}
+                onImportTransactions={handleImportTransactions}
+                onDeleteTransaction={handleDeleteTransaction}
+                onClearAll={handleClearAllTransactions}
+                onSaveManualRevenue={handleSaveManualRevenue}
+                onUpdateTransaction={handleUpdateTransaction}
+              />
+            )}
+
+            {activeTab === 'plano' && (
+              <PlanoContas 
+                planoContas={planoContas}
+                onAddAccount={handleAddPlanoContasItem}
+                onUpdateAccount={handleUpdatePlanoContasItem}
+                onDeleteAccount={handleDeletePlanoContasItem}
+                categories={categories}
+              />
+            )}
+
+            {activeTab === 'projections' && (
+              <ForecastModule 
+                transactions={enrichedTransactions}
+                categories={categories}
                 categoryGoals={categoryGoals}
                 monthConfigs={monthConfigs}
                 onSaveCategoryGoal={handleSaveCategoryGoal}
                 onSaveMonthConfig={handleSaveMonthConfig}
+                onAddTransaction={handleAddTransaction}
+                onDeleteTransaction={handleDeleteTransaction}
+                onUpdateTransaction={handleUpdateTransaction}
               />
-            </div>
-          )}
+            )}
 
-          {activeTab === 'charts' && (
-            <DashboardCharts 
-              transactions={enrichedTransactions} 
-              categories={categories} 
-            />
-          )}
+            {activeTab === 'ai' && (
+              <AiAssistant 
+                dreContext={computeFinancialContext()} 
+                companyId={activeCompany.id}
+                userId={activeRole}
+              />
+            )}
 
-          {activeTab === 'import' && (
-            <TransactionList 
-              transactions={enrichedTransactions}
-              categories={categories}
-              rules={rules}
-              planoContas={planoContas}
-              pendingUnregisteredAccounts={pendingUnregisteredAccounts}
-              onAddAccount={handleAddPlanoContasItem}
-              onAddTransaction={handleAddTransaction}
-              onImportTransactions={handleImportTransactions}
-              onDeleteTransaction={handleDeleteTransaction}
-              onClearAll={handleClearAllTransactions}
-              onSaveManualRevenue={handleSaveManualRevenue}
-              onUpdateTransaction={handleUpdateTransaction}
-            />
-          )}
-
-          {activeTab === 'plano' && (
-            <PlanoContas 
-              planoContas={planoContas}
-              onAddAccount={handleAddPlanoContasItem}
-              onUpdateAccount={handleUpdatePlanoContasItem}
-              onDeleteAccount={handleDeletePlanoContasItem}
-              categories={categories}
-            />
-          )}
-
-          {activeTab === 'projections' && (
-            <ForecastModule 
-              transactions={enrichedTransactions}
-              categories={categories}
-              categoryGoals={categoryGoals}
-              monthConfigs={monthConfigs}
-              onSaveCategoryGoal={handleSaveCategoryGoal}
-              onSaveMonthConfig={handleSaveMonthConfig}
-              onAddTransaction={handleAddTransaction}
-              onDeleteTransaction={handleDeleteTransaction}
-              onUpdateTransaction={handleUpdateTransaction}
-            />
-          )}
-
-          {activeTab === 'ai' && (
-            <AiAssistant 
-              dreContext={computeFinancialContext()} 
-              companyId={activeCompany.id}
-              userId={activeRole}
-            />
-          )}
+            {activeTab === 'procurement' && (
+              <ProcurementModule 
+                companyId={activeCompany.id}
+                userId={activeRole}
+                dreContext={computeFinancialContext()}
+                activeSubTab={procurementSubTab}
+                onSubTabChange={(tab) => setProcurementSubTab(tab)}
+              />
+            )}
+          </div>
         </div>
-      </main>
 
-      {/* Aesthetic Footer */}
-      <footer className="mt-auto bg-slate-900 text-slate-400 border-t border-slate-800/50 px-6 py-5 text-center text-xs">
-        <p className="font-mono text-[10px] tracking-wider uppercase">DRE Inteligente • Plataforma BI SaaS Financeira Avançada</p>
-        <p className="text-slate-500 mt-1">Conforme especificado no escopo MVP - Escrita relacional PostgreSQL e RLS Supabase integrados de ponta-a-ponta.</p>
-      </footer>
+        {/* Aesthetic Footer */}
+        <footer className="mt-auto bg-white border-t border-slate-100 px-6 py-4 text-center text-xs text-slate-400 shrink-0">
+          <p className="font-mono text-[10px] tracking-wider uppercase">DRE Inteligente Suite • Plataforma de Gestão Corporativa MVP</p>
+          <p className="text-slate-400 mt-0.5">Isolamento multi-empresa nativo da DRE com controlador de suprimentos senior integrado.</p>
+        </footer>
+      </main>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "DRE Inteligente",
-  "description": "Sistema de BI e chatbot financeiro por inteligência artificial para demonstração do resultado do exercício (DRE) com importação automática de planilhas.",
+  "description": "Ferramenta robusta para gerenciamento empresarial unificando DRE Inteligente (BI, Simulações, Assistência IA e Plano de Contas) e Compra Inteligente (Cotações, Estoque de Reposição e Sourcing).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
