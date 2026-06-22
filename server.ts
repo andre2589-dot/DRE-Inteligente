@@ -806,6 +806,12 @@ app.get("/api/supabase/diagnose", async (req, res) => {
 
     const allTablesOk = !anyTableFailed;
 
+    // AUTO-HEAL: If all core tables are perfectly verified, restore active integration immediately!
+    if (allTablesOk) {
+      supabaseActive = true;
+      console.log("❇️ [AUTO-HEAL] Supabase integration automatically restored to ACTIVE status because all tables are verified and accessible.");
+    }
+
     const dbAccessibility = {
       status: dbAccessible && !anyTableFailed ? "OK" : "ERRO",
       details: dbAccessible && !anyTableFailed ? "Leitura concluída no cluster PostgreSQL" : "Algumas tabelas possuem falhas de leitura ou não existem",
@@ -903,6 +909,10 @@ app.post("/api/supabase/seed", async (req, res) => {
 
     const { error: pcErr } = await supabase.from('plano_contas').upsert(dbSeedPlano);
     if (pcErr) throw new Error(`Falha ao semear 'plano_contas': ${pcErr.message}`);
+
+    // AUTO-HEAL: Successful seeding establishes verified active state
+    supabaseActive = true;
+    console.log("❇️ [AUTO-HEAL] Supabase integration fully activated on successful seed.");
 
     res.json({ success: true, message: "Banco de dados do Supabase semeado com sucesso para as empresas demonstrativas!" });
   } catch (err: any) {
