@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import { whatsappService } from "./src/services/whatsapp/whatsappService";
+import { whatsappSessionManager } from "./src/services/whatsapp/multiUser/sessionManager";
 
 dotenv.config();
 
@@ -377,6 +378,90 @@ app.post("/api/whatsapp/clear-unreads", async (req, res) => {
   try {
     await whatsappService.clearUnreads(companyId || 'c1', conversationId);
     res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// WHATSAPP MULTI-USER API ROUTESTEMPLATE (Vazias/Simulação estrutural integrada)
+// ==========================================
+
+// Criar/Inicializar uma sessão para um usuário/empresa específico
+app.post("/api/whatsapp/multi/create", async (req, res) => {
+  const { sessionId, userId, companyId } = req.body;
+  if (!sessionId || !userId || !companyId) {
+    return res.status(400).json({ error: "Os campos sessionId, userId e companyId são obrigatórios." });
+  }
+  try {
+    const session = await whatsappSessionManager.createSession({ sessionId, userId, companyId });
+    res.json({ success: true, session });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Consultar estado de uma sessão de WhatsApp multi-usuário
+app.get("/api/whatsapp/multi/session/:sessionId", (req, res) => {
+  const { sessionId } = req.params;
+  try {
+    const session = whatsappSessionManager.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: `Sessão ${sessionId} não encontrada.` });
+    }
+    res.json({ success: true, session });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Consultar todas as sessões cadastradas
+app.get("/api/whatsapp/multi/sessions", (req, res) => {
+  try {
+    const sessions = whatsappSessionManager.getAllSessions();
+    res.json({ success: true, sessions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Enviar mensagem utilizando uma sessão específica de faturamento do usuário
+app.post("/api/whatsapp/multi/send", async (req, res) => {
+  const { sessionId, toPhone, message } = req.body;
+  if (!sessionId || !toPhone || !message) {
+    return res.status(400).json({ error: "Os campos sessionId, toPhone e message são obrigatórios." });
+  }
+  try {
+    const result = await whatsappSessionManager.sendMessage({ sessionId, toPhone, message });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Desconectar sessão ativa
+app.post("/api/whatsapp/multi/disconnect", async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ error: "O campo sessionId é obrigatório." });
+  }
+  try {
+    const success = await whatsappSessionManager.disconnectSession(sessionId);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Simular escaneamento com sucesso de QR Code para testes rápidos de sandbox
+app.post("/api/whatsapp/multi/simulate-scan", async (req, res) => {
+  const { sessionId, phone } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ error: "O campo sessionId é obrigatório." });
+  }
+  try {
+    const success = await whatsappSessionManager.simulateScanSuccess(sessionId, phone);
+    res.json({ success });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

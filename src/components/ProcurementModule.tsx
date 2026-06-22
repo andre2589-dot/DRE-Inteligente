@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, 
   Trash, 
   Bot, 
   TrendingUp, 
-  TrendingDown, 
-  Clock, 
   AlertTriangle, 
   CheckCircle, 
   DollarSign, 
@@ -15,45 +13,106 @@ import {
   FileText, 
   Send,
   Sparkles,
+  Upload,
+  Calendar,
   Layers,
   ArrowRight,
-  Upload,
-  MessageSquare,
+  Search,
+  ShoppingCart,
+  CreditCard,
   Building,
-  User,
-  Calendar,
-  Layers3,
-  CheckSquare,
-  ShieldCheck,
-  ChevronRight,
   History,
   Tag,
-  Wifi,
-  WifiOff,
-  QrCode,
-  LogOut
+  Info,
+  Download,
+  ChevronRight,
+  ChevronDown,
+  Settings,
+  Filter,
+  HelpCircle
 } from 'lucide-react';
-import { safeFetchJson } from '../utils/safeFetch';
+import { 
+  ResponsiveContainer, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  PieChart, 
+  Pie, 
+  Cell,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
+} from 'recharts';
 
-interface QuoteItem {
-  id?: string;
-  item_name: string;
-  quantity: number;
-  supplier_name: string;
-  price: number;
-  lead_time: number;
-  category: 'Grains' | 'Packaging' | 'Dairy' | 'Support';
+// Definindo as interfaces rigorosamente para persistência e tipagem segura
+interface EstoqueItem {
+  id: string;
+  codigo?: string; // Código do Produto (CODIGO) do padrão de controle de estoque
+  item: string;
+  lote: string;
+  quantidade: number;
+  unidade: string;
+  min_stock: number;
+  safety_stock: number;
+  custo_unitario: number;
+  preco_venda: number; // For "Valor de Venda" & "Lucratividade por Item"
+  local: string;
+  frequencia_venda?: 'Alta' | 'Média' | 'Baixa'; // For "Frequência de Venda"
+  situacao_lote?: string; // Situação (LIBERADO, BLOQUEADO, CERTIFICACAO)
+  originalItemsCount?: number;
+  mergedSituations?: string[];
 }
 
-interface RepoItem {
+interface ConsumoItem {
   id: string;
-  item_name: string;
-  current_stock: number;
-  min_stock: number;
-  avg_consumption: number;
-  lead_time: number;
-  expiration_date?: string;
-  sales_rate?: string; // e.g., 'Alta demanda', 'Média', 'Baixa'
+  item: string;
+  quantidade_consumida: number;
+  mes_ano: string;
+  custo_total: number;
+}
+
+interface PrecoHistoricoItem {
+  id: string;
+  item: string;
+  fornecedor: string;
+  preco_unitario: number;
+  data_compra: string;
+  condicao_pagamento: string;
+  codigo_pedido: string;
+}
+
+interface ValidadeLoteItem {
+  id: string;
+  item: string;
+  lote: string;
+  quantidade: number;
+  validade: string;
+  status: string; // 'Crítico' | 'Atenção' | 'Saudável' | 'Vencido'
+  valor_economico: number;
+}
+
+interface RegistrosArquivos {
+  id: string;
+  nome: string;
+  tamanho: string;
+  tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade';
+  enviado_em: string;
+  colunas_detectadas: string[];
+}
+
+interface ColumnMapping {
+  itemCol: string;
+  qtyCol: string;
+  loteCol: string;
+  costCol: string;
+  validadeCol: string;
+  fornecedorCol: string;
+  precoVendaCol: string;
 }
 
 interface ProcurementModuleProps {
@@ -64,1015 +123,1528 @@ interface ProcurementModuleProps {
   onSubTabChange?: (tab: 'indicators' | 'quotes' | 'whatsapp') => void;
 }
 
-// Supplier template
-interface SupplierContact {
-  id: 'alpha' | 'beta' | 'gama';
-  name: string;
-  representative: string;
-  phone: string;
-  description: string;
-  category: string;
-  initials: string;
-}
+export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab = 'indicators' }: ProcurementModuleProps) {
+  // Aba de dados selecionada na Gestão de Compras ('estoque' | 'consumo' | 'historico_precos' | 'validade')
+  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade'>('estoque');
 
-const SUPPLIERS: SupplierContact[] = [
-  {
-    id: 'alpha',
-    name: 'Fornecedor Alpha (Café e Grãos)',
-    representative: 'Beto • Grãos & Sourcing',
-    phone: '+55 (11) 98765-4321',
-    description: 'Cafés especiais, açúcar e insumos orgânicos secos.',
-    category: 'Grãos e Insumos Secos',
-    initials: 'AG'
-  },
-  {
-    id: 'beta',
-    name: 'Fornecedor Beta (Copos e Descartáveis)',
-    representative: 'Alice • Comercial',
-    phone: '+55 (11) 97654-3210',
-    description: 'Copos personalizados, fardos de embalagens Kraft e apoio.',
-    category: 'Materiais de Apoio e Embalagens',
-    initials: 'BD'
-  },
-  {
-    id: 'gama',
-    name: 'Fornecedor Gama (Leite e Laticínios)',
-    representative: 'Carlos • Vendas Corp',
-    phone: '+55 (11) 96543-2109',
-    description: 'UHT integral, cremes frescos e laticínios faturados.',
-    category: 'Laticínios e Insumos Frescos',
-    initials: 'GL'
-  }
-];
-
-export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab: propActiveSubTab, onSubTabChange }: ProcurementModuleProps) {
-  const [localActiveSubTab, setLocalActiveSubTab] = useState<'indicators' | 'quotes' | 'whatsapp'>('indicators');
-  const activeSubTab = propActiveSubTab !== undefined ? propActiveSubTab : localActiveSubTab;
-  
-  const setActiveSubTab = (tab: 'indicators' | 'quotes' | 'whatsapp') => {
-    if (onSubTabChange) {
-      onSubTabChange(tab);
-    } else {
-      setLocalActiveSubTab(tab);
-    }
-  };
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
-
-  // Indicators State & Calculations
-  const [giroTarget, setGiroTarget] = useState<number>(10.5); // 10.5 rotations per year
-  const [pmpSimulated, setPmpSimulated] = useState<number>(18.4); // Prazo Médio de Pagamento em dias
-  const [pmrSimulated, setPmrSimulated] = useState<number>(30.0); // Prazo Médio de Recebimento de Clientes em dias
-
-  // 1. Files & Inputs for Quotes AI List Generator
-  const [rawProductsList, setRawProductsList] = useState<string>(
-    `Café Especial Arábica (Sacas de 60kg)\nCopos Personalizados 350ml (Milhar)\nAçúcar de Confeiteiro (Fardos de 20kg)\nLeite UHT Integral (Caixas de 12L)\nEmbalagens Kraft Take-Away`
-  );
-  
-  const [inputStateFiles, setInputStateFiles] = useState<{
-    listaProdutos: { name: string; size: string; status: string } | null;
-    estoque: { name: string; size: string; status: string };
-    consumo: { name: string; size: string; status: string };
-    validades: { name: string; size: string; status: string };
-  }>({
-    listaProdutos: null,
-    estoque: { name: 'estoque_atual_junho_santos.xlsx', size: '14.2 KB', status: 'pre-seeded' },
-    consumo: { name: 'historico_consumo_trimestral.csv', size: '32.5 KB', status: 'pre-seeded' },
-    validades: { name: 'tabela_precos_e_validades_vigentes.xlsx', size: '19.8 KB', status: 'pre-seeded' }
-  });
-
-  const [customCriteria, setCustomCriteria] = useState<string>(
-    'Me dê a lista dos itens que vão faltar nos próximos dias junto com os itens que vão vencer e tem venda, para repor estoque.'
-  );
-
-  const [isGeneratingList, setIsGeneratingList] = useState(false);
-  const [generationSteps, setGenerationSteps] = useState<string[]>([]);
-  const [validatedPurchaseList, setValidatedPurchaseList] = useState<any[]>([]);
-  const [isListValidated, setIsListValidated] = useState(false);
-
-  // Form to add custom items to recommended list
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemQty, setNewItemQty] = useState(1);
-  const [newItemPrice, setNewItemPrice] = useState(0);
-
-  // WhatsApp states
-  const [selectedSupplierId, setSelectedSupplierId] = useState<'alpha' | 'beta' | 'gama'>('alpha');
-  const [whatsappChats, setWhatsappChats] = useState<{
-    alpha: { role: 'user' | 'supplier', content: string, timestamp: string }[];
-    beta: { role: 'user' | 'supplier', content: string, timestamp: string }[];
-    gama: { role: 'user' | 'supplier', content: string, timestamp: string }[];
-  }>({
-    alpha: [
-      { role: 'supplier', content: 'Olá! Sou o Beto da Alpha Grãos e Café. Recebemos cotações para sacas de café especial e açúcar refinado com negociação no faturamento. Quando precisar, mande sua lista aqui!', timestamp: '09:00' }
-    ],
-    beta: [
-      { role: 'supplier', content: 'Como vai? Aqui é a Alice da Beta Copos e Descartáveis. Pronta para cotar copos personalizados e embalagens de alta qualidade com o melhor saving da região!', timestamp: '09:12' }
-    ],
-    gama: [
-      { role: 'supplier', content: 'Carlos por aqui do Laticínios Gama. Temos leite UHT fresco com vencimento longo para entrega rápida. Mandando a lista fazemos boleto de 28 dias!', timestamp: '09:30' }
-    ]
-  });
-
-  const [whatsappStatus, setWhatsappStatus] = useState<{
-    status: 'CONNECTED' | 'QR_REQUIRED' | 'INITIALIZING' | 'DISCONNECTED';
-    mode: 'REAL' | 'SIMULATOR';
-    qrCodeUrl?: string;
-    logs: string[];
-  }>({
-    status: 'DISCONNECTED',
-    mode: 'SIMULATOR',
-    logs: []
-  });
-
-  const [isTypingSupplier, setIsTypingSupplier] = useState<boolean>(false);
-  const [whatsappInput, setWhatsappInput] = useState<string>('');
-
-  // Sincronizador de dados do WhatsApp no servidor (polling em segundo plano de 2.5 segundos)
-  const syncWhatsappData = async () => {
-    try {
-      const response = await fetch(`/api/whatsapp/messages?companyId=${companyId}`);
-      if (response.ok) {
-        const data = await response.json();
-        
-        const nextChats: typeof whatsappChats = {
-          alpha: [],
-          beta: [],
-          gama: []
-        };
-
-        if (data.messages && Array.isArray(data.messages)) {
-          data.messages.forEach((msg: any) => {
-            const rawId = msg.conversation_id;
-            const key = rawId === 'contact_alpha' ? 'alpha' :
-                        rawId === 'contact_beta' ? 'beta' :
-                        rawId === 'contact_gama' ? 'gama' : 'alpha';
-
-            nextChats[key].push({
-              role: msg.sender === 'me' ? 'user' : 'supplier',
-              content: msg.content,
-              timestamp: new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-            });
-          });
-        }
-
-        // Se o array do canal estiver totalmente vazio, insere o seed inicial para manter a experiência
-        if (nextChats.alpha.length === 0) {
-          nextChats.alpha.push({ role: 'supplier', content: 'Olá! Sou o Beto da Alpha Grãos e Café. Recebemos cotações para sacas de café especial e açúcar refinado com negociação no faturamento. Quando precisar, mande sua lista aqui!', timestamp: '09:00' });
-        }
-        if (nextChats.beta.length === 0) {
-          nextChats.beta.push({ role: 'supplier', content: 'Como vai? Aqui é a Alice da Beta Copos e Descartáveis. Pronta para cotar copos personalizados e embalagens de alta qualidade com o melhor saving da região!', timestamp: '09:12' });
-        }
-        if (nextChats.gama.length === 0) {
-          nextChats.gama.push({ role: 'supplier', content: 'Carlos por aqui do Laticínios Gama. Temos leite UHT fresco com vencimento longo para entrega rápida. Mandando a lista fazemos boleto de 28 dias!', timestamp: '09:30' });
-        }
-
-        setWhatsappChats(nextChats);
-      }
-
-      // Buscar status da conexão de retaguarda
-      const statusRes = await fetch('/api/whatsapp/status');
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        setWhatsappStatus(statusData);
-      }
-    } catch (err) {
-      console.warn("Erro ao ler dados em tempo real do WhatsApp do servidor:", err);
-    }
-  };
-
-  // Inicializar o loop de sincronização ativa
-  useEffect(() => {
-    syncWhatsappData();
-    const timer = setInterval(syncWhatsappData, 2500);
-    return () => clearInterval(timer);
-  }, [companyId]);
-
-  // Limpar contadores de mensagens não lidas no servidor sempre que trocar de fornecedor visualizado
-  useEffect(() => {
-    const rawId = selectedSupplierId === 'alpha' ? 'contact_alpha' :
-                  selectedSupplierId === 'beta' ? 'contact_beta' : 'contact_gama';
-                  
-    fetch('/api/whatsapp/clear-unreads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companyId, conversationId: rawId })
-    }).catch(e => console.warn("Erro ao resetar unread count no servidor:", e));
-  }, [selectedSupplierId, companyId]);
-
-  // Default preselected recommended list generated initially to guarantee a robust landing
-  useEffect(() => {
-    // Set a default recommended list so there is immediate content to audit or send
-    setValidatedPurchaseList([
-      { id: 'rec_1', item_name: 'Café Especial Torrado (Saca 60kg)', current_stock: 4, runout_days: 6, expiration: 'Vence em 45 dias', sales_rate: 'Alta demanda (CMV ideal)', suggested_qty: 15, last_price: 285.00 },
-      { id: 'rec_2', item_name: 'Copos Personalizados 350ml (Milhar)', current_stock: 45, runout_days: 8, expiration: 'Seguro (>90 dias)', sales_rate: 'Média constante', suggested_qty: 40, last_price: 150.00 },
-      { id: 'rec_3', item_name: 'Açúcar de Confeiteiro (Fardos 20kg)', current_stock: 15, runout_days: 30, expiration: 'Vence em 12 dias', sales_rate: 'Alta (Venda de doces)', suggested_qty: 10, last_price: 52.00 },
-      { id: 'rec_4', item_name: 'Leite UHT Integral (Caixas de 12L)', current_stock: 35, runout_days: 5, expiration: 'Vence em 14 dias', sales_rate: 'Alta (Espresso/Capuccino)', suggested_qty: 35, last_price: 76.50 },
-      { id: 'rec_5', item_name: 'Embalagens Kraft Take-Away (Fardo)', current_stock: 250, runout_days: 4, expiration: 'Seguro', sales_rate: 'Crescente delivery', suggested_qty: 12, last_price: 185.00 }
-    ]);
-  }, [companyId]);
-
-  // Handle fake file uploads
-  const triggerFakeUpload = (fileType: 'listaProdutos' | 'estoque' | 'consumo' | 'validades', e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setInputStateFiles(prev => ({
-        ...prev,
-        [fileType]: {
-          name: file.name,
-          size: `${(file.size / 1024).toFixed(1)} KB`,
-          status: 'uploaded'
-        }
-      }));
-      
-      if (fileType === 'listaProdutos') {
-        setRawProductsList((prev) => 
-          prev + `\n\n[Arquivo importado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)]\n` + 
-          `- Café Blend Premium Moído (Fardos de 10kg)\n` +
-          `- Copos Kraft biodegradáveis 300ml\n` +
-          `- Canudos de Papel Sachê`
-        );
-      }
-      
-      // Toast message simulated
-      setSaveStatus(`Arquivo '${file.name}' carregado e integrado com sucesso!`);
-      setTimeout(() => setSaveStatus(null), 3000);
-    }
-  };
-
-  // Generate recommendation list using AI criteria
-  const handleGenerateAiPurchaseList = () => {
-    setIsGeneratingList(true);
-    setGenerationSteps([]);
-    setIsListValidated(false);
-
-    const steps = [
-      `🔍 Lendo lista de produtos informada (${inputStateFiles.listaProdutos ? 'Arquivo anexado: ' + inputStateFiles.listaProdutos.name : 'Lista de texto direto'})...`,
-      `📊 Lendo arquivo de estoque atual: '${inputStateFiles.estoque.name}' (${inputStateFiles.estoque.size}). Encontrado 142 itens catalogados.`,
-      `📈 Cruzando com o arquivo de consumo mensal histórico: '${inputStateFiles.consumo.name}' para projetar cobertura diária de dias.`,
-      `🗓️ Auditando lotes de vencimentos e últimos preços médios pagos via: '${inputStateFiles.validades.name}'.`,
-      `🤖 Aplicando filtro inteligente solicitado: "${customCriteria}"...`,
-      '💡 Otimizando lote econômico de compras para mitigar CMB faturado curto e maximizar saving de fornecedores.',
-      '🚀 Geração concluída! Exibindo lista recomendada customizada com risco de ruptura mitigado.'
-    ];
-
-    let delay = 0;
-    steps.forEach((step, idx) => {
-      setTimeout(() => {
-        setGenerationSteps(prev => [...prev, step]);
-        if (idx === steps.length - 1) {
-          setIsGeneratingList(false);
-          
-          // Generate customized outputs matching the criteria!
-          const generated = [
-            { id: 'ai_1', item_name: 'Café Especial Torrado (Saca 60kg)', current_stock: 4, runout_days: 6, expiration: 'Sem vencimento crítico (Lote novo)', sales_rate: 'Crítico • Giro Máximo', suggested_qty: 20, last_price: 280.00 },
-            { id: 'ai_2', item_name: 'Copos Personalizados 350ml (Milhar)', current_stock: 12, runout_days: 3, expiration: 'Seguro (>120 dias)', sales_rate: 'Alta Demanda', suggested_qty: 50, last_price: 145.00 },
-            { id: 'ai_3', item_name: 'Açúcar de Confeiteiro (Fardos 20kg)', current_stock: 3, runout_days: 5, expiration: 'Vence em 10 dias (Urgente usar)', sales_rate: 'Giro de Balcão Ativo', suggested_qty: 15, last_price: 50.00 },
-            { id: 'ai_4', item_name: 'Leite UHT Integral (Caixas de 12L)', current_stock: 8, runout_days: 2, expiration: 'Vence em 15 dias (Necessita reposição)', sales_rate: 'Crítico • Consumo Espresso', suggested_qty: 45, last_price: 74.00 },
-            { id: 'ai_5', item_name: 'Embalagens Kraft Take-Away (Fardo)', current_stock: 40, runout_days: 4, expiration: 'Seguro', sales_rate: 'Giro Constante', suggested_qty: 15, last_price: 180.00 }
-          ];
-          setValidatedPurchaseList(generated);
-          
-          setSaveStatus('Nova lista recomendada gerada pela IA de acordo com os arquivos anexados!');
-          setTimeout(() => setSaveStatus(null), 4000);
-        }
-      }, delay);
-      delay += 800; // staggered delay
-    });
-  };
-
-  // Live edits inside purchase list table
-  const handleUpdateQty = (id: string, newQty: number) => {
-    if (newQty < 0) return;
-    setValidatedPurchaseList(prev => 
-      prev.map(item => item.id === id ? { ...item, suggested_qty: newQty } : item)
-    );
-  };
-
-  const handleUpdatePrice = (id: string, newPrice: number) => {
-    if (newPrice < 0) return;
-    setValidatedPurchaseList(prev => 
-      prev.map(item => item.id === id ? { ...item, last_price: newPrice } : item)
-    );
-  };
-
-  const handleDeleteItem = (id: string) => {
-    setValidatedPurchaseList(prev => prev.filter(item => item.id !== id));
-  };
-
-  const handleAddCustomItem = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newItemName.trim() || newItemQty <= 0) return;
-    
-    const newItem = {
-      id: `add_${Date.now()}`,
-      item_name: newItemName,
-      current_stock: 0,
-      runout_days: 99,
-      expiration: 'Seguro',
-      sales_rate: 'Manualmente inserido',
-      suggested_qty: newItemQty,
-      last_price: newItemPrice || 10.00
+  // Controle de Mapeador de Colunas Personalizado
+  const [isMapperOpen, setIsMapperOpen] = useState(false);
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>(() => {
+    const cached = localStorage.getItem('gestao_colunas_mapping');
+    if (cached) return JSON.parse(cached);
+    return {
+      itemCol: 'Descrição do Item',
+      qtyCol: 'Quantidade',
+      loteCol: 'Número do Lote',
+      costCol: 'Preço de Custo',
+      validadeCol: 'Data de Vencimento',
+      fornecedorCol: 'Nome do Fornecedor',
+      precoVendaCol: 'Preço de Venda'
     };
+  });
 
-    setValidatedPurchaseList(prev => [...prev, newItem]);
-    setNewItemName('');
-    setNewItemQty(1);
-    setNewItemPrice(0);
-  };
+  // Salvar mapeamento
+  useEffect(() => {
+    localStorage.setItem('gestao_colunas_mapping', JSON.stringify(columnMapping));
+  }, [columnMapping]);
 
-  // Validate and submit list
-  const handleValidateList = () => {
-    setIsListValidated(true);
-    setSaveStatus('Sucesso: Sua lista de compras foi validada e disponibilizada para envio aos fornecedores registrados!');
-    setTimeout(() => {
-      setSaveStatus(null);
-      // Automatically navigate to whatsapp tab to let user coordinate dispatch
-      setActiveSubTab('whatsapp');
-    }, 2500);
-  };
+  // Lista de arquivos registrados para Download do usuário e Auditoria
+  const [arquivosRegistrados, setArquivosRegistrados] = useState<RegistrosArquivos[]>(() => {
+    const cached = localStorage.getItem('gestao_arquivos_registrados');
+    if (cached) return JSON.parse(cached);
+    return [
+      { id: 'arq_1', nome: 'saldo_estoque_geral_2026.xlsx', tamanho: '54 KB', tipo: 'estoque', enviado_em: '21/06/2026 14:10', colunas_detectadas: ['Descrição do Item', 'Número do Lote', 'Quantidade', 'Preço de Custo', 'Preço de Venda'] },
+      { id: 'arq_2', nome: 'historico_consumo_mensal_vendas.xlsx', tamanho: '42 KB', tipo: 'consumo', enviado_em: '21/06/2026 14:15', colunas_detectadas: ['Descrição do Item', 'Mês/Ano', 'Quantidade Consumida', 'Custo Total'] },
+      { id: 'arq_3', nome: 'faturas_compras_suplementos_abc.xlsx', tamanho: '112 KB', tipo: 'historico_precos', enviado_em: '21/06/2026 14:24', colunas_detectadas: ['Descrição do Item', 'Nome do Fornecedor', 'Preço Pago', 'Data da Nota'] },
+      { id: 'arq_4', nome: 'lotes_validade_vigentes.pdf', tamanho: '1.2 MB', tipo: 'validade', enviado_em: '21/06/2026 14:32', colunas_detectadas: ['Descrição do Item', 'Número do Lote', 'Vencimento', 'Quantidade Disponível'] }
+    ];
+  });
 
-  // Outgoing Chat Handler - Envia real para o back-end via API
-  const handleSendWhatsappMessage = async (e?: React.FormEvent, directText?: string) => {
-    if (e) e.preventDefault();
-    const textToSend = directText || whatsappInput;
-    if (!textToSend.trim()) return;
+  // Armazenar os arquivos no localStorage
+  useEffect(() => {
+    localStorage.setItem('gestao_arquivos_registrados', JSON.stringify(arquivosRegistrados));
+  }, [arquivosRegistrados]);
 
-    if (!directText) setWhatsappInput('');
+  // Estados dos bancos estruturados populados com os dados iniciais do relatório real de CONTROLE DE ESTOQUE
+  const [estoqueData, setEstoqueData] = useState<EstoqueItem[]>(() => {
+    const cached = localStorage.getItem('gestao_estoque_data');
+    if (cached) return JSON.parse(cached);
+    return [
+      { id: 'est_pdf_1', codigo: '01918', item: 'CREATINA (USAR)', lote: 'LIBERADO', quantidade: 1379.0000, unidade: 'G', min_stock: 1000, safety_stock: 500, custo_unitario: 42.00, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_2', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'LIBERADO', quantidade: 19.4500, unidade: 'G', min_stock: 30, safety_stock: 10, custo_unitario: 124.50, preco_venda: 198.00, local: 'Galpão A', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_3', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'BLOQUEADO', quantidade: 10.0000, unidade: 'G', min_stock: 30, safety_stock: 10, custo_unitario: 124.50, preco_venda: 198.00, local: 'Estoque Retido', frequencia_venda: 'Média', situacao_lote: 'BLOQUEADO' },
+      { id: 'est_pdf_4', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'LIBERADO', quantidade: 148.2910, unidade: 'ML', min_stock: 300, safety_stock: 100, custo_unitario: 15.80, preco_venda: 32.00, local: 'Câmara Fria', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_5', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'CERTIFICACAO', quantidade: 1000.0000, unidade: 'ML', min_stock: 300, safety_stock: 100, custo_unitario: 15.80, preco_venda: 32.00, local: 'Laboratório Ingressos', frequencia_venda: 'Média', situacao_lote: 'CERTIFICACAO' },
+      { id: 'est_pdf_6', codigo: '01056', item: '5-HIDROXITRIPTOFANO L (USAR)', lote: 'LIBERADO', quantidade: 313.1750, unidade: 'G', min_stock: 200, safety_stock: 80, custo_unitario: 2.10, preco_venda: 5.40, local: 'Prateleira Especial', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_7', codigo: '00448', item: 'ABACATE OLEO (USAR)', lote: 'LIBERADO', quantidade: 483.4061, unidade: 'G', min_stock: 400, safety_stock: 150, custo_unitario: 3.20, preco_venda: 7.90, local: 'Almoxarifado Geral', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_8', codigo: '01109', item: 'ACETILCISTEINA (USAR)', lote: 'LIBERADO', quantidade: 945.0000, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 0.85, preco_venda: 2.40, local: 'Galpão A', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_9', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'LIBERADO', quantidade: 1.6550, unidade: 'G', min_stock: 10, safety_stock: 5, custo_unitario: 340.00, preco_venda: 650.00, local: 'Armário Controlados', frequencia_venda: 'Baixa', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_10', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'CERTIFICACAO', quantidade: 5.0000, unidade: 'G', min_stock: 10, safety_stock: 5, custo_unitario: 340.00, preco_venda: 650.00, local: 'Laboratório Ingressos', frequencia_venda: 'Baixa', situacao_lote: 'CERTIFICACAO' },
+      { id: 'est_pdf_11', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'LIBERADO', quantidade: 177.1396, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 1.10, preco_venda: 3.20, local: 'Almoxarifado Principal', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
+      { id: 'est_pdf_12', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'CERTIFICACAO', quantidade: 2000.0000, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 1.10, preco_venda: 3.20, local: 'Laboratório Ingressos', frequencia_venda: 'Alta', situacao_lote: 'CERTIFICACAO' }
+    ];
+  });
 
-    // Exibir digitando temporariamente para simular lag comercial natural do fornecedor
-    setIsTypingSupplier(true);
+  const [consumoData, setConsumoData] = useState<ConsumoItem[]>(() => {
+    const cached = localStorage.getItem('gestao_consumo_data');
+    if (cached) return JSON.parse(cached);
+    return [
+      { id: 'cons_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 120, mes_ano: '05/2026', custo_total: 5040.00 },
+      { id: 'cons_2', item: 'Café Especial Arábica', quantidade_consumida: 110, mes_ano: '05/2026', custo_total: 93500.00 },
+      { id: 'cons_3', item: 'Copos Personalizados 350ml', quantidade_consumida: 15000, mes_ano: '05/2026', custo_total: 2700.00 },
+      { id: 'cons_4', item: 'Leite UHT Integral', quantidade_consumida: 95, mes_ano: '05/2026', custo_total: 456.00 },
+      { id: 'cons_5', item: 'Açúcar de Confeiteiro', quantidade_consumida: 25, mes_ano: '05/2026', custo_total: 2125.00 },
+      { id: 'cons_6', item: 'Energético Fusion lata 250ml', quantidade_consumida: 240, mes_ano: '05/2026', custo_total: 840.00 } // Item consumido mas com saldo 0 (Ruptura!)
+    ];
+  });
 
-    const destSupplierId = selectedSupplierId === 'alpha' ? 'contact_alpha' :
-                           selectedSupplierId === 'beta' ? 'contact_beta' : 'contact_gama';
+  const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>(() => {
+    const cached = localStorage.getItem('gestao_precos_data');
+    if (cached) return JSON.parse(cached);
+    return [
+      { id: 'prec_1', item: 'Creatina Monohidratada 250g', fornecedor: 'SupleMax Distribuidora', preco_unitario: 38.50, data_compra: '2026-03-12', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-9811' },
+      { id: 'prec_2', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriCorp S/A', preco_unitario: 41.20, data_compra: '2026-05-05', condicao_pagamento: 'Boleto 28 dias', codigo_pedido: 'PED-10255' },
+      { id: 'prec_3', item: 'Creatina Monohidratada 250g', fornecedor: 'Atacadão Vida Saudável', preco_unitario: 42.00, data_compra: '2026-06-14', condicao_pagamento: 'Pix à Vista', codigo_pedido: 'PED-11048' },
+      { id: 'prec_4', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 820.00, data_compra: '2026-01-10', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-8801' },
+      { id: 'prec_5', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 850.00, data_compra: '2026-06-01', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-10992' },
+      { id: 'prec_6', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.16, data_compra: '2026-02-20', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-9104' },
+      { id: 'prec_7', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.18, data_compra: '2026-05-25', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-10332' },
+      { id: 'prec_8', item: 'Leite UHT Integral', fornecedor: 'Laticínios Gama Corp', preco_unitario: 4.50, data_compra: '2026-04-10', condicao_pagamento: 'Faturado 15 d', codigo_pedido: 'PED-9721' }
+    ];
+  });
 
-    const supObj = SUPPLIERS.find(s => s.id === selectedSupplierId) || SUPPLIERS[0];
-    const sanitizedPhone = supObj.phone.replace(/\D/g, '');
+  const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>(() => {
+    const cached = localStorage.getItem('gestao_validade_data');
+    if (cached) return JSON.parse(cached);
+    return [
+      { id: 'val_1', item: 'Creatina Monohidratada 250g', lote: 'CR-900', quantidade: 28, validade: '2026-12-18', status: 'Saudável', valor_economico: 1176.00 },
+      { id: 'val_2', item: 'Café Especial Arábica', lote: '104-CAF', quantidade: 45, validade: '2026-08-15', status: 'Atenção', valor_economico: 38250.00 },
+      { id: 'val_3', item: 'Açúcar de Confeiteiro', lote: '2602-X', quantidade: 18, validade: '2026-06-27', status: 'Crítico', valor_economico: 1530.00 },
+      { id: 'val_4', item: 'Leite UHT Integral', lote: '77-LEI', quantidade: 12, validade: '2026-07-05', status: 'Crítico', valor_economico: 57.60 }
+    ];
+  });
 
-    try {
-      const response = await fetch('/api/whatsapp/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          companyId,
-          phone: sanitizedPhone,
-          text: textToSend,
-          supplierId: destSupplierId
-        })
-      });
+  // Salvar alterações locais para persistência no localStorage
+  useEffect(() => {
+    localStorage.setItem('gestao_estoque_data', JSON.stringify(estoqueData));
+  }, [estoqueData]);
 
-      if (response.ok) {
-        // Recarregar mensagens imediatamente
-        await syncWhatsappData();
-      } else {
-        console.error("Erro retornado pelo servidor ao enviar mensagem.");
-      }
-    } catch (err) {
-      console.error("Erro de rede ao despachar mensagem pelo whatsapp:", err);
-    } finally {
-      // Pequeno lag animado para indicar processamento
-      setTimeout(() => {
-        setIsTypingSupplier(false);
-      }, 1000);
+  useEffect(() => {
+    localStorage.setItem('gestao_consumo_data', JSON.stringify(consumoData));
+  }, [consumoData]);
+
+  useEffect(() => {
+    localStorage.setItem('gestao_precos_data', JSON.stringify(historicoPrecosData));
+  }, [historicoPrecosData]);
+
+  useEffect(() => {
+    localStorage.setItem('gestao_validade_data', JSON.stringify(validadeLotesData));
+  }, [validadeLotesData]);
+
+  // Estados gerais
+  const [searchQuery, setSearchQuery] = useState('');
+  const [uploadLoading, setUploadLoading] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isChatExpanded, setIsChatExpanded] = useState(true);
+
+  // Consolidação automática por código (fazer a soma pelos códigos, caso conste mais vezes)
+  const [consolidatedByCode, setConsolidatedByCode] = useState<boolean>(true);
+
+  // Estados para inserção manual de novos registros
+  const [formEstoque, setFormEstoque] = useState({ codigo: '', item: '', lote: '', quantidade: 0, unidade: 'G', min_stock: 50, safety_stock: 20, custo_unitario: 10.00, preco_venda: 20.00, local: 'Câmara Fria', situacao_lote: 'LIBERADO' });
+  const [formConsumo, setFormConsumo] = useState({ item: '', quantidade_consumida: 0, mes_ano: '06/2026', custo_total: 0 });
+  const [formPrecos, setFormPrecos] = useState({ item: '', fornecedor: '', preco_unitario: 0, data_compra: '', condicao_pagamento: '', codigo_pedido: '' });
+  const [formValidade, setFormValidade] = useState({ item: '', lote: '', quantidade: 0, validade: '' });
+
+  // Estados do Chatbot IA Inteligente
+  const [chatInput, setChatInput] = useState('');
+  const [isAiTyping, setIsAiTyping] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string; timestamp: string }[]>([
+    { 
+      role: 'assistant', 
+      content: 'Olá! Sou seu Assistente de IA de Gestão Comercial e Suprimentos. Eu tenho livre acesso aos seus arquivos e tabelas de dados de compras, estoque, vendas e validades.\n\nVocê pode me pedir para cruzar qualquer informação! Por exemplo, pergunte: **"Qual foi o preço da minha última compra de Creatina e qual foi o fornecedor?"** ou **"Quais são os itens de consumo que estão zerados no estoque?"**', 
+      timestamp: 'Agora' 
     }
+  ]);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, isAiTyping]);
+
+  // Função auxiliar de notificacao rápida
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Pre-load formatted purchase list to WhatsApp field
-  const handlePreloadWhatsAppList = () => {
-    // Compile items assigned to this supplier filter:
-    const filteredItems = validatedPurchaseList.filter(item => {
-      const name = item.item_name.toLowerCase();
-      if (selectedSupplierId === 'alpha') {
-        return name.includes('café') || name.includes('açúcar') || name.includes('grão');
-      } else if (selectedSupplierId === 'beta') {
-        return name.includes('copo') || name.includes('embalagem') || name.includes('kraft');
-      } else if (selectedSupplierId === 'gama') {
-        return name.includes('leite') || name.includes('lata') || name.includes('laticínio');
-      }
-      return true;
-    });
-
-    const targetList = filteredItems.length > 0 ? filteredItems : validatedPurchaseList;
-
-    let text = `*SOLICITAÇÃO DE COTAÇÃO INTELIGENTE – ${dreContext?.companyName || 'DRE Inteligente Corp'}*\n`;
-    text += `Olá, gostaria de formalizar a cotação faturada para reposição do seguinte lote de insumos:\n\n`;
-    
-    targetList.forEach(item => {
-      text += `• *${item.item_name}* - Qtd: *${item.suggested_qty}* un (Preço habitual: R$ ${item.last_price.toFixed(2)})\n`;
-    });
-
-    text += `\nSolicito validação de faturamento comercial focado em faturamento alongado (PMP ideal) ou condições de saving à vista. No aguardo!`;
-    
-    setWhatsappInput(text);
-  };
-
-  const calculatedTotalSpend = validatedPurchaseList.reduce((acc, item) => acc + (item.suggested_qty * item.last_price), 0);
-  const calculatedTotalSaving = calculatedTotalSpend * 0.142; // Simulated savings target (avg 14.2%)
-
-  // Recalculating Dynamic Metrics in Real Time base on interactive sliders
-  const pmeCalculated = Math.max(10, Math.round(365 / Math.max(1, giroTarget)));
-  const cicloOperacionalCalculated = Math.round(pmeCalculated + pmrSimulated);
-  
-  return (
-    <div className="space-y-6">
+  // Upload simulado de planilhas para o repositório
+  const handleFileUploadSimulated = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade', fileName: string) => {
+    setUploadLoading(tipo);
+    setTimeout(() => {
+      let headersDetected: string[] = [];
+      let sizeText = '32 KB';
       
-      {/* Compra Inteligente Header / Concept intro */}
-      <div className="bg-slate-900 text-white rounded-3xl p-6 relative overflow-hidden shadow-xl border border-slate-800">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      if (tipo === 'estoque') {
+        const newData: EstoqueItem[] = [
+          { id: 'est_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, unidade: 'potes', min_stock: 60, safety_stock: 20, custo_unitario: 41.50, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta' },
+          { id: 'est_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, unidade: 'potes', min_stock: 40, safety_stock: 15, custo_unitario: 28.90, preco_venda: 59.90, local: 'Almoxarifado', frequencia_venda: 'Média' },
+          { id: 'est_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, unidade: 'potes', min_stock: 80, safety_stock: 25, custo_unitario: 119.00, preco_venda: 249.90, local: 'Câmara Fria', frequencia_venda: 'Alta' }
+        ];
+        headersDetected = [columnMapping.itemCol, columnMapping.loteCol, columnMapping.qtyCol, columnMapping.costCol, columnMapping.precoVendaCol];
+        setEstoqueData(prev => {
+          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
+          return [...filtered, ...newData];
+        });
+        sizeText = '58 KB';
+      } else if (tipo === 'consumo') {
+        const newData: ConsumoItem[] = [
+          { id: 'cons_up_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
+          { id: 'cons_up_2', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
+          { id: 'cons_up_3', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 }
+        ];
+        headersDetected = [columnMapping.itemCol, 'Mês/Ano', 'Quantidade Consumida', 'Custo Consumido'];
+        setConsumoData(prev => {
+          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
+          return [...filtered, ...newData];
+        });
+        sizeText = '46 KB';
+      } else if (tipo === 'historico_precos') {
+        const newData: PrecoHistoricoItem[] = [
+          { id: 'pre_up_1', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriAtacado Brasil', preco_unitario: 39.90, data_compra: '2026-06-19', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-11582' },
+          { id: 'pre_up_2', item: 'Whey Protein Isolado 1kg', fornecedor: 'SupleMax Distribuidora', preco_unitario: 115.00, data_compra: '2026-06-18', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-11579' },
+          { id: 'pre_up_3', item: 'BCAA Ultra Pure', fornecedor: 'Globo Suplementos', preco_unitario: 27.50, data_compra: '2026-06-17', condicao_pagamento: 'Pix', codigo_pedido: 'PED-11511' }
+        ];
+        headersDetected = [columnMapping.itemCol, columnMapping.fornecedorCol, 'Preço Pago', 'Data Compra', 'Pedido'];
+        setHistoricoPrecosData(prev => [...prev, ...newData]);
+        sizeText = '88 KB';
+      } else if (tipo === 'validade') {
+        const newData: ValidadeLoteItem[] = [
+          { id: 'val_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, validade: '2027-02-14', status: 'Saudável', valor_economico: 2697.50 },
+          { id: 'val_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, validade: '2026-07-28', status: 'Atenção', valor_economico: 2601.00 },
+          { id: 'val_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, validade: '2026-06-25', status: 'Crítico', valor_economico: 13090.00 }
+        ];
+        headersDetected = [columnMapping.itemCol, columnMapping.loteCol, 'Qtd Lote', columnMapping.validadeCol];
+        setValidadeLotesData(prev => {
+          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
+          return [...filtered, ...newData];
+        });
+        sizeText = '1.1 MB';
+      }
+
+      // Adicionar novo arquivo à lista de arquivos registrados
+      const novoArquivo: RegistrosArquivos = {
+        id: 'file_' + Date.now(),
+        nome: fileName,
+        tamanho: sizeText,
+        tipo: tipo,
+        enviado_em: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        colunas_detectadas: headersDetected
+      };
+
+      setArquivosRegistrados(prev => [novoArquivo, ...prev]);
+      setUploadLoading(null);
+      triggerToast(`Sucesso! Arquivo registrado em base comercial. O Assistente de IA agora possui livre acesso a ele!`);
+    }, 1200);
+  };
+
+  // Funções de Deletar Registros individuais
+  const handleDeleteEstoque = (id: string) => {
+    setEstoqueData(prev => prev.filter(i => i.id !== id));
+    triggerToast('Item removido do saldo de estoque atual.');
+  };
+
+  const handleDeleteConsumo = (id: string) => {
+    setConsumoData(prev => prev.filter(i => i.id !== id));
+    triggerToast('Item removido do consumo mensal.');
+  };
+
+  const handleDeletePreco = (id: string) => {
+    setHistoricoPrecosData(prev => prev.filter(i => i.id !== id));
+    triggerToast('Registro de compra excluído com sucesso.');
+  };
+
+  const handleDeleteValidade = (id: string) => {
+    setValidadeLotesData(prev => prev.filter(i => i.id !== id));
+    triggerToast('Aviso de lote deletado.');
+  };
+
+  const handleDeleteArquivo = (id: string) => {
+    setArquivosRegistrados(prev => prev.filter(f => f.id !== id));
+    triggerToast('Arquivo descadastrado do sistema.');
+  };
+
+  // Consolidador por Código: Agrupa e soma as quantidades dos itens com mesmo código
+  const getAggregatedStockData = (): EstoqueItem[] => {
+    if (!consolidatedByCode) return estoqueData;
+    
+    const grouped: { [key: string]: EstoqueItem & { originalItemsCount?: number; mergedSituations?: string[] } } = {};
+    
+    estoqueData.forEach(item => {
+      // Se não constar código estruturado, usa a descrição como chave restritora
+      const key = item.codigo || item.item;
+      if (!grouped[key]) {
+        grouped[key] = {
+          ...item,
+          originalItemsCount: 1,
+          mergedSituations: [item.situacao_lote || item.lote || 'LIBERADO']
+        };
+      } else {
+        grouped[key].quantidade += item.quantidade;
+        grouped[key].originalItemsCount = (grouped[key].originalItemsCount || 1) + 1;
+        const sit = item.situacao_lote || item.lote || 'LIBERADO';
+        if (grouped[key].mergedSituations && !grouped[key].mergedSituations?.includes(sit)) {
+          grouped[key].mergedSituations?.push(sit);
+        }
+      }
+    });
+    
+    return Object.values(grouped);
+  };
+
+  // Formulário: Adicionar Estoque Manualmente
+  const handleAddEstoque = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formEstoque.item) return;
+    const newItem: EstoqueItem = {
+      id: 'custom_est_' + Date.now(),
+      codigo: formEstoque.codigo || undefined,
+      item: formEstoque.item,
+      lote: formEstoque.lote || formEstoque.situacao_lote || 'LIBERADO',
+      quantidade: Math.max(0, formEstoque.quantidade),
+      unidade: formEstoque.unidade,
+      min_stock: Math.max(0, formEstoque.min_stock),
+      safety_stock: Math.max(0, formEstoque.safety_stock),
+      custo_unitario: Math.max(0, formEstoque.custo_unitario),
+      preco_venda: Math.max(0, formEstoque.preco_venda || (formEstoque.custo_unitario * 1.5)),
+      local: formEstoque.local || 'Almoxarifado Principal',
+      frequencia_venda: formEstoque.quantidade > 50 ? 'Alta' : 'Média',
+      situacao_lote: formEstoque.situacao_lote || 'LIBERADO'
+    };
+    setEstoqueData(prev => [newItem, ...prev]);
+    setFormEstoque({ codigo: '', item: '', lote: '', quantidade: 0, unidade: 'G', min_stock: 50, safety_stock: 20, custo_unitario: 10.00, preco_venda: 20.00, local: 'Câmara Fria', situacao_lote: 'LIBERADO' });
+    triggerToast(`"${newItem.item}" adicionado ao saldo de estoque!`);
+  };
+
+  // Formulário: Adicionar Consumo Manualmente
+  const handleAddConsumo = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formConsumo.item) return;
+    const newItem: ConsumoItem = {
+      id: 'custom_cons_' + Date.now(),
+      item: formConsumo.item,
+      quantidade_consumida: Math.max(0, formConsumo.quantidade_consumida),
+      mes_ano: formConsumo.mes_ano,
+      custo_total: Math.max(0, formConsumo.custo_total || (formConsumo.quantidade_consumida * 10))
+    };
+    setConsumoData(prev => [newItem, ...prev]);
+    setFormConsumo({ item: '', quantidade_consumida: 0, mes_ano: '06/2026', custo_total: 0 });
+    triggerToast(`Registro de consumo para "${newItem.item}" incorporado!`);
+  };
+
+  // Formulário: Adicionar Preço Histórico Manualmente
+  const handleAddPreco = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formPrecos.item) return;
+    const newItem: PrecoHistoricoItem = {
+      id: 'custom_prec_' + Date.now(),
+      item: formPrecos.item,
+      fornecedor: formPrecos.fornecedor || 'Fornecedor Avulso',
+      preco_unitario: Math.max(0, formPrecos.preco_unitario),
+      data_compra: formPrecos.data_compra || new Date().toISOString().split('T')[0],
+      condicao_pagamento: formPrecos.condicao_pagamento || 'Pix',
+      codigo_pedido: formPrecos.codigo_pedido || ('PED-' + Math.floor(Math.random() * 9000 + 1000))
+    };
+    setHistoricoPrecosData(prev => [newItem, ...prev]);
+    setFormPrecos({ item: '', fornecedor: '', preco_unitario: 0, data_compra: '', condicao_pagamento: '', codigo_pedido: '' });
+    triggerToast(`Preço histórico de "${newItem.item}" arquivado com sucesso.`);
+  };
+
+  // Formulário: Adicionar Validade Manualmente
+  const handleAddValidade = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formValidade.item) return;
+    const calculatedValDays = Math.round((new Date(formValidade.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    let calculatedStatus = 'Saudável';
+    if (calculatedValDays < 0) calculatedStatus = 'Vencido';
+    else if (calculatedValDays <= 15) calculatedStatus = 'Crítico';
+    else if (calculatedValDays <= 45) calculatedStatus = 'Atenção';
+
+    const newItem: ValidadeLoteItem = {
+      id: 'custom_val_' + Date.now(),
+      item: formValidade.item,
+      lote: formValidade.lote || 'L-Custom',
+      quantidade: Math.max(0, formValidade.quantidade),
+      validade: formValidade.validade || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      status: calculatedStatus,
+      valor_economico: formValidade.quantidade * 50
+    };
+    setValidadeLotesData(prev => [newItem, ...prev]);
+    setFormValidade({ item: '', lote: '', quantidade: 0, validade: '' });
+    triggerToast(`Controle do lote de "${newItem.item}" registrado.`);
+  };
+
+  // Função auxiliar de download de relatório (Gera e exporta CSV fictício fidedigno)
+  const handleDownloadRelatorioCSV = (tipo: string) => {
+    let content = 'data:text/csv;charset=utf-8,';
+    if (tipo === 'estoque') {
+      content += '"ID";"Item";"Lote";"Quantidade";"Unidade";"Custo Unitário";"Preço de Venda";"Local"\n';
+      estoqueData.forEach(i => {
+        content += `"${i.id}";"${i.item}";"${i.lote}";${i.quantidade};"${i.unidade}";${i.custo_unitario};${i.preco_venda};"${i.local}"\n`;
+      });
+    } else if (tipo === 'consumo') {
+      content += '"ID";"Item";"Quantidade Consumida";"Mês/Ano";"Custo Total"\n';
+      consumoData.forEach(c => {
+        content += `"${c.id}";"${c.item}";${c.quantidade_consumida};"${c.mes_ano}";${c.custo_total}\n`;
+      });
+    } else if (tipo === 'historico_precos') {
+      content += '"ID";"Item";"Fornecedor";"Preço Unitário";"Data de Compra";"Condição de Pagamento";"Código do Pedido"\n';
+      historicoPrecosData.forEach(h => {
+        content += `"${h.id}";"${h.item}";"${h.fornecedor}";${h.preco_unitario};"${h.data_compra}";"${h.condicao_pagamento}";"${h.codigo_pedido}"\n`;
+      });
+    } else {
+      content += '"ID";"Item";"Lote";"Quantidade";"Data de Validade";"Status";"Valor de Ativo"\n';
+      validadeLotesData.forEach(v => {
+        content += `"${v.id}";"${v.item}";"${v.lote}";${v.quantidade};"${v.validade}";"${v.status}";${v.valor_economico}\n`;
+      });
+    }
+
+    const encodedUri = encodeURI(content);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `base_registrada_${tipo}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    triggerToast(`Exportação concluída. Download iniciado para "base_registrada_${tipo}.csv"!`);
+  };
+
+  // ==========================================
+  // CALCULOS DOS EXCELENTES METRICAS DE ESTOQUE
+  // ==========================================
+  const valorEstoqueTotal = estoqueData.reduce((acc, current) => acc + (current.quantidade * current.custo_unitario), 0);
+  
+  // RUPTURA: Itens que têm histórico de consumo mas estão com saldo ZERADO (ou zerando)
+  const itensRuptura = estoqueData.filter(e => {
+    const hasConsumo = consumoData.some(c => c.item.toLowerCase() === e.item.toLowerCase() && c.quantidade_consumida > 0);
+    return hasConsumo && e.quantidade === 0;
+  });
+
+  // GIRO DE ESTOQUE: Consumo Anualizado / Estoque Médio
+  // Estoque Médio = ValorTotalEstoque (Para simulação ou real)
+  // Consumo Mensal Totalizado em Custo
+  const custoConsumoMensalTotal = consumoData.reduce((acc, cur) => acc + cur.custo_total, 0);
+  const giroEstoque = valorEstoqueTotal > 0 ? (custoConsumoMensalTotal * 12) / valorEstoqueTotal : 0;
+
+  // CURVA ABC: Classificação
+  // Calculado multiplicando QtdEstoque * CustoUnitario (ou consumo mensual totalizado, que representa a rotatividade financeira real)
+  const totalFinancialFlow = estoqueData.reduce((acc, item) => acc + (item.quantidade * item.custo_unitario || 10), 0) || 1;
+  const estoqueOrdenadoParaABC = [...estoqueData].sort((a,b) => (b.quantidade * b.custo_unitario) - (a.quantidade * a.custo_unitario));
+  
+  let acumulado = 0;
+  const itemsABCClassification = estoqueOrdenadoParaABC.map(item => {
+    const itemValue = item.quantidade * item.custo_unitario;
+    acumulado += itemValue;
+    const pct = (acumulado / totalFinancialFlow) * 100;
+    
+    let classe: 'A' | 'B' | 'C' = 'C';
+    if (pct <= 80) classe = 'A';
+    else if (pct <= 95) classe = 'B';
+
+    return {
+      ...item,
+      value: itemValue,
+      pctOfTotal: (itemValue / totalFinancialFlow) * 100,
+      classification: classe
+    };
+  });
+
+  const countA = itemsABCClassification.filter(i => i.classification === 'A').length;
+  const valueA = itemsABCClassification.filter(i => i.classification === 'A').reduce((acc, cur) => acc + cur.value, 0);
+  const countB = itemsABCClassification.filter(i => i.classification === 'B').length;
+  const valueB = itemsABCClassification.filter(i => i.classification === 'B').reduce((acc, cur) => acc + cur.value, 0);
+  const countC = itemsABCClassification.filter(i => i.classification === 'C').length;
+  const valueC = itemsABCClassification.filter(i => i.classification === 'C').reduce((acc, cur) => acc + cur.value, 0);
+
+  // ROTINA DO ASSISTENTE IA (Livre acesso para cruzamento de dados, cumprindo o critério fidedigno)
+  const handleSendChatMessage = (alternativeQuery?: string) => {
+    const query = alternativeQuery || chatInput;
+    if (!query.trim()) return;
+    
+    const newMsgArr = [...chatHistory, { role: 'user' as const, content: query, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }];
+    setChatHistory(newMsgArr);
+    if (!alternativeQuery) setChatInput('');
+    setIsAiTyping(true);
+
+    setTimeout(() => {
+      let response = '';
+      const queryLower = query.toLowerCase();
+
+      // REGRA DE VERIFICACAO DOS CAMPOS OPCIONAIS NO MAPPER (Cria alerta dinâmico se algum mapeamento estiver vazio ou ausente)
+      let warningsMapeador = '';
+      if (!columnMapping.itemCol) warningsMapeador += '\n* ⚠️ **Campo de Identificação do Item não está mapeado no sistema.**';
+      if (!columnMapping.qtyCol) warningsMapeador += '\n* ⚠️ **Campo de Quantidade de Unidades está indefinido.**';
+      if (!columnMapping.costCol) warningsMapeador += '\n* ⚠️ **Campo de Preço de Custo está indisponível para derivar rentabilidade.**';
+      
+      const mapperNotice = warningsMapeador 
+        ? `\n\n_Nota do Mapeador de Dados:_ Detectei que algumas colunas de correspondência personalizada não estão mapeadas:${warningsMapeador}\nIsso pode limitar a profundidade de faturamento de minhas deduções.` 
+        : '';
+
+      // CASO CÓDIGO/SALDO: Checar se a mensagem contém menção a um código de produto (padrão de controle de estoque do PDF, ex: "04808", "00633") ou solicita saldo
+      const digitMatch = queryLower.match(/\b(\d{5,6})\b/);
+      if (digitMatch || (queryLower.includes('código') && queryLower.includes('saldo')) || queryLower.includes('somar por código') || queryLower.includes('soma de código') || queryLower.includes('soma pelos códigos')) {
+        const foundCode = digitMatch ? digitMatch[1] : '';
+        const matchingItems = foundCode ? estoqueData.filter(e => e.codigo === foundCode) : [];
         
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-300 text-[10px] font-black uppercase tracking-wider font-mono">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
-              Gestão de Procurement Ativa
-            </div>
-            <h1 className="text-xl md:text-2xl font-black tracking-tight text-white leading-tight">
-              Compra Inteligente & Sourcing Integrado
-            </h1>
-            <p className="text-sm text-slate-300 font-sans leading-relaxed">
-              Evite rupturas de estoque, maximize o saving negociado de fornecedores e controle o caixa da empresa cruzando o giro de estoque operacional com o Prazo Médio de Pagamento (PMP).
-            </p>
-          </div>
+        if (matchingItems.length > 0) {
+          const totalAggQty = matchingItems.reduce((acc, curr) => acc + curr.quantidade, 0);
+          const firstItem = matchingItems[0];
           
-          <div className="bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 p-4 shrink-0 grid grid-cols-2 gap-4 divide-x divide-white/10 font-mono">
-            <div className="text-center px-2">
-              <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Saving Projetado</span>
-              <span className="text-sm font-black text-emerald-400 block mt-1">~14.2%</span>
-            </div>
-            <div className="text-center pl-4 pr-2">
-              <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Ciclo Operacional</span>
-              <span className="text-sm font-black text-indigo-300 block mt-1">{cicloOperacionalCalculated} dias</span>
-            </div>
-          </div>
+          response = `### 📦 Consulta de Saldo por Código: \`${foundCode}\`\n\n` +
+                     `Encontrei o padrão de informação do relatório de estoque para o insumo **${firstItem.item}**.\n\n` +
+                     `* 🔢 **Código Relatório:** \`${foundCode}\`\n` +
+                     `* 🧪 **Descrição do Item:** ${firstItem.item}\n` +
+                     `* 🥄 **Unidade de Medida:** ${firstItem.unidade?.toUpperCase()}\n\n` +
+                     `#### 🗃️ Detalhamento dos Saldos e Situações/Lotes:\n` +
+                     matchingItems.map((item, idx) => `* **Registro ${idx + 1}:** Status \`${item.situacao_lote || item.lote || 'LIBERADO'}\` — Volume: **${item.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${item.unidade}** (em _${item.local}_)`).join('\n') + `\n\n` +
+                     `---\n` +
+                     `### 🧮 Soma Consolidada pelo Código:\n` +
+                     `Como constam múltiplos registros para o mesmo código no relatório original, realizei a **soma automática**:\n` +
+                     `👉 **SALDO CONSOLIDADO TOTAL:** **${totalAggQty.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${firstItem.unidade?.toUpperCase()}**\n\n` +
+                     `_Isso consolida os saldos de diferentes lotes/bloqueios de forma imediata. Deseja registrar cotações ou novos faturamentos?_`;
+        } else if (foundCode) {
+          response = `Encontrei a menção ao código **\`${foundCode}\`**, mas esse item não está cadastrado no saldo físico de estoque atual.\n\nVocê pode cadastrá-lo manualmente no menu à esquerda ou colar as linhas do relatório em PDF usando nosso **Importador por Cópia de PDF** que a soma automática será realizada no ato!`;
+        } else {
+          // O usuário pediu consulta geral de saldos ou soma por código
+          const itemsWithCode = estoqueData.filter(e => e.codigo);
+          const duplicates = itemsWithCode.filter(e => estoqueData.filter(other => other.codigo === e.codigo).length > 1);
+          const uniqueDupCodes = Array.from(new Set(duplicates.map(d => d.codigo)));
+          
+          response = `### 📊 Consolidação Geral de Saldos por Código\n\nIdentifiquei o padrão de controle de estoque do sistema. Atualmente, temos **${uniqueDupCodes.length} matérias-primas** que constam mais de uma vez na base original e foram agrupadas com sucesso:\n\n` +
+                     uniqueDupCodes.map(code => {
+                       const matches = estoqueData.filter(e => e.codigo === code);
+                       const total = matches.reduce((acc, curr) => acc + curr.quantidade, 0);
+                       const desc = matches[0].item;
+                       const units = matches[0].unidade;
+                       const detailsString = matches.map(m => `${m.quantidade.toLocaleString('pt-BR')} ${units} (${m.situacao_lote || m.lote})`).join(' + ');
+                       return `* 🧪 **Código \`${code}\` - ${desc}:**\n` +
+                              `  * _Soma por lotes:_ ${detailsString} = **${total.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${units}**`;
+                     }).join('\n\n') +
+                     `\n\n_Dica:_ O botão **"Consolidar por Código (Soma)"** no cabeçalho da planilha permite alternar visualmente entre a visualização de lotes individualizados (prazos ou lotes LIBERADO, BLOQUEADO, CERTIFICACAO) e a soma consolidada de cada insumo!`;
+        }
+      }
+      
+      // CASO 1: Pergunta sobre a Creatina (Último preço, Fornecedor e cruzamento de estoques)
+      else if (queryLower.includes('creatina') && (queryLower.includes('preco') || queryLower.includes('preço') || queryLower.includes('compra') || queryLower.includes('fornecedor'))) {
+        
+        // Pesquisar no histórico de preços
+        const comprasCreatina = historicoPrecosData
+          .filter(h => h.item.toLowerCase().includes('creatina'))
+          .sort((a, b) => new Date(b.data_compra).getTime() - new Date(a.data_compra).getTime());
+
+        // Pesquisar no saldo
+        const estoqueCreatina = estoqueData.find(e => e.item.toLowerCase().includes('creatina'));
+
+        // Pesquisar na validade
+        const validadeCreatina = validadeLotesData.find(v => v.item.toLowerCase().includes('creatina'));
+
+        if (comprasCreatina.length > 0) {
+          const ultimaCompra = comprasCreatina[0];
+          response = `### 🔍 Auditoria Comercial: Creatina Monohidratada\n\nCom base nos arquivos estruturados registrados no sistema, localizei os seguintes dados fidedignos:\n\n` +
+                     `* 👤 **Último Fornecedor:** **${ultimaCompra.fornecedor}**\n` +
+                     `* 🪙 **Último Preço Pago:** **R$ ${ultimaCompra.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**\n` +
+                     `* 📅 **Data da Aquisição:** ${new Date(ultimaCompra.data_compra).toLocaleDateString('pt-BR')}\n` +
+                     `* 🧾 **Condições de Pagamento:** ${ultimaCompra.condicao_pagamento}\n` +
+                     `* 📦 **Código do Faturamento/Pedido:** \`${ultimaCompra.codigo_pedido}\`\n\n` +
+                     `---\n` +
+                     `### 📊 Cruzamento com Saldos e Validades Vigentes:\n`;
+
+          if (estoqueCreatina) {
+            response += `* 📥 **Estoque Físico Atual:** **${estoqueCreatina.quantidade} potes** (Estoque mínimo configurado: ${estoqueCreatina.min_stock} potes).\n` +
+                        `  * ⚠️ *Ruptura de Segurança:* Faltam **${estoqueCreatina.min_stock - estoqueCreatina.quantidade} potes** para restabelecer a segurança operacional.\n`;
+          }
+          if (validadeCreatina) {
+            response += `* 📅 **Validade Rastreável:** Lote \`${validadeCreatina.lote}\` vence em **${new Date(validadeCreatina.validade).toLocaleDateString('pt-BR')}** (Status: **${validadeCreatina.status}**).\n`;
+          }
+          
+          response += `\n*Nota Histórica:* Rastreie ${comprasCreatina.length} faturamentos de Creatina em sua base histórica. O preço oscilou de R$ 38,50 (com SupleMax em Março/2026) até R$ 42,00 (Atacadão Vida Saudável em Junho/2026), demonstrando inflação física de suprimentos de **+9,09%** no trimestre.`;
+        } else {
+          response = `Localizei itens de Creatina listados no seu painel de saldo físico, porém **não encontrei registros de compra desse item** nos relatórios de faturas de fornecedores importados.\n\nPor favor, cadastre uma fatura de compra para a Creatina ou mapeie a coluna correspondente no Mapeador de Colunas para que eu possa responder no ato.`;
+        }
+      }
+      
+      // CASO 2: Pergunta sobre Ruptura / Itens abaixo do mínimo ou consumo ativo zerado no estoque
+      else if (queryLower.includes('zerado') || queryLower.includes('ruptura') || queryLower.includes('mínimo') || queryLower.includes('reposição') || queryLower.includes('falta')) {
+        const abaixoDoMinimo = estoqueData.filter(e => e.quantidade < e.min_stock);
+        
+        if (abaixoDoMinimo.length > 0) {
+          response = `### ⚠️ Alerta Crítico: Diagnóstico de Rupturas e Reposição de Ativos\n\nCruzei seu saldo de estoque com o histórico de consumo enviado. Temos **${abaixoDoMinimo.length} insumos** em situação de reabastecimento imediato:\n\n`;
+          
+          abaixoDoMinimo.forEach((item, index) => {
+            const cons = consumoData.find(c => c.item.toLowerCase() === item.item.toLowerCase());
+            const consQtd = cons ? cons.quantidade_consumida : 0;
+            const coberturaDias = consQtd > 0 ? Math.round((item.quantidade / consQtd) * 30) : 0;
+            
+            response += `${index + 1}. **${item.item}** (Lote: \`${item.lote}\`)\n` +
+                        `   * 📦 Saldo: **${item.quantidade}** vs Mínimo: ${item.min_stock} de segurança.\n` +
+                        `   * 📈 Histórico de Consumo mensal: ~${consQtd} ${item.unidade}/mês.\n` +
+                        `   * ⏳ Cobertura Física: **${coberturaDias} dias** de operação.\n` +
+                        `   * 🛒 Reposição Sugerida: **+${item.min_stock - item.quantidade} ${item.unidade}** para sanar.\n\n`;
+          });
+          
+          response += `Recomendo disparar ordens de compras sob as condições de pagamento dos últimos faturamentos arquivados. Quer que eu faça uma simulação de orçamento?`;
+        } else {
+          response = `Excelente! Todos os itens do estoque estão operando acima dos seus limites de segurança configurados. Nenhuma ruptura detectada.`;
+        }
+      }
+
+      // CASO 3: Perdegas por prazos de Validade vencendo
+      else if (queryLower.includes('venc') || queryLower.includes('validade') || queryLower.includes('perda') || queryLower.includes('expir')) {
+        const lotesCriticos = validadeLotesData.filter(v => v.status === 'Crítico');
+        
+        if (lotesCriticos.length > 0) {
+          response = `### 📅 Auditoria de Validade e Prazos Críticos\n\nIdentifiquei lotes vigentes com expiração imediata. Cruzei esses insumos com o consumo mensal para prever perda financeira:\n\n`;
+          
+          lotesCriticos.forEach(lote => {
+            const cons = consumoData.find(c => c.item.toLowerCase() === lote.item.toLowerCase());
+            const consMensal = cons ? cons.quantidade_consumida : 0;
+            const velocidadeVenda = consMensal > 100 ? 'Velocidade Alta 🟢' : 'Velocidade Moderada / Baixa 🟡';
+            
+            response += `* 📦 **Produto:** **${lote.item}** (Lote \`${lote.lote}\`)\n` +
+                        `  * ⏳ Vence em: **${new Date(lote.validade).toLocaleDateString('pt-BR')}** (Estado: **${lote.status}**)\n` +
+                        `  * 🪙 Valor Comercial Impedido: **R$ ${lote.valor_economico.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**\n` +
+                        `  * 📉 Consumo Físico Rastreável: ~${consMensal} un/mês (${velocidadeVenda})\n\n`;
+          });
+          
+          response += `*Recomendações IA:* Desencadeie promoções de escoamento rápido no PDV para esses lotes críticos antes do prazo limite de expiração.`;
+        } else {
+          response = `Muito bem! Todas as validades físicas ativas apontam maturidade segura com tempo superior a 45 dias operáveis.`;
+        }
+      }
+
+      // CASO 4: Curva ABC de Estoques
+      else if (queryLower.includes('abc') || queryLower.includes('curva') || queryLower.includes('classificação')) {
+        response = `### 📊 Análise de Curva ABC sobre Ativos de Estoques\n\nA Curva ABC prioriza a relevância financeira dos seus insumos no almoxarifado:\n\n` +
+                   `* 🟥 **Classe A (Alta Relevância - 80% do Valor):** **${countA} itens** totalizando **R$ ${valueA.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n` +
+                   `* 🟨 **Classe B (Média Relevância - 15% do Valor):** **${countB} itens** totalizando **R$ ${valueB.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n` +
+                   `* 🟦 **Classe C (Baixa Relevância - 5% do Valor):** **${countC} itens** totalizando **R$ ${valueC.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n` +
+                   `### 💡 Insight de Gestão:\n` +
+                   `Os itens de Classe A contêm seu maior capital parado e necessitam de processos de aquisições de Just-in-Time sob boletos enxutos, enquanto os itens de Classe C podem ser comprados em maior volume sob parcelas dilatadas.`;
+      }
+
+      // CASO 5: Outras perguntas comerciais (Padrão de IA)
+      else {
+        response = `### 🧠 Diagnóstico Comercial Inteligente\n\nRealizei uma busca ampla nas suas bases integradas de suprimentos:\n` +
+                   `* 📦 **Saldo Geral:** ${estoqueData.length} produtos em almoxarifados catalogados.\n` +
+                   `* 📈 **Histórico de Saídas:** Média de consumo rastreado para os principais produtos comercializados.\n` +
+                   `* 💰 **Capital Imobiliário:** R$ ${valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} total de valor de estocagem física.\n\n` +
+                   `Tente me perguntar especificações exatas nos arquivos:\n` +
+                   `1. *"Qual foi o preço da última compra de Creatina?"*\n` +
+                   `2. *"Me informe os itens em ruptura ou críticos abaixo do estoque mínimo"* \n` +
+                   `3. *"Qual a curva ABC de estocagem de capital parado?"*`;
+      }
+
+      response += mapperNotice;
+
+      setChatHistory(prev => [...prev, { role: 'assistant', content: response, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }]);
+      setIsAiTyping(false);
+    }, 1000);
+  };
+
+  return (
+    <div className="w-full bg-slate-50 min-h-screen pb-12 transition-all duration-300">
+      
+      {/* Toast Popup de Alerta de Mudanças */}
+      {toastMessage && (
+        <div id="procurement-toast" className="fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-white p-4 rounded-2xl flex items-center gap-3 shadow-xl max-w-sm z-50 animate-bounce">
+          <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />
+          <p className="text-xs font-semibold leading-normal">{toastMessage}</p>
         </div>
+      )}
 
-        {/* Dynamic sub navigation tabs inside Procurement Module */}
-        <div className="flex flex-wrap gap-2 mt-6 pt-5 border-t border-white/10">
-          <button
-            onClick={() => setActiveSubTab('indicators')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === 'indicators'
-                ? 'bg-emerald-600 text-white shadow-lg'
-                : 'bg-white/5 hover:bg-white/10 text-slate-300'
-            }`}
-          >
-            <Layers3 className="h-4 w-4 shrink-0" />
-            Página de Indicadores
-          </button>
+      {/* Hero Header Adaptativo baseando-se no Tab Selecionada no Sidebar */}
+      <div className="bg-white border-b border-slate-200/80 py-6 px-6 sm:px-8 mb-6">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">Módulo Compras Inteligentes</span>
+              <span className="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-md text-[9px] font-bold">Livre Acesso IA</span>
+            </div>
+            
+            {activeSubTab === 'indicators' ? (
+              <>
+                <h1 id="procurement-module-title" className="text-2xl font-black text-slate-800 tracking-tight mt-1 flex items-center gap-2">
+                  <ShoppingCart className="h-6 w-6 text-emerald-600" />
+                  Gestão de Compras & Ingestão
+                </h1>
+              </>
+            ) : (
+              <>
+                <h1 id="procurement-module-title" className="text-2xl font-black text-slate-800 tracking-tight mt-1 flex items-center gap-2">
+                  <Package className="h-6 w-6 text-indigo-600" />
+                  Gestão de Estoque & Indicadores
+                </h1>
+              </>
+            )}
+          </div>
 
-          <button
-            onClick={() => setActiveSubTab('quotes')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === 'quotes'
-                ? 'bg-emerald-600 text-white shadow-lg'
-                : 'bg-white/5 hover:bg-white/10 text-slate-300'
-            }`}
-          >
-            <Bot className="h-4 w-4 shrink-0" />
-            Cotações Inteligentes (IA)
-          </button>
+          <div className="flex items-center gap-2.5">
+            {/* Botão de mapeamento personalizado de colunas */}
+            <button
+              onClick={() => setIsMapperOpen(!isMapperOpen)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 select-none cursor-pointer ${
+                isMapperOpen ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-extrabold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Settings className="h-4 w-4 shrink-0" />
+              <span>Configurar Colunas ({Object.values(columnMapping).filter(Boolean).length})</span>
+            </button>
 
-          <button
-            onClick={() => setActiveSubTab('whatsapp')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === 'whatsapp'
-                ? 'bg-emerald-600 text-white shadow-lg'
-                : 'bg-white/5 hover:bg-white/10 text-slate-300'
-            }`}
-          >
-            <MessageSquare className="h-4 w-4 shrink-0" />
-            Zap de Fornecedores {isListValidated && <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />}
-          </button>
+            {/* Minimizar / maximizar painel da IA */}
+            <button
+              onClick={() => setIsChatExpanded(!isChatExpanded)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 select-none cursor-pointer ${
+                isChatExpanded ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              <Bot className="h-4 w-4 shrink-0" />
+              <span>Auditor IA {isChatExpanded ? 'Ativo' : 'Oculto'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {saveStatus && (
-        <div className="bg-emerald-50 border border-emerald-150 p-4 rounded-2xl text-xs text-emerald-800 flex items-center gap-3.5 font-bold animate-fade-in shadow-xs">
-          <div className="bg-emerald-550 text-white p-1 rounded-lg">
-            <Check className="h-4 w-4" />
+      {/* EDITOR MAPPER DE COLUNAS PERSONALIZADO (Flutuante Collapsible) */}
+      {isMapperOpen && (
+        <div className="max-w-7xl mx-auto px-6 sm:px-8 mb-6 animate-fadeIn">
+          <div className="bg-white border border-indigo-100 rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-2">
+                  <Settings className="h-4 w-4 text-indigo-600" />
+                  Mapeador de Colunas Personalizadas
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsMapperOpen(false)}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-850 bg-indigo-50 px-2.5 py-1 rounded-lg"
+              >
+                Concluir
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3.5 text-left">
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">A. Descrição Item</label>
+                <input
+                  type="text"
+                  value={columnMapping.itemCol}
+                  onChange={e => setColumnMapping({...columnMapping, itemCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Nome do Produto"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">B. Saldo Estoque</label>
+                <input
+                  type="text"
+                  value={columnMapping.qtyCol}
+                  onChange={e => setColumnMapping({...columnMapping, qtyCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Saldo Atual"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">C. Código Lote</label>
+                <input
+                  type="text"
+                  value={columnMapping.loteCol}
+                  onChange={e => setColumnMapping({...columnMapping, loteCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Identificação Lote"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">D. Custo Unitário</label>
+                <input
+                  type="text"
+                  value={columnMapping.costCol}
+                  onChange={e => setColumnMapping({...columnMapping, costCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Preço Custo"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">E. Validade Lote</label>
+                <input
+                  type="text"
+                  value={columnMapping.validadeCol}
+                  onChange={e => setColumnMapping({...columnMapping, validadeCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Vencimento"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">F. Nome Fornecedor</label>
+                <input
+                  type="text"
+                  value={columnMapping.fornecedorCol}
+                  onChange={e => setColumnMapping({...columnMapping, fornecedorCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Distribuidor"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-530 block mb-1">G. Preço Venda</label>
+                <input
+                  type="text"
+                  value={columnMapping.precoVendaCol}
+                  onChange={e => setColumnMapping({...columnMapping, precoVendaCol: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Valor Consumidor"
+                />
+              </div>
+            </div>
           </div>
-          <span>{saveStatus}</span>
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* PAGE 1: PÁGINA DE INDICADORES (ESTOQUE E COMPRAS)           */}
-      {/* ========================================================= */}
-      {activeSubTab === 'indicators' && (
+      {/* CORE DISPLAY EM LAYOUT COMPLETO DA PÁGINA */}
+      <div className="max-w-7xl mx-auto px-6 sm:px-8 space-y-6">
+        
+        {/* PAINEL PRINCIPAL (Calculadora/Ingestão/Indicadores) - Sempre ocupa largura inteira para máxima visibilidade das tabelas */}
         <div className="space-y-6">
-          
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            {/* COLUMN 1: ESTOQUE METRICS (8 Cols) */}
-            <div className="lg:col-span-8 bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                <div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Métricas de Estoque & Ciclo Operacional</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Visão analítica de giro de café, copos e insumos contra o ciclo financeiro corporativo.</p>
-                </div>
-                <span className="p-2 bg-emerald-50 rounded-xl text-emerald-600"><Package className="h-5 w-5" /></span>
-              </div>
-
-              {/* Dynamic Interactive Sliders */}
-              <div className="bg-slate-50 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-6 border border-slate-150/60">
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-slate-600">
-                    <span>Giro de Estoque Anual (rotas)</span>
-                    <span className="font-mono text-indigo-650 bg-indigo-50 px-2 py-0.5 rounded">{giroTarget.toFixed(1)}x / ano</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="3" 
-                    max="18" 
-                    step="0.5" 
-                    value={giroTarget} 
-                    onChange={(e) => setGiroTarget(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-slate-400">
-                    <span>Rotatividade Baixa</span>
-                    <span>Meta Ideal (12x)</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-slate-600">
-                    <span>Prazo Médio de Recebimento (Clientes)</span>
-                    <span className="font-mono text-purple-650 bg-purple-50 px-2 py-0.5 rounded">{pmrSimulated} dias</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="15" 
-                    max="60" 
-                    step="1" 
-                    value={pmrSimulated} 
-                    onChange={(e) => setPmrSimulated(parseInt(e.target.value) || 30)}
-                    className="w-full accent-emerald-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-slate-400">
-                    <span>À vista / Sem faturamento</span>
-                    <span>Faturado de 60 dias</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Output metric card breakdowns */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* ========================================================= */}
+            {/* TAB OUTCOME 1: GESTÃO DE COMPRAS (INDICATORS)             */}
+            {/* ========================================================= */}
+            {activeSubTab === 'indicators' && (
+              <div className="space-y-6">
                 
-                <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-2xs space-y-2">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Estocagem (PME)</span>
-                  <div className="text-2xl font-black text-slate-800 font-mono">
-                    {pmeCalculated} <span className="text-xs font-medium text-slate-450 text-right">dias em hold</span>
-                  </div>
-                  <div className="text-[10px] text-slate-450 leading-normal">
-                    Representa o tempo médio que os fardos e grãos ficam guardados na saca até o consumo final.
-                  </div>
-                </div>
-
-                <div className="p-4 border border-indigo-100 rounded-2xl bg-indigo-50/20 shadow-2xs space-y-2">
-                  <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider block">Ciclo Operacional</span>
-                  <div className="text-2xl font-black text-indigo-600 font-mono">
-                    {cicloOperacionalCalculated} <span className="text-xs font-medium text-indigo-400">dias totais</span>
-                  </div>
-                  <div className="text-[10px] text-slate-450 leading-normal">
-                    Ciclo total que engloba a entrada física do produto no estoque até recebimento das vendas: <strong className="font-mono">{pmeCalculated} + {pmrSimulated}</strong>.
-                  </div>
-                </div>
-
-                <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-2xs space-y-2">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Cobertura de Estoque</span>
-                  <div className="text-2xl font-black text-emerald-600 font-mono">
-                    ~24 <span className="text-xs font-medium text-slate-450">dias de segurança</span>
-                  </div>
-                  <div className="text-[10px] text-slate-450 leading-normal">
-                    Nível de estoque faturado de reserva capaz de suportar as flutuações sazonais de venda de balcão.
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Categorias mais analisadas details */}
-              <div className="space-y-3">
-                <h4 className="text-[11px] font-extrabold uppercase text-slate-700 tracking-wider">Desempenho por Categoria de Suprimentos</h4>
-                
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-600 mb-1">
-                      <span>Café Especial (Grãos)</span>
-                      <span className="font-mono text-slate-550">Giro: 8.4x / hold: 12 dias</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: '84%' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-600 mb-1">
-                      <span>Copos e Embalagens Kraft</span>
-                      <span className="font-mono text-slate-550">Giro: 12.1x / hold: 30 dias</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: '68%' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-600 mb-1">
-                      <span>Leite frescas e Laticínios</span>
-                      <span className="font-mono text-slate-550">Giro: 15.3x / hold: 4 dias</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: '92%' }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* COLUMN 2: COMPRAS METRICS (4 Cols) */}
-            <div className="lg:col-span-4 bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                <div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Métricas de Sourcing & Compras</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Savins, custos mitigados e liquidez de caixa faturado.</p>
-                </div>
-                <span className="p-2 bg-indigo-50 rounded-xl text-indigo-600"><DollarSign className="h-5 w-5" /></span>
-              </div>
-
-              {/* KPI Savings Card */}
-              <div className="bg-emerald-50/40 p-5 rounded-2xl border border-emerald-100 space-y-1">
-                <span className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider block">Total Saving Negociado IA</span>
-                <span className="text-3xl font-black text-emerald-600 block leading-tight font-mono">
-                  R$ {(calculatedTotalSpend * 0.142).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
-                <span className="text-[10px] text-emerald-700 block mt-1">
-                  <strong>+14.2%</strong> retido no CMV total de compras da empresa através de seleção da melhor cotação comparatória.
-                </span>
-              </div>
-
-              {/* DPO / Prazo Médio de Pagamento */}
-              <div className="space-y-4">
-                <div className="p-4 border border-slate-100 rounded-2xl relative bg-white">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Prazo Médio de Pagamento (PMP)</span>
-                  <div className="text-3xl font-black text-slate-800 mt-1 font-mono">
-                    {pmpSimulated.toFixed(1)} dias
-                  </div>
-                  
-                  <div className="mt-3 space-y-2">
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-600">
-                      <span>Simular alongamento comercial</span>
-                      <span className="font-mono text-emerald-600">+{pmpSimulated - 18.4 > 0 ? (pmpSimulated - 18.4).toFixed(1) : '0'} d</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="15" 
-                      max="45" 
-                      step="1.5" 
-                      value={pmpSimulated} 
-                      onChange={(e) => setPmpSimulated(parseFloat(e.target.value))}
-                      className="w-full accent-indigo-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                    />
-                  </div>
-                  
-                  <p className="text-[10px] mt-2.5 text-slate-450 leading-relaxed bg-indigo-50/30 p-2.5 rounded-lg border border-indigo-100/30 text-slate-500">
-                    💡 <strong>Alongamento de PMP:</strong> Se você conseguir alongar o prazo com o Fornecedor Alpha de 15 para 45 dias no faturamento, você injeta <strong>R$ 11.200</strong> de caixa imediata de capital de giro!
-                  </p>
-                </div>
-
-                <div className="border border-slate-100 p-4 rounded-2xl space-y-2">
-                  <h4 className="text-[10px] font-black uppercase text-slate-705 tracking-wider">Estoque Parado vs Escoamento</h4>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-450">Capital de Giro Retido:</span>
-                    <strong className="font-mono text-slate-700">R$ 5.480,00</strong>
-                  </div>
-                  <div className="flex justify-between items-center text-xs pb-1 border-b border-slate-100">
-                    <span className="text-slate-450">Perda por vencimento (estimada):</span>
-                    <strong className="font-mono text-amber-500">R$ 380,00</strong>
-                  </div>
-                  <p className="text-[9px] text-slate-400 font-medium">Auditoria interna via CFO Inteligente atualizada há poucos minutos.</p>
-                </div>
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* Quick Action linking to Tab 2 */}
-          <div className="bg-gradient-to-r from-emerald-600 to-indigo-650 rounded-2xl p-5 text-white flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="space-y-1 text-center sm:text-left">
-              <h4 className="text-sm font-black uppercase tracking-tight">Estoque abaixo do ponto de pedido crítico?</h4>
-              <p className="text-xs text-white/80">Envie seus arquivos de estoque e histórico para que a Inteligência Artificial formule o lote exato de compra agora!</p>
-            </div>
-            <button
-              onClick={() => setActiveSubTab('quotes')}
-              className="bg-white text-emerald-900 hover:bg-emerald-50 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all cursor-pointer"
-            >
-              Iniciar Cotação IA
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* PAGE 2: COTAÇÕES INTELIGENTES (UPLOAD INPUTS & GENERATOR) */}
-      {/* ========================================================= */}
-      {activeSubTab === 'quotes' && (
-        <div className="space-y-6 animate-fade-in">
-          
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            
-            {/* INPUT PANEL FOR AUDIT (5 COLS) */}
-            <div className="lg:col-span-5 bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-5">
-              <div className="border-b border-slate-50 pb-3 flex items-center gap-2">
-                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-                  <Upload className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-extrabold uppercase text-slate-800 tracking-wider">Arquivos de Auditoria de Sourcing</h3>
-                  <p className="text-[10px] text-slate-400 font-medium">Anexe seus dados locais para que o assistente analise tudo cruzando vencimentos.</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                
-                {/* INPUT 1: LISTA DE PRODUTOS */}
-                <div className="space-y-2 pb-3 border-b border-slate-105">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider block">1. INFORME SUA LISTA DE PRODUTOS</label>
-                    <span className="text-[9.5px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded font-black">Digitação ou Arquivo Anexo</span>
-                  </div>
-                  
-                  <textarea
-                    rows={4}
-                    value={rawProductsList}
-                    onChange={(e) => setRawProductsList(e.target.value)}
-                    placeholder="Cole ou escreva os produtos separados por linha..."
-                    className="w-full text-xs font-bold leading-normal bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white font-mono"
-                  />
-                  
-                  {/* File attachment for Product List */}
-                  <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/85">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-650 mb-1.5">
-                      <span className="flex items-center gap-1">
-                        <FileText className="h-3.5 w-3.5 text-indigo-505" />
-                        Anexar arquivo de produtos faturáveis:
+                {/* 4 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                  <button
+                    onClick={() => setActiveSubData('estoque')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'estoque' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'estoque' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <Package className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {estoqueData.length} itens
                       </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">1. Saldo de Estoque</h3>
+                    {activeSubData === 'estoque' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveSubData('consumo')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'consumo' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'consumo' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <TrendingUp className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {consumoData.length} insumos
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">2. Consumo Mensal</h3>
+                    {activeSubData === 'consumo' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveSubData('historico_precos')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'historico_precos' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'historico_precos' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <History className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {historicoPrecosData.length} faturas
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">3. Comercial/Preços</h3>
+                    {activeSubData === 'historico_precos' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveSubData('validade')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'validade' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'validade' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <Calendar className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {validadeLotesData.length} lotes
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">4. Controle de Validade</h3>
+                    {activeSubData === 'validade' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+                </div>
+
+                {/* Sub cockpit: Área de Uploads + Lançamento Manual na linha de cima, e Tabela Dinâmica em largura total na linha de baixo */}
+                <div className="space-y-6">
+                  
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                    
+                    {/* Upload do Componente Ativo e Botões Rápidos */}
+                    <div className="lg:col-span-4 bg-white border border-slate-200 rounded-3xl p-5 space-y-4 flex flex-col justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-1">
+                          {activeSubData === 'estoque' && 'Upload: Saldo Estoque'}
+                          {activeSubData === 'consumo' && 'Upload: Consumo Médio'}
+                          {activeSubData === 'historico_precos' && 'Upload: Fornecedores & Preço'}
+                          {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400 mb-3">Arraste seus relatórios do sistema em Excel ou PDF para processar.</p>
+
+                        <div 
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) {
+                              const fileExt = file.name.split('.').pop()?.toLowerCase();
+                              const isPdf = fileExt === 'pdf';
+                              const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
+                              
+                              setUploadLoading(activeSubData);
+                              setTimeout(() => {
+                                handleFileUploadSimulated(activeSubData, file.name);
+                                if (isPdf) {
+                                  triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
+                                } else if (isExcel) {
+                                  triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
+                                } else {
+                                  triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
+                                }
+                              }, 1000);
+                            }
+                          }}
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = '.xlsx,.xls,.pdf,.csv,.txt';
+                            input.onchange = (event: any) => {
+                              const file = event.target.files?.[0];
+                              if (file) {
+                                const fileExt = file.name.split('.').pop()?.toLowerCase();
+                                const isPdf = fileExt === 'pdf';
+                                const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
+                                
+                                setUploadLoading(activeSubData);
+                                setTimeout(() => {
+                                  handleFileUploadSimulated(activeSubData, file.name);
+                                  if (isPdf) {
+                                    triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
+                                  } else if (isExcel) {
+                                    triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
+                                  } else {
+                                    triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
+                                  }
+                                }, 1000);
+                              }
+                            };
+                            input.click();
+                          }}
+                          className="border-2 border-dashed border-indigo-200 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer hover:bg-slate-50 transition-all group"
+                        >
+                          {uploadLoading === activeSubData ? (
+                            <div className="space-y-2 py-2">
+                              <RefreshCw className="h-6 w-6 text-indigo-650 animate-spin mx-auto" />
+                              <p className="text-[10px] font-bold text-slate-550 animate-pulse font-mono uppercase">Mapeando Relatório...</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 py-1">
+                              <Upload className="h-5 w-5 text-indigo-400 group-hover:text-indigo-600 mx-auto transition-colors" />
+                               <div>
+                                 <p className="text-[10px] font-extrabold text-indigo-700">Arraste PDF, EXCEL ou clique</p>
+                                 <p className="text-[8px] text-slate-400 leading-normal">Mapeamento inteligente por colunas</p>
+                               </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Botões rápidos adicionais */}
+                      <div className="space-y-1.5 pt-3 border-t border-slate-100">
+                        <button
+                          onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.xlsx`)}
+                          className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
+                        >
+                          <span className="truncate">Carregar Planilha Comercial (.XLSX)</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        </button>
+                        <button
+                          onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.pdf`)}
+                          className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
+                        >
+                          <span className="truncate">Carregar Relatório do Sistema (.PDF)</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Formulários rápidos de Inserção Individual Manual (Ocupa 8 colunas agora) */}
+                    <div className="lg:col-span-8 bg-white border border-slate-200 rounded-3xl p-5 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider block mb-2.5">
+                          Lançamento Avulso Manual ({activeSubData === 'estoque' ? 'Saldo Estoque' : activeSubData === 'consumo' ? 'Consumo Mensal' : activeSubData === 'historico_precos' ? 'Faturamento/Fornecedores' : 'Validade de Lote'})
+                        </span>
+                        
+                        {activeSubData === 'estoque' && (
+                          <form onSubmit={handleAddEstoque} className="space-y-3 text-left">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Código Produto</label>
+                                <input
+                                  type="text" placeholder="Ex: 04808"
+                                  value={formEstoque.codigo} onChange={e => setFormEstoque({...formEstoque, codigo: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Nome do Item / Insumo</label>
+                                <input
+                                  type="text" required placeholder="Nome do item"
+                                  value={formEstoque.item} onChange={e => setFormEstoque({...formEstoque, item: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Situação do Lote</label>
+                                <select
+                                  value={formEstoque.situacao_lote} onChange={e => setFormEstoque({...formEstoque, situacao_lote: e.target.value, lote: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                >
+                                  <option value="LIBERADO">LIBERADO</option>
+                                  <option value="BLOQUEADO">BLOQUEADO</option>
+                                  <option value="CERTIFICACAO">CERTIFICACAO</option>
+                                </select>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Código do Lote</label>
+                                <input
+                                  type="text" placeholder="Ex: LOT2026"
+                                  value={formEstoque.lote} onChange={e => setFormEstoque({...formEstoque, lote: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Qtd Saldo</label>
+                                <input
+                                  type="number" required placeholder="Ex: 50"
+                                  value={formEstoque.quantidade === 0 ? '' : formEstoque.quantidade} onChange={e => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Unidade</label>
+                                <select
+                                  value={formEstoque.unidade} onChange={e => setFormEstoque({...formEstoque, unidade: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                >
+                                  <option value="G">G (Gramas)</option>
+                                  <option value="ML">ML (Mililitros)</option>
+                                  <option value="KG">KG (Quilos)</option>
+                                  <option value="unidades">unidades</option>
+                                  <option value="potes">potes</option>
+                                </select>
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Est. Mínimo</label>
+                                <input
+                                  type="number" placeholder="Ex: 500"
+                                  value={formEstoque.min_stock === 0 ? '' : formEstoque.min_stock} onChange={e => setFormEstoque({...formEstoque, min_stock: parseInt(e.target.value) || 0})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Custo Unitário (R$)</label>
+                                <input
+                                  type="number" step="0.01" placeholder="Ex: 10.00"
+                                  value={formEstoque.custo_unitario === 0 ? '' : formEstoque.custo_unitario} onChange={e => setFormEstoque({...formEstoque, custo_unitario: parseFloat(e.target.value) || 0})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Preço Venda (R$)</label>
+                                <input
+                                  type="number" step="0.01" placeholder="Ex: 20.00"
+                                  value={formEstoque.preco_venda === 0 ? '' : formEstoque.preco_venda} onChange={e => setFormEstoque({...formEstoque, preco_venda: parseFloat(e.target.value) || 0})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
+                                  Incluir no Saldo
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+
+                        {activeSubData === 'consumo' && (
+                          <form onSubmit={handleAddConsumo} className="space-y-3 text-left">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">Insumo Consumido</label>
+                                <input
+                                  type="text" required placeholder="Nome do insumo"
+                                  value={formConsumo.item} onChange={e => setFormConsumo({...formConsumo, item: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400 uppercase">Mês/Ano Ref.</label>
+                                  <input
+                                    type="text" placeholder="Ex: 06/2026"
+                                    value={formConsumo.mes_ano} onChange={e => setFormConsumo({...formConsumo, mes_ano: e.target.value})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400 uppercase">Qtd Consumida</label>
+                                  <input
+                                    type="number" required placeholder="Ex: 15"
+                                    value={formConsumo.quantidade_consumida === 0 ? '' : formConsumo.quantidade_consumida} onChange={e => setFormConsumo({...formConsumo, quantidade_consumida: parseInt(e.target.value) || 0})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex justify-end pt-2">
+                              <button type="submit" className="bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 px-6 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
+                                Salvar em Consumos
+                              </button>
+                            </div>
+                          </form>
+                        )}
+
+                        {activeSubData === 'historico_precos' && (
+                          <form onSubmit={handleAddPreco} className="space-y-3 text-left">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Insumo / Item Comprado</label>
+                                <input
+                                  type="text" required placeholder="Ex: Creatina Pura"
+                                  value={formPrecos.item} onChange={e => setFormPrecos({...formPrecos, item: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Fornecedor / Fabricante</label>
+                                <input
+                                  type="text" placeholder="Ex: Fornecedor Farmacêutico S/A"
+                                  value={formPrecos.fornecedor} onChange={e => setFormPrecos({...formPrecos, fornecedor: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Preço Pago Unitário</label>
+                                <input
+                                  type="number" step="0.01" required placeholder="Ex: 89.90"
+                                  value={formPrecos.preco_unitario === 0 ? '' : formPrecos.preco_unitario} onChange={e => setFormPrecos({...formPrecos, preco_unitario: parseFloat(e.target.value) || 0})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Data da Compra</label>
+                                <input
+                                  type="date"
+                                  value={formPrecos.data_compra} onChange={e => setFormPrecos({...formPrecos, data_compra: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
+                                  Registrar Faturamento
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+
+                        {activeSubData === 'validade' && (
+                          <form onSubmit={handleAddValidade} className="space-y-3 text-left">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Nome do Item / Produto</label>
+                                <input
+                                  type="text" required placeholder="Ex: Whey Isolate Lote A"
+                                  value={formValidade.item} onChange={e => setFormValidade({...formValidade, item: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-405 uppercase">Código do Lote</label>
+                                  <input
+                                    type="text" placeholder="Ex: L2026-X"
+                                    value={formValidade.lote} onChange={e => setFormValidade({...formValidade, lote: e.target.value})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-405 uppercase">Qtd Volume Lote</label>
+                                  <input
+                                    type="number" required placeholder="Ex: 50"
+                                    value={formValidade.quantidade === 0 ? '' : formValidade.quantidade} onChange={e => setFormValidade({...formValidade, quantidade: parseInt(e.target.value) || 0})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-405 uppercase">Data de Vencimento</label>
+                                <input
+                                  type="date" required
+                                  value={formValidade.validade} onChange={e => setFormValidade({...formValidade, validade: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
+                                  Registrar Validade
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+                      </div>
                     </div>
                     
-                    <div className="relative border border-dashed border-slate-300 hover:border-emerald-500/60 rounded-lg p-2 text-center bg-white transition-all cursor-pointer">
-                      <input 
-                        type="file" 
-                        accept=".xlsx,.xls,.csv,.txt"
-                        onChange={(e) => triggerFakeUpload('listaProdutos', e)}
-                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                      />
-                      {inputStateFiles.listaProdutos ? (
-                        <div className="flex items-center justify-between gap-2 px-1">
-                          <span className="text-xs font-black text-slate-700 truncate max-w-[200px]">
-                            ✔️ {inputStateFiles.listaProdutos.name}
-                          </span>
-                          <span className="text-[9px] font-mono text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded shrink-0 font-bold">
-                            {inputStateFiles.listaProdutos.size}
-                          </span>
+                  </div>
+
+                  {/* Tabela Dinâmica do Componente Selecionado em largura completa */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
+                    
+                    {/* Filtros e Busca */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3.5 border-b border-slate-100">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                          {activeSubData === 'estoque' && 'Base: Saldo de Estoque Atual'}
+                          {activeSubData === 'consumo' && 'Base: Histórico de Consumo Mensal'}
+                          {activeSubData === 'historico_precos' && 'Base: Histórico de Compras e Fornecedores'}
+                          {activeSubData === 'validade' && 'Base: Auditoria de Validades de Shelf-life'}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                        {activeSubData === 'estoque' && (
+                          <button
+                            onClick={() => setConsolidatedByCode(!consolidatedByCode)}
+                            className={`px-3 py-1.5 rounded-xl font-bold uppercase text-[9px] tracking-wide transition-all select-none cursor-pointer border flex items-center gap-1.5 shrink-0 ${
+                              consolidatedByCode 
+                                ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-extrabold' 
+                                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'
+                            }`}
+                            title="Agrupa e soma de forma consolidada os itens que tiverem mesmo código"
+                          >
+                            <Layers className="h-3.5 w-3.5 text-indigo-500" />
+                            <span>{consolidatedByCode ? 'Soma por Código' : 'Lotes Individuais'}</span>
+                          </button>
+                        )}
+                        <div className="relative flex-1 sm:w-44">
+                          <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-slate-400" />
+                          <input
+                            type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                            placeholder="Pesquisar na planilha..."
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-7 text-[11px] py-1.5 focus:outline-none"
+                          />
                         </div>
-                      ) : (
-                        <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-450 font-bold">
-                          <Upload className="h-3 w-3 text-slate-400" />
-                          <span>Anexar lista de produtos (.xlsx, .csv, .txt)</span>
+                        <button
+                          onClick={() => handleDownloadRelatorioCSV(activeSubData)}
+                          className="bg-slate-50 border hover:bg-slate-100 p-2 rounded-xl text-slate-600 transition-colors select-none cursor-pointer"
+                          title="Baixar Base Ativa em CSV"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                     {/* RENDER PLANILHA ESTOQUE */}
+                     {activeSubData === 'estoque' && (
+                      <div className="space-y-4">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-[11px] bg-white rounded-xl">
+                            <thead>
+                              <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest pb-1 text-left">
+                                <th className="pb-2">Código</th>
+                                <th className="pb-2">Insumo / Descrição</th>
+                                <th className="pb-2">Status Lote</th>
+                                <th className="pb-2 text-right">Físico</th>
+                                <th className="pb-2 text-right">Est. Seg / Mín</th>
+                                <th className="pb-2 text-right">Custo Unit.</th>
+                                <th className="pb-2 text-right">Valor Total</th>
+                                <th className="pb-2 text-center">Excluir</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                              {getAggregatedStockData()
+                                .filter(i => 
+                                  i.item.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                  (i.codigo && i.codigo.includes(searchQuery))
+                                )
+                                .map((row) => (
+                                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="py-2.5 font-mono text-indigo-700 font-bold bg-indigo-50/30 px-2 py-0.5 rounded text-[10.5px] border border-indigo-100/50 inline-block mt-2">
+                                      {row.codigo || '—'}
+                                    </td>
+                                    <td className="py-2.5 font-bold text-slate-900">
+                                      {row.item}
+                                      <span className="block font-normal text-[9px] text-slate-400 font-mono uppercase">{row.local}</span>
+                                    </td>
+                                    <td className="py-2.5 font-sans">
+                                      {row.originalItemsCount && row.originalItemsCount > 1 ? (
+                                        <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-850 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight">
+                                          Somou {row.originalItemsCount} Lotes
+                                        </span>
+                                      ) : (
+                                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-650 rounded text-[9.5px] font-mono uppercase">
+                                          {row.situacao_lote || row.lote}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 text-right font-black">
+                                      <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                                        row.quantidade <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
+                                      }`}>
+                                        {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 text-right font-mono text-slate-450 text-[10px]">
+                                      Mín: {row.min_stock} / Seg: {row.safety_stock}
+                                    </td>
+                                    <td className="py-2.5 text-right font-mono text-slate-500">
+                                      R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">
+                                      R$ {(row.quantidade * row.custo_unitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-2.5 text-center">
+                                      <button onClick={() => handleDeleteEstoque(row.id)} className="text-slate-400 hover:text-red-650 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                        <Trash className="h-3.5 w-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                     )}
+
+                    {/* RENDER PLANILHA CONSUMO */}
+                    {activeSubData === 'consumo' && (
+                      <div className="overflow-x-auto text-[11px]">
+                        <table className="w-full text-left bg-white rounded-xl">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
+                              <th className="pb-1.5">Descrição</th>
+                              <th className="pb-1.5">Mês Ref.</th>
+                              <th className="pb-1.5 text-right">Consumo Mensal</th>
+                              <th className="pb-1.5 text-right">Custo Mensal Consumido</th>
+                              <th className="pb-1.5 text-center">Excluir</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                            {consumoData
+                              .filter(c => c.item.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map((row) => (
+                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
+                                  <td className="py-2.5 font-mono font-semibold text-emerald-700">{row.mes_ano}</td>
+                                  <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">{row.quantidade_consumida.toLocaleString('pt-BR')} unidades</td>
+                                  <td className="py-2.5 text-right font-mono font-extrabold text-emerald-650">R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  <td className="py-2.5 text-center">
+                                    <button onClick={() => handleDeleteConsumo(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                      <Trash className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* RENDER PLANILHA HISTORICO PRECOS */}
+                    {activeSubData === 'historico_precos' && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-[11px] bg-white rounded-xl">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
+                              <th className="pb-2">Fornecedor / Insumo</th>
+                              <th className="pb-2">Código Faturamento</th>
+                              <th className="pb-2">Data Venda</th>
+                              <th className="pb-2 text-right">Preço Pago</th>
+                              <th className="pb-2">Condições</th>
+                              <th className="pb-2 text-center">Excluir</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                            {historicoPrecosData
+                              .filter(h => h.item.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map((row) => (
+                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-2.5">
+                                    <span className="font-bold text-slate-900 block">{row.item}</span>
+                                    <span className="text-[9px] text-slate-400 block uppercase font-medium">{row.fornecedor}</span>
+                                  </td>
+                                  <td className="py-2.5 font-mono text-indigo-700 bg-indigo-50/20 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100/50 inline-block mt-1">{row.codigo_pedido}</td>
+                                  <td className="py-2.5 font-mono text-slate-500">{new Date(row.data_compra).toLocaleDateString('pt-BR')}</td>
+                                  <td className="py-2.5 text-right font-mono font-black text-indigo-650">R$ {row.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  <td className="py-2.5 text-slate-650 font-bold">{row.condicao_pagamento}</td>
+                                  <td className="py-2.5 text-center">
+                                    <button onClick={() => handleDeletePreco(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                      <Trash className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* RENDER PLANILHA VALIDADES */}
+                    {activeSubData === 'validade' && (
+                      <div className="overflow-x-auto text-[11px]">
+                        <table className="w-full text-left bg-white rounded-xl">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
+                              <th className="pb-2">Produto Lote</th>
+                              <th className="pb-2">Lote Código</th>
+                              <th className="pb-2 text-right">Volume</th>
+                              <th className="pb-2">Vencimento</th>
+                              <th className="pb-2 text-center">Risco Alerta</th>
+                              <th className="pb-2 text-right">Valor Financeiro</th>
+                              <th className="pb-2 text-center">Excluir</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50 text-slate-705 font-sans">
+                            {validadeLotesData
+                              .filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map((row) => (
+                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
+                                  <td className="py-2.5 font-mono text-slate-500 uppercase">{row.lote}</td>
+                                  <td className="py-2.5 text-right font-mono">{row.quantidade} un</td>
+                                  <td className="py-2.5 font-mono">{new Date(row.validade).toLocaleDateString('pt-BR')}</td>
+                                  <td className="py-2.5 text-center">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                                      row.status === 'Crítico' ? 'bg-rose-50 text-rose-800 border border-rose-100' :
+                                      row.status === 'Atenção' ? 'bg-amber-50 text-amber-800 border border-amber-100' :
+                                      'bg-emerald-50 text-emerald-800 border border-emerald-100'
+                                    }`}>
+                                      {row.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 text-right font-mono font-bold text-slate-800">R$ {row.valor_economico.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  <td className="py-2.5 text-center">
+                                    <button onClick={() => handleDeleteValidade(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                      <Trash className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
                   </div>
-                  <span className="text-[9px] text-slate-400 block pl-0.5">Prefilled com itens cruciais para sua cafeteria.</span>
+
                 </div>
 
-                {/* INPUT 2: ESTOQUE ATUAL */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">2. ARQUIVO DO ESTOQUE ATUAL</label>
-                  <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500/50 rounded-2xl bg-slate-50/50 p-4 text-center relative transition-all">
-                    <input 
-                      type="file" 
-                      accept=".xlsx,.xls,.csv"
-                      onChange={(e) => triggerFakeUpload('estoque', e)}
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    />
-                    <div className="space-y-1">
-                      <div className="mx-auto h-8 w-8 text-slate-400 rounded-full flex items-center justify-center bg-slate-100">
-                        <Upload className="h-4 w-4" />
-                      </div>
-                      <div className="text-xs text-slate-650 font-black">
-                        {inputStateFiles.estoque.name}
-                      </div>
-                      <span className="text-[9px] text-emerald-600 font-mono font-bold bg-emerald-50 px-2 py-0.5 rounded">
-                        Tamanho: {inputStateFiles.estoque.size} • Integrado
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* INPUT 3: HISTÓRICO DE CONSUMO */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">3. HISTÓRICO DE CONSUMO MENSAL</label>
-                  <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500/50 rounded-2xl bg-slate-50/50 p-4 text-center relative transition-all">
-                    <input 
-                      type="file" 
-                      accept=".xlsx,.xls,.csv"
-                      onChange={(e) => triggerFakeUpload('consumo', e)}
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    />
-                    <div className="space-y-1">
-                      <div className="mx-auto h-8 w-8 text-slate-400 rounded-full flex items-center justify-center bg-slate-100">
-                        <Upload className="h-4 w-4" />
-                      </div>
-                      <div className="text-xs text-slate-650 font-black">
-                        {inputStateFiles.consumo.name}
-                      </div>
-                      <span className="text-[9px] text-emerald-600 font-mono font-bold bg-emerald-50 px-2 py-0.5 rounded">
-                        Tamanho: {inputStateFiles.consumo.size} • Consumo Calculado
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* INPUT 4: VALIDADES E ÚLTIMOS PREÇOS */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">4. VALIDADES & ÚLTIMOS PREÇOS COMPRADOS</label>
-                  <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500/50 rounded-2xl bg-slate-50/50 p-4 text-center relative transition-all">
-                    <input 
-                      type="file" 
-                      accept=".xlsx,.xls,.csv"
-                      onChange={(e) => triggerFakeUpload('validades', e)}
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    />
-                    <div className="space-y-1">
-                      <div className="mx-auto h-8 w-8 text-slate-400 rounded-full flex items-center justify-center bg-slate-100">
-                        <Upload className="h-4 w-4" />
-                      </div>
-                      <div className="text-xs text-slate-650 font-black">
-                        {inputStateFiles.validades.name}
-                      </div>
-                      <span className="text-[9px] text-emerald-600 font-mono font-bold bg-emerald-50 px-2 py-0.5 rounded">
-                        Tamanho: {inputStateFiles.validades.size} • 85 itens mapeados
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* TEXTAREA DO PROMPT DE DIRETRIZ CRITÉRIO */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <label className="text-[10px] font-black text-emerald-600 uppercase tracking-wider block flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 animate-spin" />
-                    Critério de Análise do Assistente IA
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={customCriteria}
-                    onChange={(e) => setCustomCriteria(e.target.value)}
-                    placeholder="Informe suas diretrizes específicas de reposição..."
-                    className="w-full text-xs font-semibold leading-relaxed bg-slate-50 border border-slate-200 p-2.5 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white"
-                  />
-                  <div className="flex flex-wrap gap-1">
-                    <button
-                      onClick={() => setCustomCriteria('Me dê a lista dos itens que vão faltar nos próximos dias junto com os itens que vão vencer e tem venda, para repor estoque.')}
-                      className="text-[9px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded px-2 py-1 text-left"
-                    >
-                      💡 Critério Principal (Estoque + Vencimentos)
-                    </button>
-                    <button
-                      onClick={() => setCustomCriteria('Apenas itens abaixo do nível mínimo de garantia, priorizando o fornecedor com melhor saving comercial.')}
-                      className="text-[9px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded px-2 py-1 text-left"
-                    >
-                      🎯 Foco em Ruptura Crítica & Saving
-                    </button>
-                  </div>
-                </div>
-
-                {/* TRIGGER ACTION */}
-                <button
-                  onClick={handleGenerateAiPurchaseList}
-                  disabled={isGeneratingList}
-                  style={{ cursor: 'pointer' }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase cursor-pointer py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
-                >
-                  {isGeneratingList ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Consolidando e Cruzando Dados...
-                    </>
-                  ) : (
-                    <>
-                      <Bot className="h-4 w-4" />
-                      Gerar Lista de Compra Inteligente por IA
-                    </>
-                  )}
-                </button>
-
-              </div>
-            </div>
-
-            {/* RESULTS OUTPUT PANEL (7 COLS) */}
-            <div className="lg:col-span-7 space-y-6">
-              
-              {/* If generating, display terminal steps */}
-              {isGeneratingList && (
-                <div className="bg-slate-900 text-emerald-400 font-mono text-xs p-5 rounded-2xl border border-slate-850 shadow-lg space-y-2.5 min-h-[300px] flex flex-col justify-center">
-                  <span className="text-[10px] text-slate-400 uppercase font-black block border-b border-slate-800 pb-2 mb-2 font-mono">Terminal de Análise de Suprimentos IA</span>
-                  {generationSteps.map((step, index) => (
-                    <div key={index} className="flex gap-2 items-center animate-fade-in text-[11px]">
-                      <span className="text-emerald-500 font-black">⚙️</span>
-                      <span>{step}</span>
-                    </div>
-                  ))}
-                  <div className="flex gap-2 items-center animate-pulse text-[10px] text-slate-400 mt-4 pl-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    <span>Lote Econômico de Compras sendo gerado...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* RECOMMENDED PURCHASE LIST TABLE PANEL */}
-              {!isGeneratingList && (
-                <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-50 pb-3">
-                    <div>
-                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Lista Recomendada pelo Inteligente Assistente</h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Esta lista foi recalculada com base no estoque residual, validades dos lotes e velocidade de vendas.</p>
-                    </div>
-                    <span className="px-3 py-1 bg-yellow-50 text-amber-700 text-[9px] font-black uppercase tracking-wider font-mono rounded-full">Edição de Rascunho Liberada</span>
+                {/* HISTÓRICOS DE RELATÓRIOS/PLANILHAS REGISTRADOS NO COCKPIT (Opcional & Downloadable) */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
+                  <div>
+                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                      <FileText className="h-4.5 w-4.5 text-slate-500" />
+                      Repositório de Planilhas e PDFs Importados (Sessão Atual)
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Todos estes documentos alimentam o chatbot de IA de forma permanente. Faça o download direto em CSV das bases tratadas a qualquer momento.</p>
                   </div>
 
-                  {/* Editable Items Table */}
-                  <div className="overflow-x-auto rounded-xl border border-slate-100/70">
-                    <table className="w-full text-xs font-sans text-left">
-                      <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-100">
-                        <tr>
-                          <th className="p-3">Descrição do Item</th>
-                          <th className="p-3">Info Alertas</th>
-                          <th className="p-3 w-28 text-center text-midnight">Quantidade Sugerida</th>
-                          <th className="p-3 text-right">Preço Unitário (R$)</th>
-                          <th className="p-3 text-right">Estimado Total</th>
-                          <th className="p-3 text-center">Ações</th>
+                  <div className="overflow-x-auto text-[11px]">
+                    <table className="w-full text-left bg-white">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
+                          <th className="pb-2">Nome do Documento</th>
+                          <th className="pb-2">Tamanho</th>
+                          <th className="pb-2">Destino / Banco</th>
+                          <th className="pb-2">Enviado em</th>
+                          <th className="pb-2">Colunas Identificadas no Mapeador</th>
+                          <th className="pb-2 text-center">Baixar</th>
+                          <th className="pb-2 text-center">Excluir</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {validatedPurchaseList.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-3">
-                              <span className="font-extrabold text-slate-800 block text-[11.5px]">{item.item_name}</span>
-                              <span className="text-[9.5px] text-slate-400 mt-0.5 block font-medium">Estoque atual: <strong>{item.current_stock} un</strong></span>
+                      <tbody className="divide-y divide-slate-50 text-slate-700">
+                        {arquivosRegistrados.map((file) => (
+                          <tr key={file.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 font-bold text-slate-900 flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-emerald-600 shrink-0" />
+                              {file.nome}
                             </td>
-                            <td className="p-3">
-                              <div className="space-y-1">
-                                <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold text-center ${
-                                  item.runout_days <= 7 ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-600'
-                                }`}>
-                                  Acaba em {item.runout_days} dias
-                                </span>
-                                <span className="text-[9px] text-slate-450 block font-bold text-[8.5px]">{item.expiration}</span>
-                                <span className="text-[8px] text-indigo-500 font-extrabold block uppercase tracking-wider">{item.sales_rate}</span>
-                              </div>
+                            <td className="py-3 font-mono text-slate-500">{file.tamanho}</td>
+                            <td className="py-3">
+                              <span className="bg-slate-100 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider text-slate-550">
+                                {file.tipo === 'estoque' && 'Saldo Estoque'}
+                                {file.tipo === 'consumo' && 'Consumo Mensal'}
+                                {file.tipo === 'historico_precos' && 'Valores Fornecedor'}
+                                {file.tipo === 'validade' && 'Validade Lote'}
+                              </span>
                             </td>
-                            <td className="p-3 text-center">
-                              <div className="inline-flex items-center gap-1.5 bg-slate-100 rounded-lg p-1">
-                                <button
-                                  onClick={() => handleUpdateQty(item.id, item.suggested_qty - 1)}
-                                  className="w-6 h-6 hover:bg-white text-slate-600 font-bold rounded flex items-center justify-center transition-all cursor-pointer"
-                                >
-                                  -
-                                </button>
-                                <span className="text-xs font-black font-mono w-6 text-center">{item.suggested_qty}</span>
-                                <button
-                                  onClick={() => handleUpdateQty(item.id, item.suggested_qty + 1)}
-                                  className="w-6 h-6 hover:bg-white text-slate-600 font-bold rounded flex items-center justify-center transition-all cursor-pointer"
-                                >
-                                  +
-                                </button>
-                              </div>
+                            <td className="py-3 font-mono text-slate-450">{file.enviado_em}</td>
+                            <td className="py-3 font-mono text-[9px] text-slate-500">
+                              {file.colunas_detectadas?.join(' • ') || 'Configuração Padrão'}
                             </td>
-                            <td className="p-3 text-right">
-                              <input 
-                                type="number" 
-                                step="0.5" 
-                                value={item.last_price || ''}
-                                onChange={(e) => handleUpdatePrice(item.id, parseFloat(e.target.value) || 0)}
-                                className="w-20 text-right text-xs border border-slate-200 bg-slate-50 font-mono font-bold p-1 rounded focus:outline-none focus:border-emerald-500 focus:bg-white"
-                              />
-                            </td>
-                            <td className="p-3 text-right font-mono font-black text-slate-800 text-[11.5px]">
-                              R$ {(item.suggested_qty * item.last_price).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3 text-center">
+                            <td className="py-3 text-center">
                               <button
-                                onClick={() => handleDeleteItem(item.id)}
-                                className="text-slate-400 hover:text-rose-600 p-1 rounded transition-colors"
+                                onClick={() => handleDownloadRelatorioCSV(file.tipo)}
+                                className="text-slate-500 hover:text-indigo-600 p-1 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer"
+                                title="Baixar base de dados traduzida"
                               >
-                                <Trash className="h-4 w-4" />
+                                <Download className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                            <td className="py-3 text-center">
+                              <button
+                                onClick={() => handleDeleteArquivo(file.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
+                                title="Remover histórico"
+                              >
+                                <Trash className="h-3.5 w-3.5" />
                               </button>
                             </td>
                           </tr>
@@ -1081,448 +1653,381 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     </table>
                   </div>
 
-                  {/* Summary / Append Item row */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100 bg-slate-50/50 p-4 rounded-2xl border border-slate-150">
-                    
-                    {/* Fast add custom item form */}
-                    <form onSubmit={handleAddCustomItem} className="space-y-2">
-                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Inserir Item Manual à Lista</span>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          required
-                          placeholder="Ex: Embalagens Personalizadas"
-                          value={newItemName}
-                          onChange={(e) => setNewItemName(e.target.value)}
-                          className="flex-1 text-[11px] font-bold p-1.5 border border-slate-200 bg-white rounded-lg outline-none focus:border-emerald-500"
-                        />
-                        <input
-                          type="number"
-                          required
-                          min="1"
-                          placeholder="Qtd"
-                          value={newItemQty || ''}
-                          onChange={(e) => setNewItemQty(parseInt(e.target.value) || 1)}
-                          className="w-14 text-center text-[11px] font-bold p-1.5 border border-slate-200 bg-white rounded-lg outline-none focus:border-emerald-500 font-mono"
-                        />
-                        <button
-                          type="submit"
-                          style={{ cursor: 'pointer' }}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 text-xs font-bold rounded-lg flex items-center justify-center shrink-0 cursor-pointer"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </form>
-
-                    {/* Spend totals */}
-                    <div className="flex flex-col justify-center items-end text-right space-y-1">
-                      <span className="text-[10px] text-slate-400 font-bold block">Valor Total Estimado da Compra</span>
-                      <strong className="text-xl font-mono font-black text-slate-800 block">
-                        R$ {calculatedTotalSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </strong>
-                      <span className="text-[9.5px] text-emerald-600 font-bold flex items-center gap-1">
-                        <TrendingUp className="h-3 w-3" />
-                        Saving financeiro calculado: R$ {calculatedTotalSaving.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-
-                  </div>
-
-                  {/* VALIDATE LIST BUTTON */}
-                  <div className="pt-4 flex justify-end">
-                    <button
-                      onClick={handleValidateList}
-                      style={{ cursor: 'pointer' }}
-                      className="bg-gradient-to-r from-emerald-600 to-teal-650 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs uppercase px-6 py-3.5 rounded-xl shadow-lg cursor-pointer flex items-center gap-2 transition-all"
-                    >
-                      <ShieldCheck className="h-4.5 w-4.5 text-white" />
-                      Validar e Disponibilizar para WhatsApp dos Fornecedores
-                    </button>
-                  </div>
-
                 </div>
-              )}
 
-            </div>
-
-          </div>
-
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* PAGE 3: ZAP DE FORNECEDORES (WHATSAPP SIMULATOR INTERFACE) */}
-      {/* ========================================================= */}
-      {activeSubTab === 'whatsapp' && (
-        <div className="space-y-6">
-          
-          {/* WHATSAPP CONNECTION & STATUS MONITOR */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div className="space-y-1">
-                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                  <Wifi className={`h-4 w-4 ${whatsappStatus.status === 'CONNECTED' ? 'text-emerald-500 animate-pulse' : 'text-slate-400'}`} />
-                  Status de Integração do WhatsApp (Multi-Canal)
-                </h3>
-                <p className="text-[11px] text-slate-400">Gerencie a sessão de faturamento e canais de contato direto ativo.</p>
               </div>
-              
-              <div className="flex items-center gap-2 shrink-0">
-                {whatsappStatus.status === 'CONNECTED' ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-200/50">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-                    CONECTADO COM SUCESSO
-                  </span>
-                ) : whatsappStatus.status === 'QR_REQUIRED' ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-700 border border-amber-200/50">
-                    LEITURA DE QR CODE REQUERIDA
-                  </span>
-                ) : whatsappStatus.status === 'INITIALIZING' ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-blue-50 text-blue-700 border border-blue-200/50 animate-pulse">
-                    INICIALIZANDO SERVIÇO...
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-slate-50 text-slate-650 border border-slate-200">
-                    <WifiOff className="h-3 w-3" />
-                    DESCONECTADO
-                  </span>
-                )}
-                
-                <span className="text-[9.5px] font-black uppercase px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-150">
-                  Modo: {whatsappStatus.mode === 'REAL' ? '🔌 Servidor Real (WWebJS)' : '🤖 Simulador Inteligente'}
-                </span>
-              </div>
-            </div>
+            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-stretch">
-              {/* Status Detail and QR Code card */}
-              <div className="md:col-span-8 flex flex-col md:flex-row gap-5 bg-slate-50 border border-slate-150/60 rounded-2xl p-4 items-center">
+            {/* ========================================================= */}
+            {/* TAB OUTCOME 2: GESTÃO DE ESTOQUE (QUOTES / INDICATORS)     */}
+            {/* ========================================================= */}
+            {activeSubTab === 'quotes' && (
+              <div className="space-y-6">
                 
-                {/* If QR Code is requested */}
-                {whatsappStatus.status === 'QR_REQUIRED' && whatsappStatus.qrCodeUrl ? (
-                  <div className="flex flex-col items-center gap-2 bg-white p-3.5 rounded-xl border border-slate-200 shadow-inner shrink-0">
-                    <img src={whatsappStatus.qrCodeUrl} className="h-32 w-32 object-contain" alt="Scan QR Code" />
-                    <span className="text-[9px] font-mono font-bold text-slate-450">Aponte a câmera</span>
+                {/* 1. Bento Grid superior de Indicadores Chave de Estoque */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  
+                  {/* Card A: VALOR DO ESTOQUE ATUAL */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Valor do Estoque Atual</span>
+                      <Package className="h-4.5 w-4.5 text-indigo-505" />
+                    </div>
+                    <div className="text-2xl font-black text-slate-800 font-mono">
+                      R$ {valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-slate-500 leading-normal">
+                      Custo total consolidado de capital imobiliário parado em almoxarifados para **{estoqueData.length}** produtos cadastrados.
+                    </div>
                   </div>
-                ) : (
-                  <div className="h-32 w-32 bg-slate-100 rounded-xl border border-slate-200/75 flex flex-col items-center justify-center text-center p-3 shrink-0">
-                    {whatsappStatus.status === 'CONNECTED' ? (
-                      <CheckCircle className="h-10 w-10 text-emerald-500 animate-bounce" />
-                    ) : (
-                      <QrCode className="h-10 w-10 text-slate-350" />
-                    )}
-                    <span className="text-[9.5px] font-black text-slate-500 mt-2 uppercase tracking-wide text-center">
-                      {whatsappStatus.status === 'CONNECTED' ? 'Prontidão Ativa' : 'Sem QR Code'}
-                    </span>
-                  </div>
-                )}
 
-                {/* Guide details */}
-                <div className="flex-1 space-y-2 text-center md:text-left">
-                  <div>
-                    <h4 className="text-[12px] font-black text-slate-700 font-sans">Como conectar seu WhatsApp de Faturamento:</h4>
-                    <p className="text-[10.5px] text-slate-450 mt-1 leading-relaxed">
-                      {whatsappStatus.status === 'CONNECTED' 
-                        ? 'Sua sessão está ativa e salva em ambiente seguro. Seus fornecedores cadastrados responderão automaticamente às solicitações de cotação e negociação faturada em tempo real.'
-                        : 'Abra o WhatsApp no seu celular, vá em Aparelhos Conectados > Conectar Aparelho e aponte para o QR Code ao lado. Para fins de testes rápidos no sandbox/preview, clique no botão de conexão simulada abaixo.'
-                      }
+                  {/* Card B: GIRO DE ESTOQUE (Rotatividade anual) */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2 relative">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[10px] text-slate-405 font-extrabold uppercase tracking-widest block">Giro Médio Anual</span>
+                      <RefreshCw className="h-4.5 w-4.5 text-emerald-500" />
+                    </div>
+                    <div className="text-2xl font-black text-emerald-650 font-mono">
+                      {giroEstoque.toFixed(1)}x <span className="text-xs font-bold text-slate-450">rotatividades</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      Indica que seus insumos renovam-se em média **{(365 / Math.max(1, giroEstoque)).toFixed(0)} dias** antes do escoamento.
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 pt-1 justify-center md:justify-start">
-                    {whatsappStatus.status !== 'CONNECTED' && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await fetch('/api/whatsapp/simulate-scan', { method: 'POST' });
-                            if (res.ok) await syncWhatsappData();
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }}
-                        style={{ cursor: 'pointer' }}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-[10.5px] font-black uppercase flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Conectar via Simulador
-                      </button>
-                    )}
-
-                    {whatsappStatus.status === 'CONNECTED' && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await fetch('/api/whatsapp/disconnect', { method: 'POST' });
-                            if (res.ok) await syncWhatsappData();
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }}
-                        style={{ cursor: 'pointer' }}
-                        className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3.5 py-1.5 rounded-lg text-[10.5px] font-black uppercase flex items-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <LogOut className="h-1.5 w-1.5 shrink-0" />
-                        Desconectar Sessão
-                      </button>
-                    )}
+                  {/* Card C: PRODUTOS EM RUPTURA COM CONSUMO ATIVO */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2 relative">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[10px] text-slate-405 font-extrabold uppercase tracking-widest block">Ruptura (Saldo Zerado)</span>
+                      <AlertTriangle className="h-4.5 w-4.5 text-rose-500" />
+                    </div>
+                    <div className="text-2xl font-black text-rose-650 font-mono">
+                      {itensRuptura.length} itens <span className="text-xs font-bold text-slate-450">críticos</span>
+                    </div>
+                    <div className="text-[10px] text-rose-700 bg-rose-50/70 p-1.5 rounded-lg font-bold flex items-center gap-1.5 leading-tight">
+                      <span>⚠️ {itensRuptura.map(i => i.item.substring(0, 15)).join(', ') || 'Nenhum insumo crítico'}</span>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Logging terminal monitor */}
-              <div className="md:col-span-4 bg-slate-900 rounded-2xl p-3 border border-slate-950 flex flex-col justify-between max-h-[160px] md:max-h-auto">
-                <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 border-b border-slate-800 pb-1.5 mb-1.5">
-                  <span className="flex items-center gap-1 uppercase">
-                    <span className="h-1.5 w-1.5 bg-indigo-400 rounded-full animate-ping" />
-                    Log de Eventos do Whatsapp
-                  </span>
-                  <button 
-                    onClick={syncWhatsappData}
-                    className="hover:text-white transition-colors"
-                  >
-                    <RefreshCw className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto font-mono text-[9.5px] text-indigo-200 select-text leading-tight space-y-1 pr-1 max-h-[100px] scrollbar-thin">
-                  {whatsappStatus.logs && whatsappStatus.logs.length > 0 ? (
-                    whatsappStatus.logs.map((log, i) => (
-                      <div key={i} className="truncate select-all" title={log}>{log}</div>
-                    ))
-                  ) : (
-                    <div className="text-slate-600">Aguardando eventos do serviço...</div>
-                  )}
                 </div>
 
-                <div className="text-[8px] font-mono text-slate-500 text-right mt-1">
-                  Sessão persistente ativa
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-slate-100 rounded-3xl p-4 md:p-6 border border-slate-200 shadow-sm min-h-[550px] overflow-hidden items-stretch">
-            
-            {/* LEFT COLUMN: REGISTERED SUPPLIERS LIST (4 Cols) */}
-            <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 flex flex-col overflow-hidden shadow-xs shrink-0 select-none">
-              <div className="p-4 bg-slate-50 border-b border-slate-200">
-                <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Fornecedores Registrados (ZAP)</h3>
-                <p className="text-[10px] text-slate-450 mt-0.5">Selecione o fornecedor correspondente para enviar a compra.</p>
-              </div>
-
-              {/* List body */}
-              <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-                {SUPPLIERS.map((sup) => {
-                  const isActive = selectedSupplierId === sup.id;
-                  const lastMessage = whatsappChats[sup.id][whatsappChats[sup.id].length - 1];
+                {/* 2. Visualizadores de Alerta de Ruptura & ABC em Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                   
-                  return (
-                    <div
-                      key={sup.id}
-                      onClick={() => setSelectedSupplierId(sup.id)}
-                      className={`p-4 flex items-center gap-3 transition-colors cursor-pointer ${
-                        isActive ? 'bg-emerald-50/70 border-l-4 border-emerald-500' : 'hover:bg-slate-50/50'
-                      }`}
-                    >
-                      {/* Avatar */}
-                      <div className="h-10 w-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-black tracking-tight text-xs shadow-inner uppercase">
-                        {sup.initials}
-                      </div>
+                  {/* ESQUERDA: LISTA DE ITENS QUE TEM CONSUMO E ESTÃO COM HISTORICO ZERADO */}
+                  <div className="lg:col-span-6 bg-white border border-slate-200 rounded-3xl p-5 space-y-3.5">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                        <AlertTriangle className="h-4.5 w-4.5 text-rose-500 shrink-0" />
+                        Insumos com Consumo Ativo mas Estoque Zerado
+                      </h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Ruptura total detectada. Itens com movimentação mensal alta, mas com saldo físico 0.</p>
+                    </div>
 
-                      {/* Info layout */}
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-extrabold text-slate-800 block truncate">{sup.name}</span>
-                          <span className="text-[8px] text-emerald-500 font-mono flex items-center gap-1">
-                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                            ativo
-                          </span>
+                    <div className="space-y-2">
+                      {itensRuptura.length > 0 ? (
+                        itensRuptura.map(item => {
+                          const cons = consumoData.find(c => c.item.toLowerCase() === item.item.toLowerCase());
+                          return (
+                            <div key={item.id} className="bg-rose-50/50 border border-rose-100 rounded-2xl p-3 flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-extrabold text-slate-900 block">{item.item}</span>
+                                <span className="text-[9px] text-rose-700 font-bold block uppercase tracking-wide mt-1">Gasto Histórico Mensal: {cons ? cons.quantidade_consumida : 0} {item.unidade}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="bg-rose-100 text-rose-800 text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wide font-mono block">Ruptura Física</span>
+                                <span className="text-[10px] text-slate-500 font-semibold block mt-1">Custo: R$ {item.custo_unitario.toFixed(2)}/un</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-center py-6 border border-dashed rounded-2xl text-slate-400 text-xs text-medium">
+                          Nenhuma ruptura total detectada sobre insumos com faturamento de consumo ativo!
                         </div>
-                        <span className="text-[10px] font-bold text-indigo-500 block">{sup.representative}</span>
-                        <p className="text-[10px] text-slate-550 block font-normal truncate">
-                          {lastMessage ? lastMessage.content : sup.description}
-                        </p>
-                      </div>
-
-                      <ChevronRight className="h-3.5 w-3.5 text-slate-350 shrink-0" />
+                      )}
                     </div>
-                  );
-                })}
+                  </div>
+
+                  {/* DIREITA: CLASSIFICADOS PELA CURVA ABC */}
+                  <div className="lg:col-span-6 bg-white border border-slate-200 rounded-3xl p-5 space-y-3">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
+                        <Layers className="h-4.5 w-4.5 text-indigo-650" />
+                        Classificação de Capital: Curva ABC
+                      </h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Separa os ativos pela sua expressividade monetária em estoque.</p>
+                    </div>
+
+                    {/* bento de Curvas ABC */}
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="bg-rose-50 border border-rose-100 p-2.5 rounded-xl space-y-1">
+                        <strong className="text-rose-800 block text-[10px] font-black">CURVA A</strong>
+                        <span className="font-mono font-extrabold text-rose-700 block text-xs">{countA} itens</span>
+                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueA.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-100 p-2.5 rounded-xl space-y-1">
+                        <strong className="text-amber-800 block text-[10px] font-black">CURVA B</strong>
+                        <span className="font-mono font-extrabold text-amber-700 block text-xs">{countB} itens</span>
+                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueB.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-xl space-y-1">
+                        <strong className="text-blue-800 block text-[10px] font-black">CURVA C</strong>
+                        <span className="font-mono font-extrabold text-blue-700 block text-xs">{countC} itens</span>
+                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueC.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                    </div>
+
+                    {/* Recharts Pie Chart da Curva ABC */}
+                    <div className="h-32 flex justify-center mt-2">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: 'Curva A', value: valueA || 10, color: '#f43f5e' },
+                              { name: 'Curva B', value: valueB || 2, color: '#f59e0b' },
+                              { name: 'Curva C', value: valueC || 1, color: '#3b82f6' }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={22}
+                            outerRadius={45}
+                            paddingAngle={3}
+                            dataKey="value"
+                          >
+                            <Cell fill="#f43f5e" />
+                            <Cell fill="#f59e0b" />
+                            <Cell fill="#3b82f6" />
+                          </Pie>
+                          <Tooltip formatter={(value) => `R$ ${Number(value).toLocaleString('pt-BR')}`} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* 3. Tabela Completa de: FREQUÊNCIA DE VENDA, VALOR DE VENDA, LUCRATIVIDADE & MARKUP POR ITEM */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
+                  <div>
+                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                      <TrendingUp className="h-4.5 w-4.5 text-indigo-700" />
+                      Margens, Frequência de Vendas e Rentabilidade Projetada por Item
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Insira ou modifique os valores de venda direto nas caixas de texto para recalcular instantaneamente as lucratividades operacionais e markups.</p>
+                  </div>
+
+                  <div className="overflow-x-auto text-[11px]">
+                    <table className="w-full text-left bg-white font-sans">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
+                          <th className="pb-2">Insumo em Estoque</th>
+                          <th className="pb-2 text-center">Frequência de Venda</th>
+                          <th className="pb-2 text-right">Preço de Custo (C)</th>
+                          <th className="pb-2 text-right">Preço de Venda (V)</th>
+                          <th className="pb-2 text-right">Margem de Lucro (%)</th>
+                          <th className="pb-2 text-right">Markup (%)</th>
+                          <th className="pb-2 text-right">Margem Bruta Unitária</th>
+                          <th className="pb-2 text-right">Lucro Projetado Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50 text-slate-705">
+                        {estoqueData.map(row => {
+                          const venda = row.preco_venda || (row.custo_unitario * 1.5);
+                          const custo = row.custo_unitario;
+                          
+                          // Lucratividade = (Venda - Custo) / Venda * 100
+                          const margem = venda > 0 ? ((venda - custo) / venda) * 100 : 0;
+                          
+                          // Markup = (Venda - Custo) / Custo * 100
+                          const markup = custo > 0 ? ((venda - custo) / custo) * 100 : 0;
+                          const margemUnitariaVal = venda - custo;
+                          const lucroTotalProjetado = margemUnitariaVal * row.quantidade;
+
+                          return (
+                            <tr key={row.id} className="hover:bg-slate-50/50">
+                              <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
+                              <td className="py-2.5 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  row.frequencia_venda === 'Alta' ? 'bg-emerald-50 text-emerald-800' :
+                                  row.frequencia_venda === 'Média' ? 'bg-indigo-50 text-indigo-805' :
+                                  'bg-slate-100 text-slate-650'
+                                }`}>
+                                  {row.frequencia_venda || 'Média'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right font-mono text-slate-500">R$ {custo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                              <td className="py-2.5 text-right font-mono font-semibold">
+                                <div className="inline-flex items-center gap-1.5 bg-slate-50 border rounded-lg px-1.5 py-0.5">
+                                  <span className="text-[9px] text-slate-400">R$</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={venda === 0 ? '' : venda}
+                                    onChange={e => {
+                                      const newVal = parseFloat(e.target.value) || 0;
+                                      setEstoqueData(prev => prev.map(item => item.id === row.id ? { ...item, preco_venda: newVal } : item));
+                                    }}
+                                    className="w-14 bg-transparent border-0 focus:outline-none focus:ring-0 text-[11px] p-0 font-bold text-right"
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-2.5 text-right font-mono font-black text-slate-800">
+                                <span className={margem >= 30 ? 'text-emerald-705' : 'text-slate-700'}>
+                                  {margem.toFixed(1)}%
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right font-mono text-indigo-650 font-bold">{markup.toFixed(1)}%</td>
+                              <td className="py-2.5 text-right font-mono text-emerald-650 font-semibold">R$ {margemUnitariaVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                              <td className="py-2.5 text-right font-mono font-black text-indigo-900 bg-indigo-50/10">R$ {lucroTotalProjetado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
+            
+        </div> {/* Fim de PAINEL PRINCIPAL */}
+
+        {/* ASSISTENTE DE IA DE AUDITORIA NO RODAPÉ DA PÁGINA EM LARGURA INTEIRA */}
+        {isChatExpanded && (
+          <div className="bg-white border border-indigo-150 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row gap-6 min-h-[460px]">
+            {/* Esquerda do Chat: Título e Consultas Rápidas */}
+            <div className="md:w-1/3 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0 md:pr-6 text-left">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <Bot className="h-5 w-5 text-indigo-600 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black text-slate-805 uppercase tracking-wider flex items-center gap-1.5">
+                      Cérebro IA Integrado
+                      <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Auditoria automatizada das planilhas em tempo real.</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  Este assistente de inteligência artificial lê todas as suas tabelas de estoque, consumo, histórico de faturamento e validades. Use as ações rápidas abaixo ou envie perguntas customizadas.
+                </p>
               </div>
 
-              <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
-                <span className="text-[9px] font-bold text-slate-450">Multi-Empresa: Santos • São Paulo • Rio</span>
+              {/* Botões rápidos de consultas no chat */}
+              <div className="pt-4 border-t border-slate-100 space-y-2 text-left">
+                <span className="text-[10px] text-indigo-900/60 font-black uppercase block tracking-wider leading-none">Consultas Rápidas IA:</span>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={() => handleSendChatMessage('Qual foi o preço da minha última compra de Creatina? E qual foi o fornecedor?')}
+                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                  >
+                    Última Compra Creatina
+                  </button>
+                  <button
+                    onClick={() => handleSendChatMessage('Quais são os itens críticos abaixo do estoque mínimo e reposição?')}
+                    className="p-2 text-left bg-indigo-50 hover:bg-indigo-100 rounded-xl text-[10px] font-extrabold text-indigo-700 cursor-pointer transition-colors"
+                  >
+                    Estoque Mínimo & Rupturas
+                  </button>
+                  <button
+                    onClick={() => handleSendChatMessage('Calcule a curva ABC e as lucratividades dos meus itens ativos')}
+                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                  >
+                    Curva ABC Financeira
+                  </button>
+                  <button
+                    onClick={() => handleSendChatMessage('Existem ativos do faturamento em risco por data de validade?')}
+                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                  >
+                    Auditar Validades Próximas
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN: WHATSAPP DECK (8 Cols) */}
-            <div className="lg:col-span-8 bg-slate-50/50 rounded-2xl border border-slate-200 flex flex-col overflow-hidden shadow-xs relative">
-              
-              {/* WhatsApp Emerald Green Top Header */}
-              {(() => {
-                const activeSup = SUPPLIERS.find(s => s.id === selectedSupplierId) || SUPPLIERS[0];
-                return (
-                  <div className="bg-emerald-700 text-white p-4 flex items-center justify-between shadow-md z-1 relative">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-white/10 text-white border border-white/20 flex items-center justify-center font-black tracking-tight text-xs uppercase">
-                        {activeSup.initials}
-                      </div>
-                      
-                      <div>
-                        <div className="font-extrabold text-xs">{activeSup.name}</div>
-                        <span className="text-[9.5px] text-emerald-100 block font-bold mt-0.5">
-                          {isTypingSupplier ? (
-                            <span className="text-yellow-300 font-black animate-pulse">Digitando...</span>
-                          ) : (
-                            <span className="flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 bg-emerald-300 rounded-full animate-bounce" />
-                              online
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right flex flex-col items-end whitespace-nowrap">
-                      <span className="text-[9.5px] font-mono font-bold text-emerald-100 uppercase tracking-widest">{activeSup.phone}</span>
-                      <span className="text-[8.5px] text-emerald-200 font-extrabold block uppercase mt-0.5">{activeSup.category}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* WHATSAPP CHAT FLOW CONTENT (SCROLLABLE BACKGROUND MODEL) */}
-              <div 
-                className="flex-1 p-4 overflow-y-auto space-y-4 max-h-[450px] min-h-[350px] relative scrollbar-thin"
-                style={{ 
-                  backgroundColor: '#efeae2',
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23cccbc6' fill-opacity='0.15'%3E%3Cpath d='M50 50c0-5.523 4.477-10 10-10s10 4.477 10 10-4.477 10-10 10c0 5.523-4.477 10-10 10s-10-4.477-10-10 4.477-10 10-10zM10 10c0-5.523 4.477-10 10-10s10 4.477 10 10-4.477 10-10 10c0 5.523-4.477 10-10 10S0 25.523 0 20s4.477-10 10-10z'/%3E%3C/g%3E%3C/svg%3E")`
-                }}
-              >
-                
-                {/* Float template notification banner */}
-                <div className="mx-auto max-w-sm bg-indigo-900 border border-indigo-800 text-white rounded-xl p-3.5 shadow-md text-center space-y-2 relative z-10 animate-fade-in">
-                  <div className="flex justify-center"><Bot className="h-5 w-5 text-indigo-300 animate-bounce" /></div>
-                  <h4 className="text-[10.5px] font-black uppercase text-indigo-300 tracking-wider">Apoio de Sourcing: Lista de Compras Pronta!</h4>
-                  <p className="text-[10px] text-white/90">A lista recomendada inteligente de compras já foi gerada e validada no sistema. Deseja carregar no chat para envio?</p>
-                  
-                  <button
-                    onClick={handlePreloadWhatsAppList}
-                    style={{ cursor: 'pointer' }}
-                    className="mx-auto bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase block shadow-md cursor-pointer transition-all"
-                  >
-                    💬 Carregar no Chat Inteligente
-                  </button>
-                </div>
-
-                {/* Actual chat balloons */}
-                {whatsappChats[selectedSupplierId] && whatsappChats[selectedSupplierId].map((msg, index) => {
-                  const isUser = msg.role === 'user';
-                  
-                  return (
-                    <div
-                      key={index}
-                      className={`flex ${isUser ? 'justify-end' : 'justify-start'} w-full animate-fade-in`}
+            {/* Direita do Chat: Conversa e Input */}
+            <div className="flex-1 flex flex-col justify-between min-h-[380px]">
+              <div className="flex-1 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center border-b border-indigo-50 pb-2 mb-3">
+                    <span className="text-[10px] font-black uppercase text-indigo-900/50 tracking-wider">Histórico de Diálogo do Auditor IA</span>
+                    <button
+                      onClick={() => setIsChatExpanded(false)}
+                      className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-2.5 py-1 rounded-xl cursor-pointer select-none"
+                      title="Fechar Assistente IA"
                     >
-                      {/* Chat bubble wrapper */}
+                      Ocultar Chat
+                    </button>
+                  </div>
+
+                  {/* Corpo histórico de diálogos */}
+                  <div className="h-[250px] overflow-y-auto space-y-3.5 pr-1 mb-3 scrollbar-thin text-left">
+                    {chatHistory.map((msg, idx) => (
                       <div
-                        className={`p-3 max-w-[80%] rounded-2xl relative shadow-sm ${
-                          isUser 
-                            ? 'bg-emerald-100 text-slate-800 rounded-tr-none border-t border-emerald-200' 
-                            : 'bg-white text-slate-800 rounded-tl-none border-t border-slate-100'
+                        key={idx}
+                        className={`p-3.5 rounded-2xl max-w-[90%] leading-relaxed text-xs shadow-3xs ${
+                          msg.role === 'user'
+                            ? 'bg-indigo-600 text-white ml-auto'
+                            : 'bg-indigo-50/45 text-slate-805 space-y-1.5 border border-indigo-50'
                         }`}
                       >
-                        <p className="whitespace-pre-line text-[11px] leading-relaxed font-sans">{msg.content}</p>
-                        
-                        <span className={`text-[8px] block mt-1 text-right font-mono ${isUser ? 'text-emerald-700' : 'text-slate-400'}`}>
-                          {msg.timestamp} • lida ✔✔
+                        <div className="whitespace-pre-wrap font-sans">
+                          {msg.content.split('\n').map((line, lIdx) => {
+                            let render: React.ReactNode = line;
+                            if (line.startsWith('* **') || line.startsWith('   * ')) {
+                              render = <span className="pl-1.5 block text-slate-650 leading-relaxed">{line}</span>;
+                            } else if (line.startsWith('###')) {
+                              render = <span className="font-extrabold text-indigo-950 block text-[11px] uppercase tracking-wider mt-2.5 pb-1 mb-1 bg-indigo-100/40 p-1.5 rounded">{line.replace('###', '')}</span>;
+                            } else if (line.startsWith('**') || line.startsWith('- **')) {
+                              render = <strong className="font-black text-slate-900 block mt-1.5">{line}</strong>;
+                            }
+                            return <p key={lIdx} className="mt-0.5">{render}</p>;
+                          })}
+                        </div>
+                        <span className={`block text-[8px] text-right mt-1 font-bold ${msg.role === 'user' ? 'text-indigo-200' : 'text-indigo-400'}`}>
+                          {msg.timestamp}
                         </span>
                       </div>
-                    </div>
-                  );
-                })}
+                    ))}
 
-                {/* Typing Indicator */}
-                {isTypingSupplier && (
-                  <div className="flex justify-start">
-                    <div className="bg-white px-4 py-2.5 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-1 animate-pulse">
-                      <span className="h-1.5 w-1.5 bg-emerald-600 rounded-full animate-bounce" />
-                      <span className="h-1.5 w-1.5 bg-emerald-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                      <span className="h-1.5 w-1.5 bg-emerald-600 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
-                    </div>
+                    {isAiTyping && (
+                      <div className="bg-slate-50 border border-slate-150 p-3 rounded-2xl max-w-[65%] flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />
+                        <span className="text-[10px] font-bold text-slate-500 animate-pulse">Cruzando faturamentos nas planilhas...</span>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
                   </div>
-                )}
+                </div>
 
-              </div>
-
-              {/* WHATSAPP INPUT / CONTROLS TEXTAREA */}
-              <div className="p-3 bg-slate-100 border-t border-slate-200">
-                <form onSubmit={(e) => handleSendWhatsappMessage(e)} className="flex gap-2 items-end">
-                  <textarea
-                    rows={Math.min(5, whatsappInput.split('\n').length || 1)}
-                    placeholder="Escreva a mensagem de cotação para enviar ao Whatsapp do fornecedor..."
-                    value={whatsappInput}
-                    onChange={(e) => setWhatsappInput(e.target.value)}
-                    className="flex-1 bg-white border border-slate-250 p-2.5 rounded-xl font-bold font-mono text-[10.5px] leading-normal outline-none focus:border-emerald-500 max-h-[140px] resize-none scrollbar-thin"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendWhatsappMessage();
-                      }
+                {/* Input de Envio de Mensagem do Chat */}
+                <div className="flex bg-slate-50 border border-slate-200 rounded-2xl p-1 gap-1.5 shrink-0 mt-3">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleSendChatMessage();
                     }}
+                    placeholder="Peça para a Inteligência Artificial auditar ou buscar dados de suas planilhas..."
+                    className="flex-grow bg-transparent text-slate-1000 border-0 focus:outline-none focus:ring-0 text-[11px] px-3 py-2"
                   />
-                  
                   <button
-                    type="submit"
-                    disabled={isTypingSupplier || !whatsappInput.trim()}
-                    style={{ cursor: 'pointer' }}
-                    className="bg-emerald-650 hover:bg-emerald-750 text-white p-3.5 rounded-xl transition-all cursor-pointer shadow-md disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none shrink-0"
+                    onClick={() => handleSendChatMessage()}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2 px-4.5 text-xs font-bold flex items-center justify-center cursor-pointer transition-all shrink-0 font-extrabold uppercase tracking-wider"
                   >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </form>
-                
-                {/* Shortcut templates */}
-                <div className="flex flex-wrap gap-1.5 mt-2 pt-1 border-t border-slate-200/50">
-                  <button
-                    onClick={() => handleSendWhatsappMessage(undefined, 'Podemos faturar em fita direta de 30 dias para otimizar meu fluxo ou vocês dão desconto no PIX?')}
-                    className="text-[9px] font-bold text-slate-500 bg-white hover:bg-slate-200 rounded-lg px-2 py-1 text-left border border-slate-200"
-                  >
-                    💸 Negociar faturamento 30d vs Desconto PIX
-                  </button>
-                  <button
-                    onClick={() => handleSendWhatsappMessage(undefined, 'Confirmado! Pode emitir o faturamento e boleto direto do lote de segurança.')}
-                    className="text-[9px] font-bold text-slate-500 bg-white hover:bg-slate-200 rounded-lg px-2 py-1 text-left border border-slate-200"
-                  >
-                    ✅ Confirmar Fechamento e Boleto
-                  </button>
-                  <button
-                    onClick={() => handleSendWhatsappMessage(undefined, 'Qual o prazo final de entrega (Lead time) se fizermos faturamento hoje?')}
-                    className="text-[9px] font-bold text-slate-500 bg-white hover:bg-slate-200 rounded-lg px-2 py-1 text-left border border-slate-200"
-                  >
-                    ⏱️ Perguntar prazo exato de entrega
+                    <Send className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
-
             </div>
-
           </div>
+        )}
 
-          {/* Guidelines on multitenancy & testing */}
-          <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs space-y-2">
-            <h4 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1.5">
-              <Building className="h-4 w-4 text-emerald-600" />
-              Guia Metodológico de Simulação Comercial
-            </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-              O painel de faturamento inteligente do WhatsApp permite que você conecte o número comercial oficial ou use uma sessão virtual de simulação síncrona. Quando você envia as metas de saving ou tabelas de insumo, as inteligências dos fornecedores respondem faturando, concedendo descontos e estendendo o PMP automaticamente.
-            </p>
-          </div>
-
-        </div>
-      )}
+      </div>
 
     </div>
   );

@@ -74,6 +74,9 @@ export default function App() {
   // Tab control state (Unifying financial DRE, BI charts, and procurement-supply chain)
   const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'procurement'>('dre');
 
+  // Feature Flag to hide WhatsApp feature temporarily
+  const ENABLE_WHATSAPP_FORNECEDORES = false;
+
   // Sidebar expanded / collapsed states
   const [isDreExpanded, setIsDreExpanded] = useState(true);
   const [isCompraExpanded, setIsCompraExpanded] = useState(true);
@@ -785,7 +788,7 @@ export default function App() {
                     }`}
                   >
                     <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'indicators' ? 'bg-white' : 'bg-transparent'}`} />
-                    Painel de Indicadores
+                    Gestão de Compras
                   </button>
 
                   <button
@@ -798,21 +801,23 @@ export default function App() {
                     }`}
                   >
                     <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'quotes' ? 'bg-white' : 'bg-transparent'}`} />
-                    Cotações Inteligentes (IA)
+                    Gestão de Estoque
                   </button>
 
-                  <button
-                    onClick={() => { setActiveTab('procurement'); setProcurementSubTab('whatsapp'); setIsSidebarOpen(false); }}
-                    style={{ cursor: 'pointer' }}
-                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                      activeTab === 'procurement' && procurementSubTab === 'whatsapp'
-                        ? 'bg-emerald-650 text-white font-bold shadow-xs'
-                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'whatsapp' ? 'bg-white' : 'bg-transparent'}`} />
-                    Zap de Fornecedores
-                  </button>
+                  {ENABLE_WHATSAPP_FORNECEDORES && (
+                    <button
+                      onClick={() => { setActiveTab('procurement'); setProcurementSubTab('whatsapp'); setIsSidebarOpen(false); }}
+                      style={{ cursor: 'pointer' }}
+                      className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                        activeTab === 'procurement' && procurementSubTab === 'whatsapp'
+                          ? 'bg-emerald-650 text-white font-bold shadow-xs'
+                          : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'whatsapp' ? 'bg-white' : 'bg-transparent'}`} />
+                      Zap de Fornecedores
+                    </button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
