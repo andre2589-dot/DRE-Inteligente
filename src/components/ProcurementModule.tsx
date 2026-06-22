@@ -909,11 +909,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         </div>
       )}
 
-      {/* CORE DISPLAY EM LAYOUT COMPLETO DA PÁGINA */}
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 space-y-6">
-        
-        {/* PAINEL PRINCIPAL (Calculadora/Ingestão/Indicadores) - Sempre ocupa largura inteira para máxima visibilidade das tabelas */}
-        <div className="space-y-6">
+      {/* CORE DISPLAY EM LAYOUT SPLIT COM ASSISTENTE IA PERSISTENTE (Opcional) */}
+      <div className="max-w-7xl mx-auto px-6 sm:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* PAINEL PRINCIPAL: ESQUERDO (Calculadora/Ingestão/Indicadores) - Ocupa 8 colunas expandido, 12 se chat fechado */}
+          <div className={`${isChatExpanded ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6 transition-all duration-300`}>
             
             {/* ========================================================= */}
             {/* TAB OUTCOME 1: GESTÃO DE COMPRAS (INDICATORS)             */}
@@ -996,356 +997,273 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                   </button>
                 </div>
 
-                {/* Sub cockpit: Área de Uploads + Lançamento Manual na linha de cima, e Tabela Dinâmica em largura total na linha de baixo */}
-                <div className="space-y-6">
+                {/* Sub cockpit: Área de Uploads + Tabelas Dinâmicas de faturamento */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                   
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                    
-                    {/* Upload do Componente Ativo e Botões Rápidos */}
-                    <div className="lg:col-span-4 bg-white border border-slate-200 rounded-3xl p-5 space-y-4 flex flex-col justify-between">
-                      <div>
-                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-1">
-                          {activeSubData === 'estoque' && 'Upload: Saldo Estoque'}
-                          {activeSubData === 'consumo' && 'Upload: Consumo Médio'}
-                          {activeSubData === 'historico_precos' && 'Upload: Fornecedores & Preço'}
-                          {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
-                        </h4>
-                        <p className="text-[10px] text-slate-400 mb-3">Arraste seus relatórios do sistema em Excel ou PDF para processar.</p>
+                  {/* Upload do Componente Ativo */}
+                  <div className="md:col-span-4 bg-white border border-slate-200 rounded-3xl p-5 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                        {activeSubData === 'estoque' && 'Upload: Saldo Estoque'}
+                        {activeSubData === 'consumo' && 'Upload: Consumo Médio'}
+                        {activeSubData === 'historico_precos' && 'Upload: Fornecedores & Preço'}
+                        {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
+                      </h4>
+                      <p className="text-[10px] text-slate-400">Arraste seus relatórios do sistema em Excel ou PDF.</p>
+                    </div>
 
-                        <div 
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const file = e.dataTransfer.files?.[0];
-                            if (file) {
-                              const fileExt = file.name.split('.').pop()?.toLowerCase();
-                              const isPdf = fileExt === 'pdf';
-                              const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
-                              
-                              setUploadLoading(activeSubData);
-                              setTimeout(() => {
-                                handleFileUploadSimulated(activeSubData, file.name);
-                                if (isPdf) {
-                                  triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
-                                } else if (isExcel) {
-                                  triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
-                                } else {
-                                  triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
-                                }
-                              }, 1000);
+                    <div 
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) {
+                          const fileExt = file.name.split('.').pop()?.toLowerCase();
+                          const isPdf = fileExt === 'pdf';
+                          const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
+                          
+                          setUploadLoading(activeSubData);
+                          setTimeout(() => {
+                            handleFileUploadSimulated(activeSubData, file.name);
+                            if (isPdf) {
+                              triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
+                            } else if (isExcel) {
+                              triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
+                            } else {
+                              triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
                             }
-                          }}
-                          onClick={() => {
-                            const input = document.createElement('input');
-                            input.type = 'file';
-                            input.accept = '.xlsx,.xls,.pdf,.csv,.txt';
-                            input.onchange = (event: any) => {
-                              const file = event.target.files?.[0];
-                              if (file) {
-                                const fileExt = file.name.split('.').pop()?.toLowerCase();
-                                const isPdf = fileExt === 'pdf';
-                                const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
-                                
-                                setUploadLoading(activeSubData);
-                                setTimeout(() => {
-                                  handleFileUploadSimulated(activeSubData, file.name);
-                                  if (isPdf) {
-                                    triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
-                                  } else if (isExcel) {
-                                    triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
-                                  } else {
-                                    triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
-                                  }
-                                }, 1000);
+                          }, 1000);
+                        }
+                      }}
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.xlsx,.xls,.pdf,.csv,.txt';
+                        input.onchange = (event: any) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            const fileExt = file.name.split('.').pop()?.toLowerCase();
+                            const isPdf = fileExt === 'pdf';
+                            const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
+                            
+                            setUploadLoading(activeSubData);
+                            setTimeout(() => {
+                              handleFileUploadSimulated(activeSubData, file.name);
+                              if (isPdf) {
+                                triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
+                              } else if (isExcel) {
+                                triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
+                              } else {
+                                triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
                               }
-                            };
-                            input.click();
-                          }}
-                          className="border-2 border-dashed border-indigo-200 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer hover:bg-slate-50 transition-all group"
-                        >
-                          {uploadLoading === activeSubData ? (
-                            <div className="space-y-2 py-2">
-                              <RefreshCw className="h-6 w-6 text-indigo-650 animate-spin mx-auto" />
-                              <p className="text-[10px] font-bold text-slate-550 animate-pulse font-mono uppercase">Mapeando Relatório...</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2 py-1">
-                              <Upload className="h-5 w-5 text-indigo-400 group-hover:text-indigo-600 mx-auto transition-colors" />
-                               <div>
-                                 <p className="text-[10px] font-extrabold text-indigo-700">Arraste PDF, EXCEL ou clique</p>
-                                 <p className="text-[8px] text-slate-400 leading-normal">Mapeamento inteligente por colunas</p>
-                               </div>
-                            </div>
-                          )}
+                            }, 1000);
+                          }
+                        };
+                        input.click();
+                      }}
+                      className="border-2 border-dashed border-indigo-200 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer hover:bg-slate-50 transition-all group"
+                    >
+                      {uploadLoading === activeSubData ? (
+                        <div className="space-y-2 py-2">
+                          <RefreshCw className="h-6 w-6 text-indigo-650 animate-spin mx-auto" />
+                          <p className="text-[10px] font-bold text-slate-550 animate-pulse font-mono uppercase">Mapeando Relatório...</p>
                         </div>
-                      </div>
-
-                      {/* Botões rápidos adicionais */}
-                      <div className="space-y-1.5 pt-3 border-t border-slate-100">
-                        <button
-                          onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.xlsx`)}
-                          className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
-                        >
-                          <span className="truncate">Carregar Planilha Comercial (.XLSX)</span>
-                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        </button>
-                        <button
-                          onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.pdf`)}
-                          className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
-                        >
-                          <span className="truncate">Carregar Relatório do Sistema (.PDF)</span>
-                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        </button>
-                      </div>
+                      ) : (
+                        <div className="space-y-2 py-1">
+                          <Upload className="h-5 w-5 text-indigo-400 group-hover:text-indigo-600 mx-auto transition-colors" />
+                           <div>
+                             <p className="text-[10px] font-extrabold text-indigo-700">Arraste PDF, EXCEL ou clique</p>
+                             <p className="text-[8px] text-slate-400 leading-normal">Mapeamento inteligente por colunas</p>
+                           </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Formulários rápidos de Inserção Individual Manual (Ocupa 8 colunas agora) */}
-                    <div className="lg:col-span-8 bg-white border border-slate-200 rounded-3xl p-5 flex flex-col justify-between">
-                      <div>
-                        <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider block mb-2.5">
-                          Lançamento Avulso Manual ({activeSubData === 'estoque' ? 'Saldo Estoque' : activeSubData === 'consumo' ? 'Consumo Mensal' : activeSubData === 'historico_precos' ? 'Faturamento/Fornecedores' : 'Validade de Lote'})
-                        </span>
-                        
-                        {activeSubData === 'estoque' && (
-                          <form onSubmit={handleAddEstoque} className="space-y-3 text-left">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Código Produto</label>
-                                <input
-                                  type="text" placeholder="Ex: 04808"
-                                  value={formEstoque.codigo} onChange={e => setFormEstoque({...formEstoque, codigo: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none font-mono"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Nome do Item / Insumo</label>
-                                <input
-                                  type="text" required placeholder="Nome do item"
-                                  value={formEstoque.item} onChange={e => setFormEstoque({...formEstoque, item: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Situação do Lote</label>
-                                <select
-                                  value={formEstoque.situacao_lote} onChange={e => setFormEstoque({...formEstoque, situacao_lote: e.target.value, lote: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                >
-                                  <option value="LIBERADO">LIBERADO</option>
-                                  <option value="BLOQUEADO">BLOQUEADO</option>
-                                  <option value="CERTIFICACAO">CERTIFICACAO</option>
-                                </select>
-                              </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Código do Lote</label>
-                                <input
-                                  type="text" placeholder="Ex: LOT2026"
-                                  value={formEstoque.lote} onChange={e => setFormEstoque({...formEstoque, lote: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Qtd Saldo</label>
-                                <input
-                                  type="number" required placeholder="Ex: 50"
-                                  value={formEstoque.quantidade === 0 ? '' : formEstoque.quantidade} onChange={e => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none font-mono"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Unidade</label>
-                                <select
-                                  value={formEstoque.unidade} onChange={e => setFormEstoque({...formEstoque, unidade: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                >
-                                  <option value="G">G (Gramas)</option>
-                                  <option value="ML">ML (Mililitros)</option>
-                                  <option value="KG">KG (Quilos)</option>
-                                  <option value="unidades">unidades</option>
-                                  <option value="potes">potes</option>
-                                </select>
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Est. Mínimo</label>
-                                <input
-                                  type="number" placeholder="Ex: 500"
-                                  value={formEstoque.min_stock === 0 ? '' : formEstoque.min_stock} onChange={e => setFormEstoque({...formEstoque, min_stock: parseInt(e.target.value) || 0})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                />
-                              </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Custo Unitário (R$)</label>
-                                <input
-                                  type="number" step="0.01" placeholder="Ex: 10.00"
-                                  value={formEstoque.custo_unitario === 0 ? '' : formEstoque.custo_unitario} onChange={e => setFormEstoque({...formEstoque, custo_unitario: parseFloat(e.target.value) || 0})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Preço Venda (R$)</label>
-                                <input
-                                  type="number" step="0.01" placeholder="Ex: 20.00"
-                                  value={formEstoque.preco_venda === 0 ? '' : formEstoque.preco_venda} onChange={e => setFormEstoque({...formEstoque, preco_venda: parseFloat(e.target.value) || 0})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5 focus:outline-none"
-                                />
-                              </div>
-                              <div className="flex items-end">
-                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
-                                  Incluir no Saldo
-                                </button>
-                              </div>
-                            </div>
-                          </form>
-                        )}
-
-                        {activeSubData === 'consumo' && (
-                          <form onSubmit={handleAddConsumo} className="space-y-3 text-left">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase">Insumo Consumido</label>
-                                <input
-                                  type="text" required placeholder="Nome do insumo"
-                                  value={formConsumo.item} onChange={e => setFormConsumo({...formConsumo, item: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                  <label className="text-[9px] font-bold text-slate-400 uppercase">Mês/Ano Ref.</label>
-                                  <input
-                                    type="text" placeholder="Ex: 06/2026"
-                                    value={formConsumo.mes_ano} onChange={e => setFormConsumo({...formConsumo, mes_ano: e.target.value})}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="text-[9px] font-bold text-slate-400 uppercase">Qtd Consumida</label>
-                                  <input
-                                    type="number" required placeholder="Ex: 15"
-                                    value={formConsumo.quantidade_consumida === 0 ? '' : formConsumo.quantidade_consumida} onChange={e => setFormConsumo({...formConsumo, quantidade_consumida: parseInt(e.target.value) || 0})}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex justify-end pt-2">
-                              <button type="submit" className="bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 px-6 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
-                                Salvar em Consumos
-                              </button>
-                            </div>
-                          </form>
-                        )}
-
-                        {activeSubData === 'historico_precos' && (
-                          <form onSubmit={handleAddPreco} className="space-y-3 text-left">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Insumo / Item Comprado</label>
-                                <input
-                                  type="text" required placeholder="Ex: Creatina Pura"
-                                  value={formPrecos.item} onChange={e => setFormPrecos({...formPrecos, item: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Fornecedor / Fabricante</label>
-                                <input
-                                  type="text" placeholder="Ex: Fornecedor Farmacêutico S/A"
-                                  value={formPrecos.fornecedor} onChange={e => setFormPrecos({...formPrecos, fornecedor: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Preço Pago Unitário</label>
-                                <input
-                                  type="number" step="0.01" required placeholder="Ex: 89.90"
-                                  value={formPrecos.preco_unitario === 0 ? '' : formPrecos.preco_unitario} onChange={e => setFormPrecos({...formPrecos, preco_unitario: parseFloat(e.target.value) || 0})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Data da Compra</label>
-                                <input
-                                  type="date"
-                                  value={formPrecos.data_compra} onChange={e => setFormPrecos({...formPrecos, data_compra: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="flex items-end">
-                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
-                                  Registrar Faturamento
-                                </button>
-                              </div>
-                            </div>
-                          </form>
-                        )}
-
-                        {activeSubData === 'validade' && (
-                          <form onSubmit={handleAddValidade} className="space-y-3 text-left">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Nome do Item / Produto</label>
-                                <input
-                                  type="text" required placeholder="Ex: Whey Isolate Lote A"
-                                  value={formValidade.item} onChange={e => setFormValidade({...formValidade, item: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                  <label className="text-[9px] font-bold text-slate-405 uppercase">Código do Lote</label>
-                                  <input
-                                    type="text" placeholder="Ex: L2026-X"
-                                    value={formValidade.lote} onChange={e => setFormValidade({...formValidade, lote: e.target.value})}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="text-[9px] font-bold text-slate-405 uppercase">Qtd Volume Lote</label>
-                                  <input
-                                    type="number" required placeholder="Ex: 50"
-                                    value={formValidade.quantidade === 0 ? '' : formValidade.quantidade} onChange={e => setFormValidade({...formValidade, quantidade: parseInt(e.target.value) || 0})}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-405 uppercase">Data de Vencimento</label>
-                                <input
-                                  type="date" required
-                                  value={formValidade.validade} onChange={e => setFormValidade({...formValidade, validade: e.target.value})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl text-xs p-2.5"
-                                />
-                              </div>
-                              <div className="flex items-end">
-                                <button type="submit" className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider block text-center">
-                                  Registrar Validade
-                                </button>
-                              </div>
-                            </div>
-                          </form>
-                        )}
-                      </div>
+                    {/* Botões rápidos adicionais */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.xlsx`)}
+                        className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
+                      >
+                        <span className="truncate">Carregar Planilha Comercial (.XLSX)</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      </button>
+                      <button
+                        onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.pdf`)}
+                        className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
+                      >
+                        <span className="truncate">Carregar Relatório do Sistema (.PDF)</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      </button>
                     </div>
-                    
+
+                    {/* Formulários rápidos adaptativos de Inserção Individual Manual */}
+                    <div className="border-t border-slate-100 pt-3">
+                      <span className="text-[10px] font-black text-slate-800 uppercase tracking-wider block mb-2">Lançamento Avulso Manual:</span>
+                      
+                      {activeSubData === 'estoque' && (
+                        <form onSubmit={handleAddEstoque} className="space-y-2 text-left">
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text" placeholder="Código (Ex: 04808)"
+                              value={formEstoque.codigo} onChange={e => setFormEstoque({...formEstoque, codigo: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none font-mono"
+                            />
+                            <select
+                              value={formEstoque.situacao_lote} onChange={e => setFormEstoque({...formEstoque, situacao_lote: e.target.value, lote: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            >
+                              <option value="LIBERADO">LIBERADO</option>
+                              <option value="BLOQUEADO">BLOQUEADO</option>
+                              <option value="CERTIFICACAO">CERTIFICACAO</option>
+                            </select>
+                          </div>
+                          
+                          <input
+                            type="text" required placeholder="Nome do Item / Insumo"
+                            value={formEstoque.item} onChange={e => setFormEstoque({...formEstoque, item: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text" placeholder="Lote (Ex: LOT2026)"
+                              value={formEstoque.lote} onChange={e => setFormEstoque({...formEstoque, lote: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            />
+                            <input
+                              type="number" required placeholder="Qtd Saldo"
+                              value={formEstoque.quantidade === 0 ? '' : formEstoque.quantidade} onChange={e => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none font-mono"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="number" placeholder="Est. Mínimo"
+                              value={formEstoque.min_stock === 0 ? '' : formEstoque.min_stock} onChange={e => setFormEstoque({...formEstoque, min_stock: parseInt(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            />
+                            <input
+                              type="number" placeholder="Custo Unit. (R$)"
+                              value={formEstoque.custo_unitario === 0 ? '' : formEstoque.custo_unitario} onChange={e => setFormEstoque({...formEstoque, custo_unitario: parseFloat(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="number" placeholder="Preço Venda (R$)"
+                              value={formEstoque.preco_venda === 0 ? '' : formEstoque.preco_venda} onChange={e => setFormEstoque({...formEstoque, preco_venda: parseFloat(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            />
+                            <select
+                              value={formEstoque.unidade} onChange={e => setFormEstoque({...formEstoque, unidade: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
+                            >
+                              <option value="G">G (Gramas)</option>
+                              <option value="ML">ML (Mililitros)</option>
+                              <option value="KG">KG (Quilos)</option>
+                              <option value="unidades">unidades</option>
+                              <option value="potes">potes</option>
+                            </select>
+                          </div>
+                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-850 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer block text-center uppercase tracking-wider">
+                            Incluir no Saldo
+                          </button>
+                        </form>
+                      )}
+
+                      {activeSubData === 'consumo' && (
+                        <form onSubmit={handleAddConsumo} className="space-y-2 text-left">
+                          <input
+                            type="text" required placeholder="Nome do Insumo Consumido"
+                            value={formConsumo.item} onChange={e => setFormConsumo({...formConsumo, item: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text" placeholder="Mês/Ano (06/2026)"
+                              value={formConsumo.mes_ano} onChange={e => setFormConsumo({...formConsumo, mes_ano: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                            />
+                            <input
+                              type="number" required placeholder="Qtd Consumo"
+                              value={formConsumo.quantidade_consumida === 0 ? '' : formConsumo.quantidade_consumida} onChange={e => setFormConsumo({...formConsumo, quantidade_consumida: parseInt(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                            />
+                          </div>
+                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
+                            Salvar em Consumos
+                          </button>
+                        </form>
+                      )}
+
+                      {activeSubData === 'historico_precos' && (
+                        <form onSubmit={handleAddPreco} className="space-y-2 text-left">
+                          <input
+                            type="text" required placeholder="Insumo / Item comprado"
+                            value={formPrecos.item} onChange={e => setFormPrecos({...formPrecos, item: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                          />
+                          <input
+                            type="text" placeholder="Fornecedor / S/A"
+                            value={formPrecos.fornecedor} onChange={e => setFormPrecos({...formPrecos, fornecedor: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="number" step="0.01" required placeholder="Preço Pago (R$)"
+                              value={formPrecos.preco_unitario === 0 ? '' : formPrecos.preco_unitario} onChange={e => setFormPrecos({...formPrecos, preco_unitario: parseFloat(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                            />
+                            <input
+                              type="date"
+                              value={formPrecos.data_compra} onChange={e => setFormPrecos({...formPrecos, data_compra: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[10px] p-1.5"
+                            />
+                          </div>
+                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
+                            Registrar Faturamento
+                          </button>
+                        </form>
+                      )}
+
+                      {activeSubData === 'validade' && (
+                        <form onSubmit={handleAddValidade} className="space-y-2 text-left">
+                          <input
+                            type="text" required placeholder="Nome do Item / Lote"
+                            value={formValidade.item} onChange={e => setFormValidade({...formValidade, item: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text" placeholder="Lote ID"
+                              value={formValidade.lote} onChange={e => setFormValidade({...formValidade, lote: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                            />
+                            <input
+                              type="number" required placeholder="Qtd Lote"
+                              value={formValidade.quantidade === 0 ? '' : formValidade.quantidade} onChange={e => setFormValidade({...formValidade, quantidade: parseInt(e.target.value) || 0})}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                            />
+                          </div>
+                          <input
+                            type="date" required
+                            value={formValidade.validade} onChange={e => setFormValidade({...formValidade, validade: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
+                          />
+                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
+                            Registrar Validade
+                          </button>
+                        </form>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Tabela Dinâmica do Componente Selecionado em largura completa */}
-                  <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
+                  {/* Tabela Dinâmica do Componente Selecionado */}
+                  <div className="md:col-span-8 bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
                     
                     {/* Filtros e Busca */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3.5 border-b border-slate-100">
@@ -1890,143 +1808,129 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
               </div>
             )}
-            
-        </div> {/* Fim de PAINEL PRINCIPAL */}
 
-        {/* ASSISTENTE DE IA DE AUDITORIA NO RODAPÉ DA PÁGINA EM LARGURA INTEIRA */}
-        {isChatExpanded && (
-          <div className="bg-white border border-indigo-150 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row gap-6 min-h-[460px]">
-            {/* Esquerda do Chat: Título e Consultas Rápidas */}
-            <div className="md:w-1/3 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0 md:pr-6 text-left">
-              <div className="space-y-3">
+          </div>
+
+          {/* PAINEL PERSISTENTE: DIREITO (ASSISTENTE DE IA DE AUDITORIA) - Ocupa 4 colunas se expandido */}
+          {isChatExpanded && (
+            <div className="lg:col-span-4 bg-white border border-indigo-100 rounded-3xl p-5 shadow-xs flex flex-col h-[580px] lg:sticky lg:top-4">
+              
+              <div className="flex justify-between items-center border-b border-indigo-50 pb-3 mb-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-                    <Bot className="h-5 w-5 text-indigo-600 animate-pulse" />
+                  <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <Bot className="h-4.5 w-4.5 animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-black text-slate-805 uppercase tracking-wider flex items-center gap-1.5">
+                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                       Cérebro IA Integrado
                       <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                     </h3>
-                    <p className="text-[10px] text-slate-400">Auditoria automatizada das planilhas em tempo real.</p>
+                    <p className="text-[9px] text-slate-400">Estampa de livre acesso ativo sobre as planilhas.</p>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Este assistente de inteligência artificial lê todas as suas tabelas de estoque, consumo, histórico de faturamento e validades. Use as ações rápidas abaixo ou envie perguntas customizadas.
-                </p>
+                <button
+                  onClick={() => setIsChatExpanded(false)}
+                  className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-650 px-2 py-1 rounded-xl cursor-not-allowed select-none"
+                  title="Fechar Assistente IA"
+                >
+                  X
+                </button>
+              </div>
+
+              {/* Corpo histórico de diálogos */}
+              <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 mb-3 scrollbar-thin">
+                {chatHistory.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3.5 rounded-2xl max-w-[90%] leading-relaxed text-xs shadow-3xs ${
+                      msg.role === 'user'
+                        ? 'bg-indigo-600 text-white ml-auto'
+                        : 'bg-indigo-50/45 text-slate-805 space-y-1.5 border border-indigo-50'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap font-sans">
+                      {msg.content.split('\n').map((line, lIdx) => {
+                        let render: React.ReactNode = line;
+                        if (line.startsWith('* **') || line.startsWith('   * ')) {
+                          render = <span className="pl-1.5 block text-slate-650 leading-relaxed">{line}</span>;
+                        } else if (line.startsWith('###')) {
+                          render = <span className="font-extrabold text-indigo-950 block text-[11px] uppercase tracking-wider mt-2.5 pb-1 mb-1 bg-indigo-100/40 p-1.5 rounded">{line.replace('###', '')}</span>;
+                        } else if (line.startsWith('**') || line.startsWith('- **')) {
+                          render = <strong className="font-black text-slate-900 block mt-1.5">{line}</strong>;
+                        }
+                        return <p key={lIdx} className="mt-0.5">{render}</p>;
+                      })}
+                    </div>
+                    <span className={`block text-[8px] text-right mt-1 font-bold ${msg.role === 'user' ? 'text-indigo-200' : 'text-indigo-400'}`}>
+                      {msg.timestamp}
+                    </span>
+                  </div>
+                ))}
+
+                {isAiTyping && (
+                  <div className="bg-slate-50 border border-slate-150 p-3 rounded-2xl max-w-[65%] flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />
+                    <span className="text-[10px] font-bold text-slate-500 animate-pulse">Cruzando faturamentos nas planilhas...</span>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Botões rápidos de consultas no chat */}
-              <div className="pt-4 border-t border-slate-100 space-y-2 text-left">
-                <span className="text-[10px] text-indigo-900/60 font-black uppercase block tracking-wider leading-none">Consultas Rápidas IA:</span>
-                <div className="flex flex-col gap-1.5">
+              <div className="pt-2 border-t border-slate-100 space-y-1.5 mb-2.5 text-left">
+                <span className="text-[9px] text-slate-450 font-extrabold uppercase block tracking-wider leading-none">Consultas Rápidas IA:</span>
+                <div className="flex flex-wrap gap-1">
                   <button
                     onClick={() => handleSendChatMessage('Qual foi o preço da minha última compra de Creatina? E qual foi o fornecedor?')}
-                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                    className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl text-[9px] font-extrabold text-slate-650 cursor-pointer transition-colors"
                   >
-                    Última Compra Creatina
+                    Creatina: Preço & Fornecedor
                   </button>
                   <button
                     onClick={() => handleSendChatMessage('Quais são os itens críticos abaixo do estoque mínimo e reposição?')}
-                    className="p-2 text-left bg-indigo-50 hover:bg-indigo-100 rounded-xl text-[10px] font-extrabold text-indigo-700 cursor-pointer transition-colors"
+                    className="p-1.5 bg-indigo-50 hover:bg-indigo-100 rounded-xl text-[9px] font-extrabold text-indigo-700 cursor-pointer transition-colors"
                   >
-                    Estoque Mínimo & Rupturas
+                    Risco de Ruptura
                   </button>
                   <button
                     onClick={() => handleSendChatMessage('Calcule a curva ABC e as lucratividades dos meus itens ativos')}
-                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                    className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl text-[9px] font-extrabold text-slate-650 cursor-pointer transition-colors"
                   >
-                    Curva ABC Financeira
+                    Curva ABC de Estoques
                   </button>
                   <button
                     onClick={() => handleSendChatMessage('Existem ativos do faturamento em risco por data de validade?')}
-                    className="p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-extrabold text-slate-650 cursor-pointer transition-colors"
+                    className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl text-[9px] font-extrabold text-slate-650 cursor-pointer transition-colors"
                   >
-                    Auditar Validades Próximas
+                    Prazos de Validade Critícos
                   </button>
                 </div>
               </div>
-            </div>
 
-            {/* Direita do Chat: Conversa e Input */}
-            <div className="flex-1 flex flex-col justify-between min-h-[380px]">
-              <div className="flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="flex justify-between items-center border-b border-indigo-50 pb-2 mb-3">
-                    <span className="text-[10px] font-black uppercase text-indigo-900/50 tracking-wider">Histórico de Diálogo do Auditor IA</span>
-                    <button
-                      onClick={() => setIsChatExpanded(false)}
-                      className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-2.5 py-1 rounded-xl cursor-pointer select-none"
-                      title="Fechar Assistente IA"
-                    >
-                      Ocultar Chat
-                    </button>
-                  </div>
-
-                  {/* Corpo histórico de diálogos */}
-                  <div className="h-[250px] overflow-y-auto space-y-3.5 pr-1 mb-3 scrollbar-thin text-left">
-                    {chatHistory.map((msg, idx) => (
-                      <div
-                        key={idx}
-                        className={`p-3.5 rounded-2xl max-w-[90%] leading-relaxed text-xs shadow-3xs ${
-                          msg.role === 'user'
-                            ? 'bg-indigo-600 text-white ml-auto'
-                            : 'bg-indigo-50/45 text-slate-805 space-y-1.5 border border-indigo-50'
-                        }`}
-                      >
-                        <div className="whitespace-pre-wrap font-sans">
-                          {msg.content.split('\n').map((line, lIdx) => {
-                            let render: React.ReactNode = line;
-                            if (line.startsWith('* **') || line.startsWith('   * ')) {
-                              render = <span className="pl-1.5 block text-slate-650 leading-relaxed">{line}</span>;
-                            } else if (line.startsWith('###')) {
-                              render = <span className="font-extrabold text-indigo-950 block text-[11px] uppercase tracking-wider mt-2.5 pb-1 mb-1 bg-indigo-100/40 p-1.5 rounded">{line.replace('###', '')}</span>;
-                            } else if (line.startsWith('**') || line.startsWith('- **')) {
-                              render = <strong className="font-black text-slate-900 block mt-1.5">{line}</strong>;
-                            }
-                            return <p key={lIdx} className="mt-0.5">{render}</p>;
-                          })}
-                        </div>
-                        <span className={`block text-[8px] text-right mt-1 font-bold ${msg.role === 'user' ? 'text-indigo-200' : 'text-indigo-400'}`}>
-                          {msg.timestamp}
-                        </span>
-                      </div>
-                    ))}
-
-                    {isAiTyping && (
-                      <div className="bg-slate-50 border border-slate-150 p-3 rounded-2xl max-w-[65%] flex items-center gap-2">
-                        <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />
-                        <span className="text-[10px] font-bold text-slate-500 animate-pulse">Cruzando faturamentos nas planilhas...</span>
-                      </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
-                </div>
-
-                {/* Input de Envio de Mensagem do Chat */}
-                <div className="flex bg-slate-50 border border-slate-200 rounded-2xl p-1 gap-1.5 shrink-0 mt-3">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleSendChatMessage();
-                    }}
-                    placeholder="Peça para a Inteligência Artificial auditar ou buscar dados de suas planilhas..."
-                    className="flex-grow bg-transparent text-slate-1000 border-0 focus:outline-none focus:ring-0 text-[11px] px-3 py-2"
-                  />
-                  <button
-                    onClick={() => handleSendChatMessage()}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2 px-4.5 text-xs font-bold flex items-center justify-center cursor-pointer transition-all shrink-0 font-extrabold uppercase tracking-wider"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+              {/* Input de Envio de Mensagem do Chat */}
+              <div className="flex bg-slate-50 border border-slate-200 rounded-2xl p-1 gap-1.5 mt-auto">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSendChatMessage();
+                  }}
+                  placeholder="Peça para IA analisar..."
+                  className="flex-grow bg-transparent text-slate-800 border-0 focus:outline-none focus:ring-0 text-[11px] px-3 py-1.5"
+                />
+                <button
+                  onClick={() => handleSendChatMessage()}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-1.5 px-3 text-xs font-bold flex items-center justify-center cursor-pointer transition-all shrink-0"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
               </div>
-            </div>
-          </div>
-        )}
 
+            </div>
+          )}
+
+        </div>
       </div>
 
     </div>
