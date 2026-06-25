@@ -66,6 +66,7 @@ interface EstoqueItem {
   situacao_lote?: string; // Situação (LIBERADO, BLOQUEADO, CERTIFICACAO)
   originalItemsCount?: number;
   mergedSituations?: string[];
+  lotsList?: { lote: string; quantidade: number; unidade: string }[];
 }
 
 interface ConsumoItem {
@@ -376,25 +377,34 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   // Consolidador por Código: Agrupa e soma as quantidades dos itens com mesmo código
   const getAggregatedStockData = (): EstoqueItem[] => {
-    if (!consolidatedByCode) return estoqueData;
+    if (!consolidatedByCode) {
+      return estoqueData.map(item => ({
+        ...item,
+        lotsList: [{ lote: item.situacao_lote || item.lote || 'LIBERADO', quantidade: item.quantidade, unidade: item.unidade }]
+      }));
+    }
     
-    const grouped: { [key: string]: EstoqueItem & { originalItemsCount?: number; mergedSituations?: string[] } } = {};
+    const grouped: { [key: string]: EstoqueItem } = {};
     
     estoqueData.forEach(item => {
       // Se não constar código estruturado, usa a descrição como chave restritora
       const key = item.codigo || item.item;
+      const sit = item.situacao_lote || item.lote || 'LIBERADO';
       if (!grouped[key]) {
         grouped[key] = {
           ...item,
           originalItemsCount: 1,
-          mergedSituations: [item.situacao_lote || item.lote || 'LIBERADO']
+          mergedSituations: [sit],
+          lotsList: [{ lote: sit, quantidade: item.quantidade, unidade: item.unidade }]
         };
       } else {
         grouped[key].quantidade += item.quantidade;
         grouped[key].originalItemsCount = (grouped[key].originalItemsCount || 1) + 1;
-        const sit = item.situacao_lote || item.lote || 'LIBERADO';
         if (grouped[key].mergedSituations && !grouped[key].mergedSituations?.includes(sit)) {
           grouped[key].mergedSituations?.push(sit);
+        }
+        if (grouped[key].lotsList) {
+          grouped[key].lotsList.push({ lote: sit, quantidade: item.quantidade, unidade: item.unidade });
         }
       }
     });
@@ -909,12 +919,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         </div>
       )}
 
-      {/* CORE DISPLAY EM LAYOUT SPLIT COM ASSISTENTE IA PERSISTENTE (Opcional) */}
-      <div className="max-w-7xl mx-auto px-6 sm:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* CORE DISPLAY EM LAYOUT UNIFICADO COM ASSISTENTE IA NA PARTE INFERIOR */}
+      <div className="max-w-7xl mx-auto px-6 sm:px-8 pb-12">
+        <div className="space-y-6">
           
-          {/* PAINEL PRINCIPAL: ESQUERDO (Calculadora/Ingestão/Indicadores) - Ocupa 8 colunas expandido, 12 se chat fechado */}
-          <div className={`${isChatExpanded ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6 transition-all duration-300`}>
+          {/* PAINEL PRINCIPAL: largura total para melhor visualização e espaço das tabelas */}
+          <div className="w-full space-y-6">
             
             {/* ========================================================= */}
             {/* TAB OUTCOME 1: GESTÃO DE COMPRAS (INDICATORS)             */}
@@ -1313,17 +1323,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                      {activeSubData === 'estoque' && (
                       <div className="space-y-4">
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left text-[11px] bg-white rounded-xl">
+                          <table className="w-full text-left text-[11px] bg-white rounded-xl table-fixed">
                             <thead>
                               <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest pb-1 text-left">
-                                <th className="pb-2">Código</th>
-                                <th className="pb-2">Insumo / Descrição</th>
-                                <th className="pb-2">Status Lote</th>
-                                <th className="pb-2 text-right">Físico</th>
-                                <th className="pb-2 text-right">Est. Seg / Mín</th>
-                                <th className="pb-2 text-right">Custo Unit.</th>
-                                <th className="pb-2 text-right">Valor Total</th>
-                                <th className="pb-2 text-center">Excluir</th>
+                                <th className="pb-2 w-[12%]">Código</th>
+                                <th className="pb-2 w-[38%]">Insumo / Descrição</th>
+                                <th className="pb-2 w-[30%]">Saldos por Lote</th>
+                                <th className="pb-2 text-right w-[10%]">Físico</th>
+                                <th className="pb-2 text-right w-[10%]">Valor Total</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
@@ -1334,44 +1341,47 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 )
                                 .map((row) => (
                                   <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-2.5 font-mono text-indigo-700 font-bold bg-indigo-50/30 px-2 py-0.5 rounded text-[10.5px] border border-indigo-100/50 inline-block mt-2">
-                                      {row.codigo || '—'}
+                                    <td className="py-2.5 w-[12%]">
+                                      <span className="font-mono text-indigo-700 font-bold bg-indigo-50/30 px-2 py-0.5 rounded text-[10.5px] border border-indigo-100/50 inline-block">
+                                        {row.codigo || '—'}
+                                      </span>
                                     </td>
-                                    <td className="py-2.5 font-bold text-slate-900">
+                                    <td className="py-2.5 font-bold text-slate-900 w-[38%] pr-4">
                                       {row.item}
                                       <span className="block font-normal text-[9px] text-slate-400 font-mono uppercase">{row.local}</span>
                                     </td>
-                                    <td className="py-2.5 font-sans">
-                                      {row.originalItemsCount && row.originalItemsCount > 1 ? (
-                                        <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-850 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight">
-                                          Somou {row.originalItemsCount} Lotes
-                                        </span>
-                                      ) : (
-                                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-650 rounded text-[9.5px] font-mono uppercase">
-                                          {row.situacao_lote || row.lote}
-                                        </span>
-                                      )}
+                                    <td className="py-2.5 w-[30%] pr-4">
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {row.lotsList && row.lotsList.length > 0 ? (
+                                          row.lotsList.map((l, idx) => {
+                                            const lotUpper = l.lote.toUpperCase();
+                                            const statusClass = lotUpper === 'BLOQUEADO' || lotUpper === 'VENCIDO'
+                                              ? 'bg-red-50 border border-red-200 text-red-800' 
+                                              : lotUpper === 'CERTIFICACAO' || lotUpper === 'QUARENTENA'
+                                                ? 'bg-amber-50 border border-amber-200 text-amber-800' 
+                                                : 'bg-emerald-50 border border-emerald-200 text-emerald-800';
+                                            return (
+                                              <span key={idx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight ${statusClass}`}>
+                                                <span className="opacity-85">{l.lote}:</span> {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {l.unidade}
+                                              </span>
+                                            );
+                                          })
+                                        ) : (
+                                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-650 rounded text-[9.5px] font-mono uppercase">
+                                            {row.situacao_lote || row.lote || 'LIBERADO'}: {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
-                                    <td className="py-2.5 text-right font-black">
+                                    <td className="py-2.5 text-right font-black w-[10%]">
                                       <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
                                         row.quantidade <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
                                       }`}>
                                         {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
                                       </span>
                                     </td>
-                                    <td className="py-2.5 text-right font-mono text-slate-450 text-[10px]">
-                                      Mín: {row.min_stock} / Seg: {row.safety_stock}
-                                    </td>
-                                    <td className="py-2.5 text-right font-mono text-slate-500">
-                                      R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </td>
-                                    <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">
+                                    <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 w-[10%]">
                                       R$ {(row.quantidade * row.custo_unitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </td>
-                                    <td className="py-2.5 text-center">
-                                      <button onClick={() => handleDeleteEstoque(row.id)} className="text-slate-400 hover:text-red-650 p-1 rounded hover:bg-slate-50 cursor-pointer">
-                                        <Trash className="h-3.5 w-3.5" />
-                                      </button>
                                     </td>
                                   </tr>
                                 ))}
@@ -1811,9 +1821,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
           </div>
 
-          {/* PAINEL PERSISTENTE: DIREITO (ASSISTENTE DE IA DE AUDITORIA) - Ocupa 4 colunas se expandido */}
+          {/* ASSISTENTE DE IA DE AUDITORIA NA PARTE INFERIOR - LARGURA COMPLETA */}
           {isChatExpanded && (
-            <div className="lg:col-span-4 bg-white border border-indigo-100 rounded-3xl p-5 shadow-xs flex flex-col h-[580px] lg:sticky lg:top-4">
+            <div className="w-full bg-white border border-indigo-100 rounded-3xl p-5 shadow-xs flex flex-col h-[580px] mt-6">
               
               <div className="flex justify-between items-center border-b border-indigo-50 pb-3 mb-3">
                 <div className="flex items-center gap-2">
