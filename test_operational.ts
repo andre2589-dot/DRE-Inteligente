@@ -30,9 +30,12 @@ async function runOperationalHomologation() {
   // PASSO 1: CRIAR UMA EMPRESA DE TESTE ATRAVÉS DO BACKEND EXPRESS
   // -------------------------------------------------------------
   console.log("\n--- [PASSO 1] Criando Empresa de Teste via API Express /api/companies ---");
+  const randomCnpj = "45." + Math.floor(Math.random() * 900 + 100) + "." + Math.floor(Math.random() * 900 + 100) + "/0001-" + Math.floor(Math.random() * 90 + 10);
+  const randomAccountCode = "1.01." + Math.floor(Math.random() * 900 + 100);
+
   const testCompanyPayload = {
     name: "Empresa Inteligente Homologação SAC",
-    cnpj: "45.000.123/0001-99",
+    cnpj: randomCnpj,
     sector: "Consultoria & Tecnologia da Informação"
   };
 
@@ -61,7 +64,7 @@ async function runOperationalHomologation() {
   // -------------------------------------------------------------
   console.log("\n--- [PASSO 2] Criando Conta customizada no Plano de Contas via /api/plano_contas ---");
   const testAccountPayload = {
-    code: "1.01.077",
+    code: randomAccountCode,
     name: "Consultoria de TI Especializada",
     classificationId: "opex_contractors",
     subCategory: "Prestadores de Serviço & Consultoria",
@@ -124,7 +127,7 @@ async function runOperationalHomologation() {
     {
       id: `tx_exp_contractors_${Date.now()}_3`,
       date: "2026-06-15",
-      account: "1.01.077", // Our custom account
+      account: randomAccountCode, // Our custom account
       description: "Serviços prestados por Consultoria Sênior de Redes",
       document: "NF-908",
       classification: "opex_contractors",

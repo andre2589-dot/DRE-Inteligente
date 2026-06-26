@@ -894,6 +894,12 @@
       "name": "Empresa Inteligente Homologação SAC",
       "cnpj": "45.000.123/0001-99",
       "sector": "Consultoria & Tecnologia da Informação"
+    },
+    {
+      "id": "c_1782493895323_gtpc",
+      "name": "Empresa Inteligente Homologação SAC",
+      "cnpj": "45.000.123/0001-99",
+      "sector": "Consultoria & Tecnologia da Informação"
     }
   ]
 }
