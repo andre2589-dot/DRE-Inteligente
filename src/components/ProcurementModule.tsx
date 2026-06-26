@@ -66,7 +66,7 @@ interface EstoqueItem {
   situacao_lote?: string; // Situação (LIBERADO, BLOQUEADO, CERTIFICACAO)
   originalItemsCount?: number;
   mergedSituations?: string[];
-  lotsList?: { lote: string; quantidade: number; unidade: string }[];
+  lotsList?: { lote: string; quantidade: number; unidade: string; situacao?: string }[];
 }
 
 interface ConsumoItem {
@@ -380,7 +380,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     if (!consolidatedByCode) {
       return estoqueData.map(item => ({
         ...item,
-        lotsList: [{ lote: item.situacao_lote || item.lote || 'LIBERADO', quantidade: item.quantidade, unidade: item.unidade }]
+        lotsList: [{ lote: item.lote || 'Único', situacao: item.situacao_lote || 'LIBERADO', quantidade: item.quantidade, unidade: item.unidade }]
       }));
     }
     
@@ -390,12 +390,13 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       // Se não constar código estruturado, usa a descrição como chave restritora
       const key = item.codigo || item.item;
       const sit = item.situacao_lote || item.lote || 'LIBERADO';
+      const lotId = item.lote || 'Único';
       if (!grouped[key]) {
         grouped[key] = {
           ...item,
           originalItemsCount: 1,
           mergedSituations: [sit],
-          lotsList: [{ lote: sit, quantidade: item.quantidade, unidade: item.unidade }]
+          lotsList: [{ lote: lotId, situacao: sit, quantidade: item.quantidade, unidade: item.unidade }]
         };
       } else {
         grouped[key].quantidade += item.quantidade;
@@ -404,7 +405,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           grouped[key].mergedSituations?.push(sit);
         }
         if (grouped[key].lotsList) {
-          grouped[key].lotsList.push({ lote: sit, quantidade: item.quantidade, unidade: item.unidade });
+          grouped[key].lotsList.push({ lote: lotId, situacao: sit, quantidade: item.quantidade, unidade: item.unidade });
         }
       }
     });
@@ -1354,21 +1355,15 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       <div className="flex flex-wrap gap-1.5">
                                         {row.lotsList && row.lotsList.length > 0 ? (
                                           row.lotsList.map((l, idx) => {
-                                            const lotUpper = l.lote.toUpperCase();
-                                            const statusClass = lotUpper === 'BLOQUEADO' || lotUpper === 'VENCIDO'
-                                              ? 'bg-red-50 border border-red-200 text-red-800' 
-                                              : lotUpper === 'CERTIFICACAO' || lotUpper === 'QUARENTENA'
-                                                ? 'bg-amber-50 border border-amber-200 text-amber-800' 
-                                                : 'bg-emerald-50 border border-emerald-200 text-emerald-800';
                                             return (
-                                              <span key={idx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight ${statusClass}`}>
+                                              <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight bg-slate-50 border border-slate-200 text-slate-700">
                                                 <span className="opacity-85">{l.lote}:</span> {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {l.unidade}
                                               </span>
                                             );
                                           })
                                         ) : (
-                                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-650 rounded text-[9.5px] font-mono uppercase">
-                                            {row.situacao_lote || row.lote || 'LIBERADO'}: {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                          <span className="px-1.5 py-0.5 bg-slate-50 border border-slate-200 text-slate-700 rounded text-[9.5px] font-mono uppercase font-bold">
+                                            Saldo: {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
                                           </span>
                                         )}
                                       </div>

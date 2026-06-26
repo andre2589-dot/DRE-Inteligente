@@ -888,6 +888,12 @@
       "name": "Empresa Teste Auditoria",
       "cnpj": "12.345.678/0001-00",
       "sector": "Auditoria e Controladoria"
+    },
+    {
+      "id": "c_1782492650022_ewwq",
+      "name": "Empresa Inteligente Homologação SAC",
+      "cnpj": "45.000.123/0001-99",
+      "sector": "Consultoria & Tecnologia da Informação"
     }
   ]
 }
