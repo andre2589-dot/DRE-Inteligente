@@ -876,6 +876,18 @@
       "name": "Empresa Principal",
       "cnpj": "00.000.000/0001-00",
       "sector": "Geral"
+    },
+    {
+      "id": "c_1782427199379_ofdo",
+      "name": "Empresa Inteligente Homologação SAC",
+      "cnpj": "45.000.123/0001-99",
+      "sector": "Consultoria & Tecnologia da Informação"
+    },
+    {
+      "id": "c_1782427403316_nm0i",
+      "name": "Empresa Teste Auditoria",
+      "cnpj": "12.345.678/0001-00",
+      "sector": "Auditoria e Controladoria"
     }
   ]
 }
