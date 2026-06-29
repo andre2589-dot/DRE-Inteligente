@@ -1751,7 +1751,6 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           <th className="pb-2 text-right">Margem de Lucro (%)</th>
                           <th className="pb-2 text-right">Markup (%)</th>
                           <th className="pb-2 text-right">Margem Bruta Unitária</th>
-                          <th className="pb-2 text-right">Lucro Projetado Total</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50 text-slate-705">
@@ -1765,7 +1764,6 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           // Markup = (Venda - Custo) / Custo * 100
                           const markup = custo > 0 ? ((venda - custo) / custo) * 100 : 0;
                           const margemUnitariaVal = venda - custo;
-                          const lucroTotalProjetado = margemUnitariaVal * row.quantidade;
 
                           return (
                             <tr key={row.id} className="hover:bg-slate-50/50">
@@ -1802,7 +1800,6 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                               </td>
                               <td className="py-2.5 text-right font-mono text-indigo-650 font-bold">{markup.toFixed(1)}%</td>
                               <td className="py-2.5 text-right font-mono text-emerald-650 font-semibold">R$ {margemUnitariaVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                              <td className="py-2.5 text-right font-mono font-black text-indigo-900 bg-indigo-50/10">R$ {lucroTotalProjetado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                             </tr>
                           );
                         })}
