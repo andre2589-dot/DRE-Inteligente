@@ -806,6 +806,16 @@ app.get("/api/supabase/diagnose", async (req, res) => {
 
     const allTablesOk = !anyTableFailed;
 
+    // Dynamically heal/restore Supabase connection state if diagnostics pass successfully
+    if (allTablesOk && client) {
+      if (!supabaseActive || !supabase) {
+        console.log("⚡ [AUTO-HEAL] Supabase diagnostics passed! Automatically restoring live database connection.");
+        supabaseActive = true;
+        supabase = client;
+        whatsappService.setSupabase(client);
+      }
+    }
+
     const dbAccessibility = {
       status: dbAccessible && !anyTableFailed ? "OK" : "ERRO",
       details: dbAccessible && !anyTableFailed ? "Leitura concluída no cluster PostgreSQL" : "Algumas tabelas possuem falhas de leitura ou não existem",
