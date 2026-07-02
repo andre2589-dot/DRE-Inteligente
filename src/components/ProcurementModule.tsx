@@ -167,80 +167,147 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   }, [arquivosRegistrados]);
 
   // Estados dos bancos estruturados populados com os dados iniciais do relatório real de CONTROLE DE ESTOQUE
-  const [estoqueData, setEstoqueData] = useState<EstoqueItem[]>(() => {
-    const cached = localStorage.getItem('gestao_estoque_data');
-    if (cached) return JSON.parse(cached);
-    return [
-      { id: 'est_pdf_1', codigo: '01918', item: 'CREATINA (USAR)', lote: 'LIBERADO', quantidade: 1379.0000, unidade: 'G', min_stock: 1000, safety_stock: 500, custo_unitario: 42.00, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_2', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'LIBERADO', quantidade: 19.4500, unidade: 'G', min_stock: 30, safety_stock: 10, custo_unitario: 124.50, preco_venda: 198.00, local: 'Galpão A', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_3', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'BLOQUEADO', quantidade: 10.0000, unidade: 'G', min_stock: 30, safety_stock: 10, custo_unitario: 124.50, preco_venda: 198.00, local: 'Estoque Retido', frequencia_venda: 'Média', situacao_lote: 'BLOQUEADO' },
-      { id: 'est_pdf_4', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'LIBERADO', quantidade: 148.2910, unidade: 'ML', min_stock: 300, safety_stock: 100, custo_unitario: 15.80, preco_venda: 32.00, local: 'Câmara Fria', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_5', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'CERTIFICACAO', quantidade: 1000.0000, unidade: 'ML', min_stock: 300, safety_stock: 100, custo_unitario: 15.80, preco_venda: 32.00, local: 'Laboratório Ingressos', frequencia_venda: 'Média', situacao_lote: 'CERTIFICACAO' },
-      { id: 'est_pdf_6', codigo: '01056', item: '5-HIDROXITRIPTOFANO L (USAR)', lote: 'LIBERADO', quantidade: 313.1750, unidade: 'G', min_stock: 200, safety_stock: 80, custo_unitario: 2.10, preco_venda: 5.40, local: 'Prateleira Especial', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_7', codigo: '00448', item: 'ABACATE OLEO (USAR)', lote: 'LIBERADO', quantidade: 483.4061, unidade: 'G', min_stock: 400, safety_stock: 150, custo_unitario: 3.20, preco_venda: 7.90, local: 'Almoxarifado Geral', frequencia_venda: 'Média', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_8', codigo: '01109', item: 'ACETILCISTEINA (USAR)', lote: 'LIBERADO', quantidade: 945.0000, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 0.85, preco_venda: 2.40, local: 'Galpão A', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_9', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'LIBERADO', quantidade: 1.6550, unidade: 'G', min_stock: 10, safety_stock: 5, custo_unitario: 340.00, preco_venda: 650.00, local: 'Armário Controlados', frequencia_venda: 'Baixa', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_10', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'CERTIFICACAO', quantidade: 5.0000, unidade: 'G', min_stock: 10, safety_stock: 5, custo_unitario: 340.00, preco_venda: 650.00, local: 'Laboratório Ingressos', frequencia_venda: 'Baixa', situacao_lote: 'CERTIFICACAO' },
-      { id: 'est_pdf_11', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'LIBERADO', quantidade: 177.1396, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 1.10, preco_venda: 3.20, local: 'Almoxarifado Principal', frequencia_venda: 'Alta', situacao_lote: 'LIBERADO' },
-      { id: 'est_pdf_12', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'CERTIFICACAO', quantidade: 2000.0000, unidade: 'G', min_stock: 500, safety_stock: 200, custo_unitario: 1.10, preco_venda: 3.20, local: 'Laboratório Ingressos', frequencia_venda: 'Alta', situacao_lote: 'CERTIFICACAO' }
-    ];
-  });
+  const [estoqueData, setEstoqueData] = useState<EstoqueItem[]>([]);
+  const [consumoData, setConsumoData] = useState<ConsumoItem[]>([]);
+  const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>([]);
+  const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>([]);
+  const [loadingDb, setLoadingDb] = useState(true);
 
-  const [consumoData, setConsumoData] = useState<ConsumoItem[]>(() => {
-    const cached = localStorage.getItem('gestao_consumo_data');
-    if (cached) return JSON.parse(cached);
-    return [
-      { id: 'cons_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 120, mes_ano: '05/2026', custo_total: 5040.00 },
-      { id: 'cons_2', item: 'Café Especial Arábica', quantidade_consumida: 110, mes_ano: '05/2026', custo_total: 93500.00 },
-      { id: 'cons_3', item: 'Copos Personalizados 350ml', quantidade_consumida: 15000, mes_ano: '05/2026', custo_total: 2700.00 },
-      { id: 'cons_4', item: 'Leite UHT Integral', quantidade_consumida: 95, mes_ano: '05/2026', custo_total: 456.00 },
-      { id: 'cons_5', item: 'Açúcar de Confeiteiro', quantidade_consumida: 25, mes_ano: '05/2026', custo_total: 2125.00 },
-      { id: 'cons_6', item: 'Energético Fusion lata 250ml', quantidade_consumida: 240, mes_ano: '05/2026', custo_total: 840.00 } // Item consumido mas com saldo 0 (Ruptura!)
-    ];
-  });
-
-  const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>(() => {
-    const cached = localStorage.getItem('gestao_precos_data');
-    if (cached) return JSON.parse(cached);
-    return [
-      { id: 'prec_1', item: 'Creatina Monohidratada 250g', fornecedor: 'SupleMax Distribuidora', preco_unitario: 38.50, data_compra: '2026-03-12', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-9811' },
-      { id: 'prec_2', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriCorp S/A', preco_unitario: 41.20, data_compra: '2026-05-05', condicao_pagamento: 'Boleto 28 dias', codigo_pedido: 'PED-10255' },
-      { id: 'prec_3', item: 'Creatina Monohidratada 250g', fornecedor: 'Atacadão Vida Saudável', preco_unitario: 42.00, data_compra: '2026-06-14', condicao_pagamento: 'Pix à Vista', codigo_pedido: 'PED-11048' },
-      { id: 'prec_4', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 820.00, data_compra: '2026-01-10', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-8801' },
-      { id: 'prec_5', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 850.00, data_compra: '2026-06-01', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-10992' },
-      { id: 'prec_6', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.16, data_compra: '2026-02-20', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-9104' },
-      { id: 'prec_7', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.18, data_compra: '2026-05-25', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-10332' },
-      { id: 'prec_8', item: 'Leite UHT Integral', fornecedor: 'Laticínios Gama Corp', preco_unitario: 4.50, data_compra: '2026-04-10', condicao_pagamento: 'Faturado 15 d', codigo_pedido: 'PED-9721' }
-    ];
-  });
-
-  const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>(() => {
-    const cached = localStorage.getItem('gestao_validade_data');
-    if (cached) return JSON.parse(cached);
-    return [
-      { id: 'val_1', item: 'Creatina Monohidratada 250g', lote: 'CR-900', quantidade: 28, validade: '2026-12-18', status: 'Saudável', valor_economico: 1176.00 },
-      { id: 'val_2', item: 'Café Especial Arábica', lote: '104-CAF', quantidade: 45, validade: '2026-08-15', status: 'Atenção', valor_economico: 38250.00 },
-      { id: 'val_3', item: 'Açúcar de Confeiteiro', lote: '2602-X', quantidade: 18, validade: '2026-06-27', status: 'Crítico', valor_economico: 1530.00 },
-      { id: 'val_4', item: 'Leite UHT Integral', lote: '77-LEI', quantidade: 12, validade: '2026-07-05', status: 'Crítico', valor_economico: 57.60 }
-    ];
-  });
-
-  // Salvar alterações locais para persistência no localStorage
+  // Carregar dados estruturados do banco de dados (Supabase ou fallback local)
   useEffect(() => {
-    localStorage.setItem('gestao_estoque_data', JSON.stringify(estoqueData));
-  }, [estoqueData]);
+    async function loadData() {
+      try {
+        setLoadingDb(true);
+        
+        // 1. Estoque
+        const resInv = await fetch(`/api/procurement/inventory?company_id=${companyId}`);
+        if (resInv.ok) {
+          const data = await resInv.json();
+          const mapped = data.map((item: any) => ({
+            ...item,
+            safety_stock: item.safety_stock || Math.max(20, Math.round(item.min_stock / 2)),
+            local: item.local || 'Almoxarifado Principal',
+            frequencia_venda: item.quantidade > 50 ? 'Alta' : 'Média'
+          }));
+          setEstoqueData(mapped);
+        }
+        
+        // 2. Consumo
+        const resCons = await fetch(`/api/procurement/consumption?company_id=${companyId}`);
+        if (resCons.ok) {
+          const data = await resCons.json();
+          const mapped = data.map((item: any) => ({
+            ...item,
+            custo_total: item.custo_total || (item.quantidade_consumida * 10)
+          }));
+          setConsumoData(mapped);
+        }
+
+        // 3. Preços Históricos
+        const resPrices = await fetch(`/api/procurement/price_history?company_id=${companyId}`);
+        if (resPrices.ok) {
+          const data = await resPrices.json();
+          const mapped = data.map((item: any) => ({
+            ...item,
+            condicao_pagamento: item.condicao_pagamento || 'Pix',
+            codigo_pedido: item.codigo_pedido || 'PED-' + Math.floor(Math.random() * 9000 + 1000)
+          }));
+          setHistoricoPrecosData(mapped);
+        }
+
+        // 4. Controle de Validades
+        const resVal = await fetch(`/api/procurement/batch_validity?company_id=${companyId}`);
+        if (resVal.ok) {
+          const data = await resVal.json();
+          const mapped = data.map((item: any) => {
+            const calculatedValDays = Math.round((new Date(item.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+            let calculatedStatus = 'Saudável';
+            if (calculatedValDays < 0) calculatedStatus = 'Vencido';
+            else if (calculatedValDays <= 15) calculatedStatus = 'Crítico';
+            else if (calculatedValDays <= 45) calculatedStatus = 'Atenção';
+            return {
+              ...item,
+              status: calculatedStatus,
+              valor_economico: item.valor_economico || (item.quantidade * 50)
+            };
+          });
+          setValidadeLotesData(mapped);
+        }
+      } catch (err) {
+        console.error("Error loading procurement data from API:", err);
+      } finally {
+        setLoadingDb(false);
+      }
+    }
+    if (companyId) {
+      loadData();
+    }
+  }, [companyId]);
+
+  // Sincronizar alterações de dados com o Banco de Dados (com Debounce para otimização)
+  useEffect(() => {
+    if (loadingDb) return;
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/inventory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, inventory_items: estoqueData })
+        });
+      } catch (e) {
+        console.error("Error saving inventory:", e);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [estoqueData, companyId, loadingDb]);
 
   useEffect(() => {
-    localStorage.setItem('gestao_consumo_data', JSON.stringify(consumoData));
-  }, [consumoData]);
+    if (loadingDb) return;
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/consumption', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, consumption_items: consumoData })
+        });
+      } catch (e) {
+        console.error("Error saving consumption:", e);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [consumoData, companyId, loadingDb]);
 
   useEffect(() => {
-    localStorage.setItem('gestao_precos_data', JSON.stringify(historicoPrecosData));
-  }, [historicoPrecosData]);
+    if (loadingDb) return;
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/price_history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, price_history_items: historicoPrecosData })
+        });
+      } catch (e) {
+        console.error("Error saving price history:", e);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [historicoPrecosData, companyId, loadingDb]);
 
   useEffect(() => {
-    localStorage.setItem('gestao_validade_data', JSON.stringify(validadeLotesData));
-  }, [validadeLotesData]);
+    if (loadingDb) return;
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/batch_validity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, batch_validity_items: validadeLotesData })
+        });
+      } catch (e) {
+        console.error("Error saving batch validity:", e);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [validadeLotesData, companyId, loadingDb]);
 
   // Estados gerais
   const [searchQuery, setSearchQuery] = useState('');
@@ -373,6 +440,28 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const handleDeleteArquivo = (id: string) => {
     setArquivosRegistrados(prev => prev.filter(f => f.id !== id));
     triggerToast('Arquivo descadastrado do sistema.');
+  };
+
+  const isLoteVencendo2Meses = (itemName: string, loteName: string): boolean => {
+    if (!validadeLotesData || validadeLotesData.length === 0) return false;
+    
+    const cleanItem = itemName.replace(/\(USAR\)/g, '').toLowerCase().trim();
+    
+    const vLote = validadeLotesData.find(v => {
+      const cleanVItem = v.item.toLowerCase().trim();
+      const matchItem = cleanVItem.includes(cleanItem) || cleanItem.includes(cleanVItem);
+      const matchLote = v.lote.toLowerCase().trim() === loteName.toLowerCase().trim();
+      return matchItem && matchLote;
+    });
+    
+    if (!vLote) return false;
+    
+    const valDate = new Date(vLote.validade);
+    const now = new Date();
+    const diffTime = valDate.getTime() - now.getTime();
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    
+    return diffDays <= 60;
   };
 
   // Consolidador por Código: Agrupa e soma as quantidades dos itens com mesmo código
@@ -1327,11 +1416,10 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           <table className="w-full text-left text-[11px] bg-white rounded-xl table-fixed">
                             <thead>
                               <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest pb-1 text-left">
-                                <th className="pb-2 w-[12%]">Código</th>
-                                <th className="pb-2 w-[38%]">Insumo / Descrição</th>
-                                <th className="pb-2 w-[30%]">Saldos por Lote</th>
-                                <th className="pb-2 text-right w-[10%]">Físico</th>
-                                <th className="pb-2 text-right w-[10%]">Valor Total</th>
+                                <th className="pb-2 w-[15%]">Código</th>
+                                <th className="pb-2 w-[40%]">Insumo / Descrição</th>
+                                <th className="pb-2 w-[25%]">Lote / Situação</th>
+                                <th className="pb-2 text-right w-[20%]">Quantidade</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
@@ -1340,46 +1428,93 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                   i.item.toLowerCase().includes(searchQuery.toLowerCase()) || 
                                   (i.codigo && i.codigo.includes(searchQuery))
                                 )
-                                .map((row) => (
-                                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-2.5 w-[12%]">
-                                      <span className="font-mono text-indigo-700 font-bold bg-indigo-50/30 px-2 py-0.5 rounded text-[10.5px] border border-indigo-100/50 inline-block">
-                                        {row.codigo || '—'}
-                                      </span>
-                                    </td>
-                                    <td className="py-2.5 font-bold text-slate-900 w-[38%] pr-4">
-                                      {row.item}
-                                      <span className="block font-normal text-[9px] text-slate-400 font-mono uppercase">{row.local}</span>
-                                    </td>
-                                    <td className="py-2.5 w-[30%] pr-4">
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {row.lotsList && row.lotsList.length > 0 ? (
-                                          row.lotsList.map((l, idx) => {
-                                            return (
-                                              <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold uppercase tracking-tight bg-slate-50 border border-slate-200 text-slate-700">
-                                                <span className="opacity-85">{l.lote}:</span> {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {l.unidade}
-                                              </span>
-                                            );
-                                          })
-                                        ) : (
-                                          <span className="px-1.5 py-0.5 bg-slate-50 border border-slate-200 text-slate-700 rounded text-[9.5px] font-mono uppercase font-bold">
-                                            Saldo: {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                .map((row) => {
+                                  let totalQuantidadeSegura = 0;
+                                  let temLoteVencendo = false;
+                                  
+                                  const processedLots = (row.lotsList || []).map(l => {
+                                    const vencendo = isLoteVencendo2Meses(row.item, l.lote);
+                                    if (vencendo) {
+                                      temLoteVencendo = true;
+                                    } else {
+                                      totalQuantidadeSegura += l.quantidade;
+                                    }
+                                    return {
+                                      ...l,
+                                      vencendo
+                                    };
+                                  });
+
+                                  if (!row.lotsList || row.lotsList.length === 0) {
+                                    const vencendo = isLoteVencendo2Meses(row.item, row.lote);
+                                    if (vencendo) {
+                                      temLoteVencendo = true;
+                                    } else {
+                                      totalQuantidadeSegura = row.quantidade;
+                                    }
+                                    processedLots.push({
+                                      lote: row.lote || 'Único',
+                                      situacao: row.situacao_lote || 'LIBERADO',
+                                      quantidade: row.quantidade,
+                                      unidade: row.unidade,
+                                      vencendo
+                                    });
+                                  }
+
+                                  return (
+                                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="py-2.5 w-[15%]">
+                                        <span className="font-mono text-indigo-700 font-bold bg-indigo-50/30 px-2 py-0.5 rounded text-[10.5px] border border-indigo-100/50 inline-block">
+                                          {row.codigo || '—'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 font-bold text-slate-900 w-[40%] pr-4">
+                                        {row.item}
+                                      </td>
+                                      <td className="py-2.5 w-[25%] pr-4">
+                                        <div className="flex flex-col gap-1.5">
+                                          {processedLots.map((l, idx) => (
+                                            <div key={idx} className="flex flex-col gap-0.5 text-[9px] border-l-2 border-slate-100 pl-1.5">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className={`font-mono font-bold ${l.vencendo ? 'text-red-600' : 'text-slate-700'}`}>
+                                                  {l.lote}
+                                                </span>
+                                                <span className={`text-[8px] px-1 rounded font-bold uppercase ${
+                                                  l.situacao === 'BLOQUEADO' ? 'bg-red-100 text-red-800' :
+                                                  l.situacao === 'CERTIFICACAO' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                                                }`}>
+                                                  {l.situacao || 'LIBERADO'}
+                                                </span>
+                                              </div>
+                                              <div className="text-[8.5px] text-slate-500 font-mono">
+                                                Qtd: {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                              </div>
+                                              {l.vencendo && (
+                                                <span className="text-[8px] font-black text-red-600 bg-red-50 px-1 py-0.5 rounded border border-red-100 inline-block w-fit mt-0.5 animate-pulse">
+                                                  ⚠️ Próximo Vencimento
+                                                </span>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 text-right font-black w-[20%]">
+                                        <div className="flex flex-col items-end justify-center">
+                                          <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                                            totalQuantidadeSegura <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
+                                          }`}>
+                                            {totalQuantidadeSegura.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
                                           </span>
-                                        )}
-                                      </div>
-                                    </td>
-                                    <td className="py-2.5 text-right font-black w-[10%]">
-                                      <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
-                                        row.quantidade <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
-                                      }`}>
-                                        {row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
-                                      </span>
-                                    </td>
-                                    <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 w-[10%]">
-                                      R$ {(row.quantidade * row.custo_unitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </td>
-                                  </tr>
-                                ))}
+                                          {temLoteVencendo && (
+                                            <span className="text-[8.5px] text-red-500 font-bold mt-1 bg-red-50 px-1 py-0.5 rounded border border-red-100 block" title="Lotes vencendo nos próximos 2 meses foram excluídos deste saldo">
+                                              Exclui lote a vencer
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>

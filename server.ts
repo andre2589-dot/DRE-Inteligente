@@ -432,6 +432,21 @@ app.get("/api/procurement/quotes", async (req, res) => {
     res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
     return;
   }
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_quotes')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching quotes from Supabase:", err);
+  }
+
   const db = getDb();
   if (!(db as any).quotes) (db as any).quotes = [];
   const list = (db as any).quotes.filter((q: any) => q.company_id === String(company_id));
@@ -445,18 +460,35 @@ app.post("/api/procurement/quotes", async (req, res) => {
     res.status(400).json({ error: "company_id ou array de cotações inválido." });
     return;
   }
-  const db = getDb();
-  if (!(db as any).quotes) (db as any).quotes = [];
-  
-  // Overwrite for this company to allow clean reporting
-  const filtered = (db as any).quotes.filter((q: any) => q.company_id !== String(company_id));
+
   const newQuotes = quotes.map((q: any) => ({
-    ...q,
     id: q.id || `quote_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     company_id: String(company_id),
+    item: q.item,
+    quantidade: Number(q.quantidade) || 0,
+    fornecedor: q.fornecedor || '',
+    preco_cotado: Number(q.preco_cotado) || 0,
+    status: q.status || 'EM ANALISE',
+    link_whatsapp: q.link_whatsapp || '',
     created_at: q.created_at || new Date().toISOString()
   }));
-  
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_quotes').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_quotes').insert(newQuotes);
+      if (!error) {
+        res.json({ success: true, count: newQuotes.length, data: newQuotes });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error inserting quotes into Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).quotes) (db as any).quotes = [];
+  const filtered = (db as any).quotes.filter((q: any) => q.company_id !== String(company_id));
   (db as any).quotes = [...filtered, ...newQuotes];
   saveDb(db);
   res.json({ success: true, count: newQuotes.length, data: newQuotes });
@@ -469,19 +501,60 @@ app.get("/api/procurement/inventory", async (req, res) => {
     res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
     return;
   }
+  
+  const defaults = [
+    { id: 'est_pdf_1', codigo: '01918', item: 'CREATINA (USAR)', lote: 'LIBERADO', quantidade: 1379.0000, unidade: 'G', min_stock: 1000, custo_unitario: 42.00, preco_venda: 89.90, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_2', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'LIBERADO', quantidade: 19.4500, unidade: 'G', min_stock: 30, custo_unitario: 124.50, preco_venda: 198.00, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_3', codigo: '04808', item: 'ACIDO FERULICO (USAR)', lote: 'BLOQUEADO', quantidade: 10.0000, unidade: 'G', min_stock: 30, custo_unitario: 124.50, preco_venda: 198.00, situacao_lote: 'BLOQUEADO', company_id: String(company_id) },
+    { id: 'est_pdf_4', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'LIBERADO', quantidade: 148.2910, unidade: 'ML', min_stock: 300, custo_unitario: 15.80, preco_venda: 32.00, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_5', codigo: '00633', item: 'ACIDO GLICOLICO 70% CONC', lote: 'CERTIFICACAO', quantidade: 1000.0000, unidade: 'ML', min_stock: 300, custo_unitario: 15.80, preco_venda: 32.00, situacao_lote: 'CERTIFICACAO', company_id: String(company_id) },
+    { id: 'est_pdf_6', codigo: '01056', item: '5-HIDROXITRIPTOFANO L (USAR)', lote: 'LIBERADO', quantidade: 313.1750, unidade: 'G', min_stock: 200, custo_unitario: 2.10, preco_venda: 5.40, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_7', codigo: '00448', item: 'ABACATE OLEO (USAR)', lote: 'LIBERADO', quantidade: 483.4061, unidade: 'G', min_stock: 400, custo_unitario: 3.20, preco_venda: 7.90, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_8', codigo: '01109', item: 'ACETILCISTEINA (USAR)', lote: 'LIBERADO', quantidade: 945.0000, unidade: 'G', min_stock: 500, custo_unitario: 0.85, preco_venda: 2.40, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_9', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'LIBERADO', quantidade: 1.6550, unidade: 'G', min_stock: 10, custo_unitario: 340.00, preco_venda: 650.00, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_10', codigo: '04762', item: 'ADAPALENO (USAR)', lote: 'CERTIFICACAO', quantidade: 5.0000, unidade: 'G', min_stock: 10, custo_unitario: 340.00, preco_venda: 650.00, situacao_lote: 'CERTIFICACAO', company_id: String(company_id) },
+    { id: 'est_pdf_11', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'LIBERADO', quantidade: 177.1396, unidade: 'G', min_stock: 500, custo_unitario: 1.10, preco_venda: 3.20, situacao_lote: 'LIBERADO', company_id: String(company_id) },
+    { id: 'est_pdf_12', codigo: '00360', item: 'AEROSIL (USAR)', lote: 'CERTIFICACAO', quantidade: 2000.0000, unidade: 'G', min_stock: 500, custo_unitario: 1.10, preco_venda: 3.20, situacao_lote: 'CERTIFICACAO', company_id: String(company_id) }
+  ];
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_inventory')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        if (data.length === 0) {
+          const dbReadyDefaults = defaults.map(d => ({
+            id: d.id,
+            codigo: d.codigo,
+            item: d.item,
+            unidade: d.unidade,
+            quantidade: d.quantidade,
+            lote: d.lote,
+            situacao_lote: d.situacao_lote,
+            custo_unitario: d.custo_unitario,
+            preco_venda: d.preco_venda,
+            min_stock: d.min_stock,
+            company_id: d.company_id,
+            created_at: new Date().toISOString()
+          }));
+          await supabase.from('procurement_inventory').insert(dbReadyDefaults);
+          res.json(dbReadyDefaults);
+          return;
+        }
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching inventory from Supabase:", err);
+  }
+
   const db = getDb();
   if (!(db as any).inventory_items) (db as any).inventory_items = [];
   const list = (db as any).inventory_items.filter((item: any) => item.company_id === String(company_id));
-  
-  // Pre-seed some realistic supply chain materials so the module looks incredible out of the box!
   if (list.length === 0) {
-    const defaults = [
-      { id: 'inv_1', item_name: 'Café Especial Torrado (Saca 60kg)', current_stock: 4, min_stock: 12, avg_consumption: 15, lead_time: 15, company_id: String(company_id) },
-      { id: 'inv_2', item_name: 'Copos Descartáveis Personalizados (Cxs)', current_stock: 45, min_stock: 40, avg_consumption: 60, lead_time: 20, company_id: String(company_id) },
-      { id: 'inv_3', item_name: 'Açúcar de Confeiteiro (Fardos 20kg)', current_stock: 15, min_stock: 10, avg_consumption: 12, lead_time: 7, company_id: String(company_id) },
-      { id: 'inv_4', item_name: 'Leite Integral UHT (Caixas de 12L)', current_stock: 35, min_stock: 30, avg_consumption: 50, lead_time: 5, company_id: String(company_id) },
-      { id: 'inv_5', item_name: 'Embalagens Take-Away (Unidades)', current_stock: 250, min_stock: 800, avg_consumption: 1000, lead_time: 14, company_id: String(company_id) }
-    ];
     (db as any).inventory_items = [...(db as any).inventory_items, ...defaults];
     saveDb(db);
     res.json(defaults);
@@ -497,19 +570,326 @@ app.post("/api/procurement/inventory", async (req, res) => {
     res.status(400).json({ error: "company_id ou array de estoque inválido." });
     return;
   }
-  const db = getDb();
-  if (!(db as any).inventory_items) (db as any).inventory_items = [];
-  
-  const filtered = (db as any).inventory_items.filter((item: any) => item.company_id !== String(company_id));
-  const newItems = inventory_items.map((item: any) => ({
-    ...item,
+
+  const cleanItems = inventory_items.map((item: any) => ({
     id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    company_id: String(company_id)
+    company_id: String(company_id),
+    codigo: item.codigo || null,
+    item: item.item,
+    unidade: item.unidade || 'G',
+    quantidade: Number(item.quantidade) || 0,
+    lote: item.lote || 'LIBERADO',
+    situacao_lote: item.situacao_lote || 'LIBERADO',
+    custo_unitario: Number(item.custo_unitario) || 0,
+    preco_venda: Number(item.preco_venda) || 0,
+    min_stock: Number(item.min_stock) || 0,
+    created_at: item.created_at || new Date().toISOString()
   }));
-  
-  (db as any).inventory_items = [...filtered, ...newItems];
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_inventory').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_inventory').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting inventory to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).inventory_items || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).inventory_items = [...filtered, ...cleanItems];
   saveDb(db);
-  res.json({ success: true, count: newItems.length, data: newItems });
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
+app.get("/api/procurement/consumption", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  const defaults = [
+    { id: 'cons_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 120, mes_ano: '05/2026', company_id: String(company_id) },
+    { id: 'cons_2', item: 'Café Especial Arábica', quantidade_consumida: 110, mes_ano: '05/2026', company_id: String(company_id) },
+    { id: 'cons_3', item: 'Copos Personalizados 350ml', quantidade_consumida: 15000, mes_ano: '05/2026', company_id: String(company_id) },
+    { id: 'cons_4', item: 'Leite UHT Integral', quantidade_consumida: 95, mes_ano: '05/2026', company_id: String(company_id) },
+    { id: 'cons_5', item: 'Açúcar de Confeiteiro', quantidade_consumida: 25, mes_ano: '05/2026', company_id: String(company_id) },
+    { id: 'cons_6', item: 'Energético Fusion lata 250ml', quantidade_consumida: 240, mes_ano: '05/2026', company_id: String(company_id) }
+  ];
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_consumption')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        if (data.length === 0) {
+          const dbReadyDefaults = defaults.map(d => ({
+            id: d.id,
+            item: d.item,
+            quantidade_consumida: d.quantidade_consumida,
+            mes_ano: d.mes_ano,
+            company_id: d.company_id,
+            created_at: new Date().toISOString()
+          }));
+          await supabase.from('procurement_consumption').insert(dbReadyDefaults);
+          res.json(dbReadyDefaults);
+          return;
+        }
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching consumption from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).consumption) (db as any).consumption = [];
+  const list = (db as any).consumption.filter((c: any) => c.company_id === String(company_id));
+  if (list.length === 0) {
+    (db as any).consumption = [...(db as any).consumption, ...defaults];
+    saveDb(db);
+    res.json(defaults);
+    return;
+  }
+  res.json(list);
+});
+
+app.post("/api/procurement/consumption", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, consumption_items } = req.body;
+  if (!company_id || !Array.isArray(consumption_items)) {
+    res.status(400).json({ error: "company_id ou array de consumo inválido." });
+    return;
+  }
+
+  const cleanItems = consumption_items.map((item: any) => ({
+    id: item.id || `cons_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id),
+    item: item.item,
+    quantidade_consumida: Number(item.quantidade_consumida) || 0,
+    mes_ano: item.mes_ano || '06/2026',
+    created_at: item.created_at || new Date().toISOString()
+  }));
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_consumption').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_consumption').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting consumption to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).consumption || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).consumption = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
+app.get("/api/procurement/price_history", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  const defaults = [
+    { id: 'prec_1', item: 'Creatina Monohidratada 250g', fornecedor: 'SupleMax Distribuidora', preco_unitario: 38.50, data_compra: '2026-03-12', company_id: String(company_id) },
+    { id: 'prec_2', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriCorp S/A', preco_unitario: 41.20, data_compra: '2026-05-05', company_id: String(company_id) },
+    { id: 'prec_3', item: 'Creatina Monohidratada 250g', fornecedor: 'Atacadão Vida Saudável', preco_unitario: 42.00, data_compra: '2026-06-14', company_id: String(company_id) },
+    { id: 'prec_4', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 820.00, data_compra: '2026-01-10', company_id: String(company_id) },
+    { id: 'prec_5', item: 'Café Especial Arábica', fornecedor: 'Parceiro Alpha Grãos', preco_unitario: 850.00, data_compra: '2026-06-01', company_id: String(company_id) },
+    { id: 'prec_6', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.16, data_compra: '2026-02-20', company_id: String(company_id) },
+    { id: 'prec_7', item: 'Copos Personalizados 350ml', fornecedor: 'Beta Copos Descartáveis', preco_unitario: 0.18, data_compra: '2026-05-25', company_id: String(company_id) },
+    { id: 'prec_8', item: 'Leite UHT Integral', fornecedor: 'Laticínios Gama Corp', preco_unitario: 4.50, data_compra: '2026-04-10', company_id: String(company_id) }
+  ];
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_price_history')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        if (data.length === 0) {
+          const dbReadyDefaults = defaults.map(d => ({
+            id: d.id,
+            item: d.item,
+            fornecedor: d.fornecedor,
+            preco_unitario: d.preco_unitario,
+            data_compra: d.data_compra,
+            company_id: d.company_id,
+            created_at: new Date().toISOString()
+          }));
+          await supabase.from('procurement_price_history').insert(dbReadyDefaults);
+          res.json(dbReadyDefaults);
+          return;
+        }
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching price history from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).price_history) (db as any).price_history = [];
+  const list = (db as any).price_history.filter((p: any) => p.company_id === String(company_id));
+  if (list.length === 0) {
+    (db as any).price_history = [...(db as any).price_history, ...defaults];
+    saveDb(db);
+    res.json(defaults);
+    return;
+  }
+  res.json(list);
+});
+
+app.post("/api/procurement/price_history", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, price_history_items } = req.body;
+  if (!company_id || !Array.isArray(price_history_items)) {
+    res.status(400).json({ error: "company_id ou array de histórico de preços inválido." });
+    return;
+  }
+
+  const cleanItems = price_history_items.map((item: any) => ({
+    id: item.id || `prec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id),
+    item: item.item,
+    fornecedor: item.fornecedor || 'Fornecedor Avulso',
+    preco_unitario: Number(item.preco_unitario) || 0,
+    data_compra: item.data_compra || new Date().toISOString().split('T')[0],
+    created_at: item.created_at || new Date().toISOString()
+  }));
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_price_history').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_price_history').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting price history to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).price_history || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).price_history = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
+app.get("/api/procurement/batch_validity", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  const defaults = [
+    { id: 'val_1', item: 'Creatina Monohidratada 250g', lote: 'CR-900', quantidade: 28, validade: '2026-12-18', company_id: String(company_id) },
+    { id: 'val_2', item: 'Café Especial Arábica', lote: '104-CAF', quantidade: 45, validade: '2026-08-15', company_id: String(company_id) },
+    { id: 'val_3', item: 'Açúcar de Confeiteiro', lote: '2602-X', quantidade: 18, validade: '2026-06-27', company_id: String(company_id) },
+    { id: 'val_4', item: 'Leite UHT Integral', lote: '77-LEI', quantidade: 12, validade: '2026-07-05', company_id: String(company_id) }
+  ];
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_batch_validity')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        if (data.length === 0) {
+          const dbReadyDefaults = defaults.map(d => ({
+            id: d.id,
+            item: d.item,
+            lote: d.lote,
+            quantidade: d.quantidade,
+            validade: d.validade,
+            company_id: d.company_id,
+            created_at: new Date().toISOString()
+          }));
+          await supabase.from('procurement_batch_validity').insert(dbReadyDefaults);
+          res.json(dbReadyDefaults);
+          return;
+        }
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching batch validity from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).batch_validity) (db as any).batch_validity = [];
+  const list = (db as any).batch_validity.filter((b: any) => b.company_id === String(company_id));
+  if (list.length === 0) {
+    (db as any).batch_validity = [...(db as any).batch_validity, ...defaults];
+    saveDb(db);
+    res.json(defaults);
+    return;
+  }
+  res.json(list);
+});
+
+app.post("/api/procurement/batch_validity", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, batch_validity_items } = req.body;
+  if (!company_id || !Array.isArray(batch_validity_items)) {
+    res.status(400).json({ error: "company_id ou array de validade de lotes inválido." });
+    return;
+  }
+
+  const cleanItems = batch_validity_items.map((item: any) => ({
+    id: item.id || `val_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id),
+    item: item.item,
+    lote: item.lote || 'LIBERADO',
+    quantidade: Number(item.quantidade) || 0,
+    validade: item.validade || new Date().toISOString().split('T')[0],
+    created_at: item.created_at || new Date().toISOString()
+  }));
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_batch_validity').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_batch_validity').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting batch validity to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).batch_validity || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).batch_validity = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
 });
 
 
