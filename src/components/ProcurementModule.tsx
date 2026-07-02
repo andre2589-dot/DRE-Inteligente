@@ -153,12 +153,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [arquivosRegistrados, setArquivosRegistrados] = useState<RegistrosArquivos[]>(() => {
     const cached = localStorage.getItem('gestao_arquivos_registrados');
     if (cached) return JSON.parse(cached);
-    return [
-      { id: 'arq_1', nome: 'saldo_estoque_geral_2026.xlsx', tamanho: '54 KB', tipo: 'estoque', enviado_em: '21/06/2026 14:10', colunas_detectadas: ['Descrição do Item', 'Número do Lote', 'Quantidade', 'Preço de Custo', 'Preço de Venda'] },
-      { id: 'arq_2', nome: 'historico_consumo_mensal_vendas.xlsx', tamanho: '42 KB', tipo: 'consumo', enviado_em: '21/06/2026 14:15', colunas_detectadas: ['Descrição do Item', 'Mês/Ano', 'Quantidade Consumida', 'Custo Total'] },
-      { id: 'arq_3', nome: 'faturas_compras_suplementos_abc.xlsx', tamanho: '112 KB', tipo: 'historico_precos', enviado_em: '21/06/2026 14:24', colunas_detectadas: ['Descrição do Item', 'Nome do Fornecedor', 'Preço Pago', 'Data da Nota'] },
-      { id: 'arq_4', nome: 'lotes_validade_vigentes.pdf', tamanho: '1.2 MB', tipo: 'validade', enviado_em: '21/06/2026 14:32', colunas_detectadas: ['Descrição do Item', 'Número do Lote', 'Vencimento', 'Quantidade Disponível'] }
-    ];
+    return [];
   });
 
   // Armazenar os arquivos no localStorage
@@ -314,6 +309,37 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [uploadLoading, setUploadLoading] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isChatExpanded, setIsChatExpanded] = useState(true);
+
+  const handleClearDatabase = async () => {
+    if (!window.confirm("Atenção: Isso irá apagar definitivamente todos os dados de estoque, consumo, preços históricos, controle de validades e cotações cadastrados para esta empresa para iniciar uma base limpa. Deseja prosseguir?")) {
+      return;
+    }
+    try {
+      setLoadingDb(true);
+      const res = await fetch('/api/procurement/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: companyId })
+      });
+      if (res.ok) {
+        setEstoqueData([]);
+        setConsumoData([]);
+        setHistoricoPrecosData([]);
+        setValidadeLotesData([]);
+        setArquivosRegistrados([]);
+        localStorage.removeItem('gestao_arquivos_registrados');
+        setToastMessage("Módulo Compras Inteligentes zerado com sucesso! Pronto para inserção real.");
+        setTimeout(() => setToastMessage(null), 4500);
+      } else {
+        alert("Erro ao tentar limpar os dados.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao tentar limpar os dados.");
+    } finally {
+      setLoadingDb(false);
+    }
+  };
 
   // Consolidação automática por código (fazer a soma pelos códigos, caso conste mais vezes)
   const [consolidatedByCode, setConsolidatedByCode] = useState<boolean>(true);
