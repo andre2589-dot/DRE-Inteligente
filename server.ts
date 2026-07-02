@@ -320,21 +320,23 @@ app.post("/api/gemini/chat", async (req, res) => {
       
       if (isProcurement) {
         if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
-          simulatedResponse = "Olá! Como seu Diretor Sênior de Compras e Supply Chain, estou pronto para gerenciar suas cotações, otimizar lead times e reduzir custos de aquisição. Em qual desafio de suprimentos ou negociação posso te apoiar hoje?";
+          simulatedResponse = "Olá! Sou o seu Assistente de Compras. Em qual cotação ou reposição de estoque posso te ajudar hoje?";
         } else if (lowerPrompt.includes("estoque") || lowerPrompt.includes("comprar") || lowerPrompt.includes("ruptura") || lowerPrompt.includes("reposição")) {
-          simulatedResponse = "Analisei seu painel de suprimentos e notei um risco crítico de ruptura:\n\n1. **Café Especial Torrado** está com estoque em **4 unidades**, sendo que o mínimo estipulado é **12**. Recomendo comprar **15.5 unidades** para suprir a demanda.\n2. **Embalagens Take-Away** está crítico com **250 unidades** de estoque atual frente ao estoque mínimo de **800**. Demanda uma compra urgente de **1016 unidades** baseado no lead time de 14 dias.\n\nQuer que eu crie uma simulação de envio de pedido de cotação para nossos fornecedores parceiros?";
+          simulatedResponse = "Atualmente há 2 itens abaixo do estoque mínimo:\n1. **Café Especial Torrado**: 4 unidades (mínimo 12). Sugestão de compra: 15.5 un.\n2. **Embalagens Take-Away**: 250 unidades (mínimo 800). Sugestão de compra: 1016 un.";
         } else if (lowerPrompt.includes("cotar") || lowerPrompt.includes("cotação") || lowerPrompt.includes("economia") || lowerPrompt.includes("saving")) {
-          simulatedResponse = "Sua matriz comparativa demonstra que o **Fornecedor A** costuma oferecer os melhores preços unitários, mas o **Fornecedor B** bate o prazo (Lead Time de 5 dias contra 15 dias). \n\nAnalisando o lote econômico: para itens de alta frequência, vale a pena segmentar e manter 70% do volume com o Fornecedor A, e acionar o Fornecedor B apenas em pedidos emergenciais para economizar em capital de giro. Isso trará um **Saving adicional de até 8%**.";
+          simulatedResponse = "Análise rápida: Fornecedor A tem melhores preços. Fornecedor B tem menor lead time (5 contra 15 dias). Comprar em lote com o Fornecedor A pode gerar economia de até 8%.";
         } else {
-          simulatedResponse = "Compreendido. Revisando seus indicadores de Supply Chain: o seu **Lead Time Médio** atual é de **12.2 dias** e o **Saving Acumulado** nas cotações registradas está em torno de **12.5%**. Recomendo fazermos uma rodada de compras consolidadas ao final do mês para aumentar nossa margem bruta (DRE). Gostaria que eu simulasse os novos preços?";
+          simulatedResponse = "Seu Lead Time Médio atual é de **12.2 dias** e o Saving Acumulado está em **12.5%**. Qual item ou cotação deseja detalhar?";
         }
       } else {
         if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
-          simulatedResponse = "Olá! Como seu CFO Virtual, estou aqui para analisarmos juntos os números da sua empresa. Como posso ajudar no diagnóstico de hoje?";
+          simulatedResponse = "Olá! Sou seu CFO Virtual. Em que posso ajudar com a análise financeira hoje?";
+        } else if (lowerPrompt.includes("contas") || lowerPrompt.includes("plano") || lowerPrompt.includes("cadastradas")) {
+          simulatedResponse = "Atualmente, você tem exatamente **74 contas cadastradas** no seu Plano de Contas, distribuídas entre custos diretos, impostos, pessoal e despesas operacionais.";
         } else if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
-          simulatedResponse = "Analisei aqui e notei que seu lucro teve uma compressão expressiva. O principal motivo foi o aumento em 'Marketing', que saltou para R$ 93.000. Isso consumiu 26% da sua receita, o que é um sinal crítico para sua margem EBITDA.\n\nMinha recomendação como seu CFO: precisamos validar se esse investimento trouxe um aumento proporcional nas vendas. Caso contrário, devemos recuar para o teto de R$ 40.000 para preservar o caixa.";
+          simulatedResponse = "Seu lucro caiu em maio devido ao aumento de despesas de Marketing para R$ 93.000 (consumindo 26% da receita). Recomendo reduzir para R$ 40.000 para restabelecer a margem.";
         } else {
-          simulatedResponse = "Verificando os dados agora... Sua receita está estável, mas os custos operacionais (OPEX) estão subindo acima do previsto. Como seu consultor, recomendo revisarmos as despesas administrativas. Quer que eu detalhe onde podemos otimizar sem ferir a operação?";
+          simulatedResponse = "A receita está estável, mas as despesas operacionais subiram 12% acima do previsto. Qual indicador ou conta específica gostaria de analisar?";
         }
       }
 
@@ -346,19 +348,17 @@ app.post("/api/gemini/chat", async (req, res) => {
 
     if (isProcurement) {
       contextPrompt = `
-Você é o "Gerente Sênior de Compras, Sourcing e Supply Chain", atuando com altíssima experiência técnica em cadeias de suprimentos de micro, pequenas e médias empresas. Sua missão é apoiar de forma assertiva e consultiva.
+Você é o "Gerente Sênior de Compras, Sourcing e Supply Chain". Sua missão é apoiar o usuário de forma assertiva, técnica e extremamente objetiva.
 
-DIRETRIZES DE PERSONALIDADE E COMPORTAMENTO:
-1. SEJA COOPERATIVO, HUMANO E ANALÍTICO: Fale com proximidade sobre o negócio. Dê as boas-vindas com entusiasmo, tratando o proprietário como parceiro.
-2. FOCO EM EFICIÊNCIA DE CAIXA: Em compras, o caixa é rei. Analise se vale a pena comprar volumes maiores para ter desconto (saving), pesando o espaço de estoque e custo de capital de giro.
-3. ENTREGUE ESTRATÉGIAS DE SUPRIMENTOS: Interprete os indicadores (Giro de estoque, Lead time, Saving).
-4. AUXILIE COM COTAÇÕES: Diga qual fornecedor é melhor financeiramente ou por lead time para cada item.
+DIRETRIZES DE COMPORTAMENTO:
+1. SEJA ALTAMENTE OBJETIVO E DIRETO AO PONTO: Responda exatamente à pergunta do usuário na primeira frase. Evite enrolação, introduções amigáveis excessivas ou conversas fiadas não solicitadas.
+2. RESPOSTAS SINTÉTICAS E CURTAS: Vá direto aos dados e insights principais. Se o usuário perguntar algo simples, responda com simplicidade e rapidez.
+3. ADICIONE CONTEXTO SÓ SE SOLICITADO: Não forneça análises complexas a menos que o usuário peça um diagnóstico profundo.
 
 DADOS ATUAIS DE SUPPLY CHAIN (COTAÇÕES E REPOSIÇÃO):
 ${JSON.stringify(procurementContext, null, 2)}
 
 CONEXÃO FINANCEIRA DRE:
-- Lembre-se que as compras afetam diretamente o CMV (Custos de Matéria-Prima e Produção) do faturamento da empresa.
 ${JSON.stringify(dreContext, null, 2)}
 
 ${attachedContext ? `DADOS DO ARQUIVO ANEXO:\n${attachedContext}\n` : ''}
@@ -371,19 +371,13 @@ ${prompt}
 `;
     } else {
       contextPrompt = `
-Você é o "CFO Virtual Inteligente", agindo como um Diretor Financeiro e Estratégico (CFO/CEO) de alta senioridade. Sua missão é ser o parceiro estratégico do dono da empresa "${dreContext?.companyName || 'Empresa Ativa'}".
+Você é o "CFO Virtual Inteligente", agindo como um Diretor Financeiro e Estratégico (CFO/CEO) de alta senioridade. Sua missão é responder às dúvidas do usuário com precisão absoluta e máxima objetividade.
 
-DIRETRIZES DE PERSONALIDADE E COMPORTAMENTO:
-1. SEJA HUMANO E PESSOAL: Não responda como um robô que apenas lista fatos. Se o usuário disser "Bom dia!", responda com "Bom dia! Como está a operação hoje?". Trate o usuário pelo nome se souber, e fale como alguém que se importa com o sucesso dele.
-2. TOM EXECUTIVO E REALISTA: Suas falas devem ser profissionais, porém diretas. Não prometa milagres. Dê retornos consistentes, baseados na realidade dos números.
-3. ESTRUTURA DE RESPOSTA: Evite listas de tópicos secas se não forem necessárias. Prefira uma conversa fluída. Em vez de apenas listar "Receita: X", diga "Notei que nossa receita este mês ficou em X, o que representa um desafio considerando nosso custo de Y...".
-4. ANALISTA CRÍTICO: Não apenas relate dados. Interprete-os. Critique desperdícios (ex: OPEX subindo sem motivo) e sugira otimizações.
-5. MEMÓRIA E CONEXÃO: Se o usuário estiver em uma página específica ou perguntar sobre algo que acabou de ver, conecte esses pontos.
-
-REGRAS TÉCNICAS:
-- NUNCA use IDs técnicos (ex: opex_people) no texto final. Use nomes reais (Folha de Pagamento).
-- Use R$ para todos os valores monetários.
-- Se houver arquivos anexos (${attachedContext ? 'SIM' : 'NÃO'}), use os dados deles para dar profundidade.
+DIRETRIZES DE COMPORTAMENTO:
+1. SEJA EXTREMAMENTE OBJETIVO E DIRETO AO PONTO: Responda à pergunta do usuário de forma concisa, direta e precisa na primeira frase de sua resposta. Sem rodeios ou conversa fiada.
+2. SEM CONVERSA FIADA OU SAUDAÇÕES PROLIXAS: Evite introduções longas como "Olá! Como vão as coisas?", "Como estão os desafios?", "É muito bom falar com você novamente!", etc. Evite conselhos estratégicos extensos ou análises profundas não solicitadas, focando puramente no que foi perguntado.
+3. RESPOSTAS SINTÉTICAS: Prefira parágrafos curtos ou listas simples e limpas quando apropriado. Vá direto aos números e fatos reais do contexto financeiro.
+4. REGRAS TÉCNICAS: NUNCA use IDs técnicos (ex: opex_people) no texto final (use nomes amigáveis como "Pessoal"). Use R$ para todos os valores monetários.
 
 CONTEXTO FINANCEIRO ATUAL:
 ${JSON.stringify(dreContext, null, 2)}
