@@ -29,7 +29,12 @@ import {
   ChevronDown,
   Settings,
   Filter,
-  HelpCircle
+  HelpCircle,
+  Database,
+  Server,
+  Link2,
+  Play,
+  Terminal
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -128,8 +133,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   // Aba de dados selecionada na Gestão de Compras ('estoque' | 'consumo' | 'historico_precos' | 'validade')
   const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade'>('estoque');
 
-  // Controle de Mapeador de Colunas Personalizado
-  const [isMapperOpen, setIsMapperOpen] = useState(false);
+  // Controle de Mapeador de Colunas Personalizado e Pré-visualização Interativa
+  const [pendingUpload, setPendingUpload] = useState<{
+    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade';
+    fileName: string;
+    fileSize: string;
+    detectedHeaders: string[];
+    suggestedMapping: Record<string, string>;
+    previewRows: Record<string, any>[];
+  } | null>(null);
+
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>(() => {
     const cached = localStorage.getItem('gestao_colunas_mapping');
     if (cached) return JSON.parse(cached);
@@ -341,14 +354,140 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     }
   };
 
+  // Inicia o processo de mapeamento e pré-visualização ao anexar arquivo
+  const initiateFileUpload = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade', fileName: string) => {
+    let detectedHeaders: string[] = [];
+    let previewRows: any[] = [];
+    let suggestedMapping: Record<string, string> = {};
+
+    if (tipo === 'estoque') {
+      detectedHeaders = ['Código Produto', 'Descrição do Item', 'Número do Lote', 'Saldo Físico', 'Custo Médio R$', 'Preço Sugerido R$', 'Unidade'];
+      previewRows = [
+        { 'Código Produto': '01918', 'Descrição do Item': 'CREATINA MONOHIDRATADA 250G', 'Número do Lote': 'CR-905', 'Saldo Físico': '65', 'Custo Médio R$': '41.50', 'Preço Sugerido R$': '89.90', 'Unidade': 'potes' },
+        { 'Código Produto': '04808', 'Descrição do Item': 'BCAA ULTRA PURE', 'Número do Lote': 'BC-11', 'Saldo Físico': '90', 'Custo Médio R$': '28.90', 'Preço Sugerido R$': '59.90', 'Unidade': 'potes' },
+        { 'Código Produto': '00633', 'Descrição do Item': 'WHEY PROTEIN ISOLADO 1KG', 'Número do Lote': 'WP-742', 'Saldo Físico': '110', 'Custo Médio R$': '119.00', 'Preço Sugerido R$': '249.90', 'Unidade': 'potes' },
+      ];
+      suggestedMapping = {
+        itemCol: 'Descrição do Item',
+        qtyCol: 'Saldo Físico',
+        loteCol: 'Número do Lote',
+        costCol: 'Custo Médio R$',
+        precoVendaCol: 'Preço Sugerido R$',
+        codigoCol: 'Código Produto',
+        unidadeCol: 'Unidade'
+      };
+    } else if (tipo === 'consumo') {
+      detectedHeaders = ['Nome do Produto', 'Mes/Ano Referência', 'Qtd Saídas Vendas', 'Custo Acumulado R$'];
+      previewRows = [
+        { 'Nome do Produto': 'Creatina Monohidratada 250g', 'Mes/Ano Referência': '06/2026', 'Qtd Saídas Vendas': '140', 'Custo Acumulado R$': '5880.00' },
+        { 'Nome do Produto': 'BCAA Ultra Pure', 'Mes/Ano Referência': '06/2026', 'Qtd Saídas Vendas': '55', 'Custo Acumulado R$': '1589.50' },
+        { 'Nome do Produto': 'Whey Protein Isolado 1kg', 'Mes/Ano Referência': '06/2026', 'Qtd Saídas Vendas': '125', 'Custo Acumulado R$': '14875.00' }
+      ];
+      suggestedMapping = {
+        itemCol: 'Nome do Produto',
+        qtyCol: 'Qtd Saídas Vendas',
+        mesAnoCol: 'Mes/Ano Referência',
+        custoTotalCol: 'Custo Acumulado R$'
+      };
+    } else if (tipo === 'historico_precos') {
+      detectedHeaders = ['Descrição Comercial', 'Fornecedor Credenciado', 'Valor Unitário Pago', 'Data Emissão NF', 'Condição de Pgto', 'Nº Faturamento'];
+      previewRows = [
+        { 'Descrição Comercial': 'Creatina Monohidratada 250g', 'Fornecedor Credenciado': 'NutriAtacado Brasil', 'Valor Unitário Pago': '39.90', 'Data Emissão NF': '2026-06-19', 'Condição de Pgto': 'Boleto 45 dias', 'Nº Faturamento': 'PED-11582' },
+        { 'Descrição Comercial': 'Whey Protein Isolado 1kg', 'Fornecedor Credenciado': 'SupleMax Distribuidora', 'Valor Unitário Pago': '115.00', 'Data Emissão NF': '2026-06-18', 'Condição de Pgto': 'Boleto 30 dias', 'Nº Faturamento': 'PED-11579' },
+        { 'Descrição Comercial': 'BCAA Ultra Pure', 'Fornecedor Credenciado': 'Globo Suplementos', 'Valor Unitário Pago': '27.50', 'Data Emissão NF': '2026-06-17', 'Condição de Pgto': 'Pix', 'Nº Faturamento': 'PED-11511' }
+      ];
+      suggestedMapping = {
+        itemCol: 'Descrição Comercial',
+        fornecedorCol: 'Fornecedor Credenciado',
+        precoUnitarioCol: 'Valor Unitário Pago',
+        dataCompraCol: 'Data Emissão NF',
+        condicaoPgtoCol: 'Condição de Pgto',
+        codigoPedidoCol: 'Nº Faturamento'
+      };
+    } else if (tipo === 'validade') {
+      detectedHeaders = ['Matéria Prima / Lote', 'ID Identificador', 'Volume de Lote', 'Vencimento Final'];
+      previewRows = [
+        { 'Matéria Prima / Lote': 'Creatina Monohidratada 250g', 'ID Identificador': 'CR-905', 'Volume de Lote': '65', 'Vencimento Final': '2027-02-14' },
+        { 'Matéria Prima / Lote': 'BCAA Ultra Pure', 'ID Identificador': 'BC-11', 'Volume de Lote': '90', 'Vencimento Final': '2026-07-28' },
+        { 'Matéria Prima / Lote': 'Whey Protein Isolado 1kg', 'ID Identificador': 'WP-742', 'Volume de Lote': '110', 'Vencimento Final': '2026-06-25' }
+      ];
+      suggestedMapping = {
+        itemCol: 'Matéria Prima / Lote',
+        loteCol: 'ID Identificador',
+        qtyCol: 'Volume de Lote',
+        validadeCol: 'Vencimento Final'
+      };
+    }
+
+    setPendingUpload({
+      tipo,
+      fileName,
+      fileSize: fileName.endsWith('.pdf') ? '1.2 MB' : '48 KB',
+      detectedHeaders,
+      suggestedMapping,
+      previewRows
+    });
+  };
+
+  const confirmAndImportPendingUpload = () => {
+    if (!pendingUpload) return;
+    const { tipo, fileName, fileSize } = pendingUpload;
+
+    if (tipo === 'estoque') {
+      const baseMockData = [
+        { id: 'est_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, unidade: 'potes', min_stock: 60, safety_stock: 20, custo_unitario: 41.50, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta', codigo: '01918', situacao_lote: 'LIBERADO' },
+        { id: 'est_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, unidade: 'potes', min_stock: 40, safety_stock: 15, custo_unitario: 28.90, preco_venda: 59.90, local: 'Almoxarifado', frequencia_venda: 'Média', codigo: '04808', situacao_lote: 'LIBERADO' },
+        { id: 'est_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, unidade: 'potes', min_stock: 80, safety_stock: 25, custo_unitario: 119.00, preco_venda: 249.90, local: 'Câmara Fria', frequencia_venda: 'Alta', codigo: '00633', situacao_lote: 'LIBERADO' }
+      ];
+      setEstoqueData(prev => {
+        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
+        return [...filtered, ...baseMockData];
+      });
+    } else if (tipo === 'consumo') {
+      const baseMockData = [
+        { id: 'cons_up_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
+        { id: 'cons_up_2', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
+        { id: 'cons_up_3', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 }
+      ];
+      setConsumoData(prev => {
+        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
+        return [...filtered, ...baseMockData];
+      });
+    } else if (tipo === 'historico_precos') {
+      const baseMockData = [
+        { id: 'pre_up_1', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriAtacado Brasil', preco_unitario: 39.90, data_compra: '2026-06-19', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-11582' },
+        { id: 'pre_up_2', item: 'Whey Protein Isolado 1kg', fornecedor: 'SupleMax Distribuidora', preco_unitario: 115.00, data_compra: '2026-06-18', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-11579' },
+        { id: 'pre_up_3', item: 'BCAA Ultra Pure', fornecedor: 'Globo Suplementos', preco_unitario: 27.50, data_compra: '2026-06-17', condicao_pagamento: 'Pix', codigo_pedido: 'PED-11511' }
+      ];
+      setHistoricoPrecosData(prev => [...prev, ...baseMockData]);
+    } else if (tipo === 'validade') {
+      const baseMockData = [
+        { id: 'val_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, validade: '2027-02-14', status: 'Saudável', valor_economico: 2697.50 },
+        { id: 'val_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, validade: '2026-07-28', status: 'Atenção', valor_economico: 2601.00 },
+        { id: 'val_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, validade: '2026-06-25', status: 'Crítico', valor_economico: 13090.00 }
+      ];
+      setValidadeLotesData(prev => {
+        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
+        return [...filtered, ...baseMockData];
+      });
+    }
+
+    const registeredFile: RegistrosArquivos = {
+      id: 'file_' + Date.now(),
+      nome: fileName,
+      tamanho: fileSize,
+      tipo,
+      enviado_em: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      colunas_detectadas: Object.values(pendingUpload.suggestedMapping).filter(Boolean) as string[]
+    };
+
+    setArquivosRegistrados(prev => [registeredFile, ...prev]);
+    setPendingUpload(null);
+    triggerToast(`Sucesso! Arquivo "${fileName}" mapeado e adicionado ao repositório.`);
+  };
+
   // Consolidação automática por código (fazer a soma pelos códigos, caso conste mais vezes)
   const [consolidatedByCode, setConsolidatedByCode] = useState<boolean>(true);
-
-  // Estados para inserção manual de novos registros
-  const [formEstoque, setFormEstoque] = useState({ codigo: '', item: '', lote: '', quantidade: 0, unidade: 'G', min_stock: 50, safety_stock: 20, custo_unitario: 10.00, preco_venda: 20.00, local: 'Câmara Fria', situacao_lote: 'LIBERADO' });
-  const [formConsumo, setFormConsumo] = useState({ item: '', quantidade_consumida: 0, mes_ano: '06/2026', custo_total: 0 });
-  const [formPrecos, setFormPrecos] = useState({ item: '', fornecedor: '', preco_unitario: 0, data_compra: '', condicao_pagamento: '', codigo_pedido: '' });
-  const [formValidade, setFormValidade] = useState({ item: '', lote: '', quantidade: 0, validade: '' });
 
   // Estados do Chatbot IA Inteligente
   const [chatInput, setChatInput] = useState('');
@@ -372,75 +511,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Upload simulado de planilhas para o repositório
-  const handleFileUploadSimulated = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade', fileName: string) => {
-    setUploadLoading(tipo);
-    setTimeout(() => {
-      let headersDetected: string[] = [];
-      let sizeText = '32 KB';
-      
-      if (tipo === 'estoque') {
-        const newData: EstoqueItem[] = [
-          { id: 'est_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, unidade: 'potes', min_stock: 60, safety_stock: 20, custo_unitario: 41.50, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta' },
-          { id: 'est_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, unidade: 'potes', min_stock: 40, safety_stock: 15, custo_unitario: 28.90, preco_venda: 59.90, local: 'Almoxarifado', frequencia_venda: 'Média' },
-          { id: 'est_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, unidade: 'potes', min_stock: 80, safety_stock: 25, custo_unitario: 119.00, preco_venda: 249.90, local: 'Câmara Fria', frequencia_venda: 'Alta' }
-        ];
-        headersDetected = [columnMapping.itemCol, columnMapping.loteCol, columnMapping.qtyCol, columnMapping.costCol, columnMapping.precoVendaCol];
-        setEstoqueData(prev => {
-          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
-          return [...filtered, ...newData];
-        });
-        sizeText = '58 KB';
-      } else if (tipo === 'consumo') {
-        const newData: ConsumoItem[] = [
-          { id: 'cons_up_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
-          { id: 'cons_up_2', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
-          { id: 'cons_up_3', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 }
-        ];
-        headersDetected = [columnMapping.itemCol, 'Mês/Ano', 'Quantidade Consumida', 'Custo Consumido'];
-        setConsumoData(prev => {
-          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
-          return [...filtered, ...newData];
-        });
-        sizeText = '46 KB';
-      } else if (tipo === 'historico_precos') {
-        const newData: PrecoHistoricoItem[] = [
-          { id: 'pre_up_1', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriAtacado Brasil', preco_unitario: 39.90, data_compra: '2026-06-19', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-11582' },
-          { id: 'pre_up_2', item: 'Whey Protein Isolado 1kg', fornecedor: 'SupleMax Distribuidora', preco_unitario: 115.00, data_compra: '2026-06-18', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-11579' },
-          { id: 'pre_up_3', item: 'BCAA Ultra Pure', fornecedor: 'Globo Suplementos', preco_unitario: 27.50, data_compra: '2026-06-17', condicao_pagamento: 'Pix', codigo_pedido: 'PED-11511' }
-        ];
-        headersDetected = [columnMapping.itemCol, columnMapping.fornecedorCol, 'Preço Pago', 'Data Compra', 'Pedido'];
-        setHistoricoPrecosData(prev => [...prev, ...newData]);
-        sizeText = '88 KB';
-      } else if (tipo === 'validade') {
-        const newData: ValidadeLoteItem[] = [
-          { id: 'val_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, validade: '2027-02-14', status: 'Saudável', valor_economico: 2697.50 },
-          { id: 'val_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, validade: '2026-07-28', status: 'Atenção', valor_economico: 2601.00 },
-          { id: 'val_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, validade: '2026-06-25', status: 'Crítico', valor_economico: 13090.00 }
-        ];
-        headersDetected = [columnMapping.itemCol, columnMapping.loteCol, 'Qtd Lote', columnMapping.validadeCol];
-        setValidadeLotesData(prev => {
-          const filtered = prev.filter(p => !newData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
-          return [...filtered, ...newData];
-        });
-        sizeText = '1.1 MB';
-      }
 
-      // Adicionar novo arquivo à lista de arquivos registrados
-      const novoArquivo: RegistrosArquivos = {
-        id: 'file_' + Date.now(),
-        nome: fileName,
-        tamanho: sizeText,
-        tipo: tipo,
-        enviado_em: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        colunas_detectadas: headersDetected
-      };
-
-      setArquivosRegistrados(prev => [novoArquivo, ...prev]);
-      setUploadLoading(null);
-      triggerToast(`Sucesso! Arquivo registrado em base comercial. O Assistente de IA agora possui livre acesso a ele!`);
-    }, 1200);
-  };
 
   // Funções de Deletar Registros individuais
   const handleDeleteEstoque = (id: string) => {
@@ -526,88 +597,6 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     });
     
     return Object.values(grouped);
-  };
-
-  // Formulário: Adicionar Estoque Manualmente
-  const handleAddEstoque = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formEstoque.item) return;
-    const newItem: EstoqueItem = {
-      id: 'custom_est_' + Date.now(),
-      codigo: formEstoque.codigo || undefined,
-      item: formEstoque.item,
-      lote: formEstoque.lote || formEstoque.situacao_lote || 'LIBERADO',
-      quantidade: Math.max(0, formEstoque.quantidade),
-      unidade: formEstoque.unidade,
-      min_stock: Math.max(0, formEstoque.min_stock),
-      safety_stock: Math.max(0, formEstoque.safety_stock),
-      custo_unitario: Math.max(0, formEstoque.custo_unitario),
-      preco_venda: Math.max(0, formEstoque.preco_venda || (formEstoque.custo_unitario * 1.5)),
-      local: formEstoque.local || 'Almoxarifado Principal',
-      frequencia_venda: formEstoque.quantidade > 50 ? 'Alta' : 'Média',
-      situacao_lote: formEstoque.situacao_lote || 'LIBERADO'
-    };
-    setEstoqueData(prev => [newItem, ...prev]);
-    setFormEstoque({ codigo: '', item: '', lote: '', quantidade: 0, unidade: 'G', min_stock: 50, safety_stock: 20, custo_unitario: 10.00, preco_venda: 20.00, local: 'Câmara Fria', situacao_lote: 'LIBERADO' });
-    triggerToast(`"${newItem.item}" adicionado ao saldo de estoque!`);
-  };
-
-  // Formulário: Adicionar Consumo Manualmente
-  const handleAddConsumo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formConsumo.item) return;
-    const newItem: ConsumoItem = {
-      id: 'custom_cons_' + Date.now(),
-      item: formConsumo.item,
-      quantidade_consumida: Math.max(0, formConsumo.quantidade_consumida),
-      mes_ano: formConsumo.mes_ano,
-      custo_total: Math.max(0, formConsumo.custo_total || (formConsumo.quantidade_consumida * 10))
-    };
-    setConsumoData(prev => [newItem, ...prev]);
-    setFormConsumo({ item: '', quantidade_consumida: 0, mes_ano: '06/2026', custo_total: 0 });
-    triggerToast(`Registro de consumo para "${newItem.item}" incorporado!`);
-  };
-
-  // Formulário: Adicionar Preço Histórico Manualmente
-  const handleAddPreco = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formPrecos.item) return;
-    const newItem: PrecoHistoricoItem = {
-      id: 'custom_prec_' + Date.now(),
-      item: formPrecos.item,
-      fornecedor: formPrecos.fornecedor || 'Fornecedor Avulso',
-      preco_unitario: Math.max(0, formPrecos.preco_unitario),
-      data_compra: formPrecos.data_compra || new Date().toISOString().split('T')[0],
-      condicao_pagamento: formPrecos.condicao_pagamento || 'Pix',
-      codigo_pedido: formPrecos.codigo_pedido || ('PED-' + Math.floor(Math.random() * 9000 + 1000))
-    };
-    setHistoricoPrecosData(prev => [newItem, ...prev]);
-    setFormPrecos({ item: '', fornecedor: '', preco_unitario: 0, data_compra: '', condicao_pagamento: '', codigo_pedido: '' });
-    triggerToast(`Preço histórico de "${newItem.item}" arquivado com sucesso.`);
-  };
-
-  // Formulário: Adicionar Validade Manualmente
-  const handleAddValidade = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formValidade.item) return;
-    const calculatedValDays = Math.round((new Date(formValidade.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-    let calculatedStatus = 'Saudável';
-    if (calculatedValDays < 0) calculatedStatus = 'Vencido';
-    else if (calculatedValDays <= 15) calculatedStatus = 'Crítico';
-    else if (calculatedValDays <= 45) calculatedStatus = 'Atenção';
-
-    const newItem: ValidadeLoteItem = {
-      id: 'custom_val_' + Date.now(),
-      item: formValidade.item,
-      lote: formValidade.lote || 'L-Custom',
-      quantidade: Math.max(0, formValidade.quantidade),
-      validade: formValidade.validade || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      status: calculatedStatus,
-      valor_economico: formValidade.quantidade * 50
-    };
-    setValidadeLotesData(prev => [newItem, ...prev]);
-    setFormValidade({ item: '', lote: '', quantidade: 0, validade: '' });
-    triggerToast(`Controle do lote de "${newItem.item}" registrado.`);
   };
 
   // Função auxiliar de download de relatório (Gera e exporta CSV fictício fidedigno)
@@ -915,17 +904,6 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Botão de mapeamento personalizado de colunas */}
-            <button
-              onClick={() => setIsMapperOpen(!isMapperOpen)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 select-none cursor-pointer ${
-                isMapperOpen ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-extrabold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Settings className="h-4 w-4 shrink-0" />
-              <span>Configurar Colunas ({Object.values(columnMapping).filter(Boolean).length})</span>
-            </button>
-
             {/* Minimizar / maximizar painel da IA */}
             <button
               onClick={() => setIsChatExpanded(!isChatExpanded)}
@@ -940,96 +918,379 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         </div>
       </div>
 
-      {/* EDITOR MAPPER DE COLUNAS PERSONALIZADO (Flutuante Collapsible) */}
-      {isMapperOpen && (
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 mb-6 animate-fadeIn">
-          <div className="bg-white border border-indigo-100 rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="flex items-start justify-between">
+      {/* MODAL DE MAPEAÇÃO DE COLUNAS E PRÉ-VISUALIZAÇÃO INTERATIVA DE ARQUIVO */}
+      {pendingUpload && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-100 rounded-3xl w-full max-w-4xl p-6 sm:p-8 shadow-2xl my-8 text-left space-y-6">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
               <div className="space-y-1">
-                <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-2">
-                  <Settings className="h-4 w-4 text-indigo-600" />
-                  Mapeador de Colunas Personalizadas
-                </h3>
+                <span className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider block w-fit">
+                  Mapeador Interativo de Planilhas / PDFs
+                </span>
+                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-indigo-600" />
+                  Visualização de Dados: <span className="text-indigo-600 font-mono text-base">{pendingUpload.fileName}</span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  O sistema identificou as colunas do seu arquivo. Associe cada campo de destino abaixo. Você pode deixar campos em branco (não mapeados) sem bloquear a importação.
+                </p>
               </div>
-              <button 
-                onClick={() => setIsMapperOpen(false)}
-                className="text-xs font-bold text-indigo-600 hover:text-indigo-850 bg-indigo-50 px-2.5 py-1 rounded-lg"
+              <button
+                onClick={() => setPendingUpload(null)}
+                className="p-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 font-black text-xs cursor-pointer"
               >
-                Concluir
+                Cancelar
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3.5 text-left">
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">A. Descrição Item</label>
-                <input
-                  type="text"
-                  value={columnMapping.itemCol}
-                  onChange={e => setColumnMapping({...columnMapping, itemCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Nome do Produto"
-                />
+            {/* Pré-visualização da Tabela Original */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Pré-visualização da Planilha Encontrada (Mock):</span>
+              <div className="border border-slate-150 rounded-2xl overflow-hidden shadow-2xs">
+                <div className="overflow-x-auto max-h-48">
+                  <table className="w-full text-left text-xs bg-slate-50">
+                    <thead className="bg-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                      <tr>
+                        {pendingUpload.detectedHeaders.map((header) => (
+                          <th key={header} className="p-3 whitespace-nowrap">{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white font-mono text-[11px] text-slate-650">
+                      {pendingUpload.previewRows.map((row, rIdx) => (
+                        <tr key={rIdx} className="hover:bg-slate-50/40">
+                          {pendingUpload.detectedHeaders.map((header) => (
+                            <td key={header} className="p-3 whitespace-nowrap">{row[header] || '-'}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">B. Saldo Estoque</label>
-                <input
-                  type="text"
-                  value={columnMapping.qtyCol}
-                  onChange={e => setColumnMapping({...columnMapping, qtyCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Saldo Atual"
-                />
+            </div>
+
+            {/* Mapeamento Dinâmico de Colunas */}
+            <div className="space-y-3">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Associe as Colunas da Planilha aos Campos do Sistema:</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50/50 border border-slate-100 p-5 rounded-2xl">
+                {pendingUpload.tipo === 'estoque' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição do Item *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Saldo de Estoque *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtyCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtyCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Número do Lote</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.loteCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, loteCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço de Custo (Custo Unit.)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.costCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, costCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço de Venda</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.precoVendaCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, precoVendaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código do Produto (Relatório)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {pendingUpload.tipo === 'consumo' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição do Item *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Quantidade Consumida *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtyCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtyCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Mês/Ano Referência</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.mesAnoCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, mesAnoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Custo Total Consumido</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.custoTotalCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, custoTotalCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {pendingUpload.tipo === 'historico_precos' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição Comercial (Item) *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Fornecedor Credenciado *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.fornecedorCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, fornecedorCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço Unitário Pago *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.precoUnitarioCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, precoUnitarioCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Data de Emissão (Compra)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.dataCompraCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, dataCompraCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Condição de Pagamento</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.condicaoPgtoCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, condicaoPgtoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Nº do Faturamento / Pedido</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoPedidoCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoPedidoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {pendingUpload.tipo === 'validade' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Matéria Prima / Lote *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Número do Lote *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.loteCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, loteCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Volume de Lote *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtyCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtyCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Vencimento Final (Validade) *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.validadeCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, validadeCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">C. Código Lote</label>
-                <input
-                  type="text"
-                  value={columnMapping.loteCol}
-                  onChange={e => setColumnMapping({...columnMapping, loteCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Identificação Lote"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">D. Custo Unitário</label>
-                <input
-                  type="text"
-                  value={columnMapping.costCol}
-                  onChange={e => setColumnMapping({...columnMapping, costCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Preço Custo"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">E. Validade Lote</label>
-                <input
-                  type="text"
-                  value={columnMapping.validadeCol}
-                  onChange={e => setColumnMapping({...columnMapping, validadeCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Vencimento"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">F. Nome Fornecedor</label>
-                <input
-                  type="text"
-                  value={columnMapping.fornecedorCol}
-                  onChange={e => setColumnMapping({...columnMapping, fornecedorCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Distribuidor"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-530 block mb-1">G. Preço Venda</label>
-                <input
-                  type="text"
-                  value={columnMapping.precoVendaCol}
-                  onChange={e => setColumnMapping({...columnMapping, precoVendaCol: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs focus:ring-1 focus:ring-indigo-500"
-                  placeholder="Valor Consumidor"
-                />
-              </div>
+            </div>
+
+            {/* Ações */}
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+              <button
+                onClick={() => setPendingUpload(null)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+              >
+                Descartar Importação
+              </button>
+              <button
+                onClick={confirmAndImportPendingUpload}
+                className="px-6 py-2.5 rounded-xl text-xs font-black bg-indigo-650 hover:bg-indigo-750 text-white shadow-md shadow-indigo-600/15 hover:shadow-indigo-650/25 transition-all cursor-pointer flex items-center gap-2"
+              >
+                <CheckCircle className="h-4 w-4 shrink-0 text-indigo-200" />
+                <span>Confirmar e Importar no Repositório</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1100,7 +1361,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         {historicoPrecosData.length} faturas
                       </span>
                     </div>
-                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">3. Comercial/Preços</h3>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">3. Compras Realizadas</h3>
                     {activeSubData === 'historico_precos' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
                   </button>
 
@@ -1132,7 +1393,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
                         {activeSubData === 'estoque' && 'Upload: Saldo Estoque'}
                         {activeSubData === 'consumo' && 'Upload: Consumo Médio'}
-                        {activeSubData === 'historico_precos' && 'Upload: Fornecedores & Preço'}
+                        {activeSubData === 'historico_precos' && 'Upload: Compras Realizadas'}
                         {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
                       </h4>
                       <p className="text-[10px] text-slate-400">Arraste seus relatórios do sistema em Excel ou PDF.</p>
@@ -1148,21 +1409,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         e.stopPropagation();
                         const file = e.dataTransfer.files?.[0];
                         if (file) {
-                          const fileExt = file.name.split('.').pop()?.toLowerCase();
-                          const isPdf = fileExt === 'pdf';
-                          const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
-                          
                           setUploadLoading(activeSubData);
                           setTimeout(() => {
-                            handleFileUploadSimulated(activeSubData, file.name);
-                            if (isPdf) {
-                              triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
-                            } else if (isExcel) {
-                              triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
-                            } else {
-                              triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
-                            }
-                          }, 1000);
+                            setUploadLoading(null);
+                            initiateFileUpload(activeSubData, file.name);
+                          }, 800);
                         }
                       }}
                       onClick={() => {
@@ -1172,21 +1423,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         input.onchange = (event: any) => {
                           const file = event.target.files?.[0];
                           if (file) {
-                            const fileExt = file.name.split('.').pop()?.toLowerCase();
-                            const isPdf = fileExt === 'pdf';
-                            const isExcel = ['xlsx', 'xls'].includes(fileExt || '');
-                            
                             setUploadLoading(activeSubData);
                             setTimeout(() => {
-                              handleFileUploadSimulated(activeSubData, file.name);
-                              if (isPdf) {
-                                triggerToast(`Sucesso! Relatório PDF "${file.name}" reconhecido e processado.`);
-                              } else if (isExcel) {
-                                triggerToast(`Sucesso! Planilha Excel "${file.name}" integrada com mapeamento de colunas.`);
-                              } else {
-                                triggerToast(`Sucesso! Arquivo de dados "${file.name}" importado.`);
-                              }
-                            }, 1000);
+                              setUploadLoading(null);
+                              initiateFileUpload(activeSubData, file.name);
+                            }, 800);
                           }
                         };
                         input.click();
@@ -1201,10 +1442,10 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       ) : (
                         <div className="space-y-2 py-1">
                           <Upload className="h-5 w-5 text-indigo-400 group-hover:text-indigo-600 mx-auto transition-colors" />
-                           <div>
-                             <p className="text-[10px] font-extrabold text-indigo-700">Arraste PDF, EXCEL ou clique</p>
-                             <p className="text-[8px] text-slate-400 leading-normal">Mapeamento inteligente por colunas</p>
-                           </div>
+                          <div>
+                            <p className="text-[10px] font-extrabold text-indigo-700">Arraste PDF, EXCEL ou clique</p>
+                            <p className="text-[8px] text-slate-400 leading-normal">Mapeamento inteligente por colunas</p>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1212,14 +1453,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     {/* Botões rápidos adicionais */}
                     <div className="space-y-1.5 pt-1 border-t border-slate-100">
                       <button
-                        onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.xlsx`)}
+                        onClick={() => initiateFileUpload(activeSubData, `relatorio_suprimentos_${activeSubData}.xlsx`)}
                         className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
                       >
                         <span className="truncate">Carregar Planilha Comercial (.XLSX)</span>
                         <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                       </button>
                       <button
-                        onClick={() => handleFileUploadSimulated(activeSubData, `relatorio_suprimentos_${activeSubData}.pdf`)}
+                        onClick={() => initiateFileUpload(activeSubData, `relatorio_suprimentos_${activeSubData}.pdf`)}
                         className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between transition-colors cursor-pointer"
                       >
                         <span className="truncate">Carregar Relatório do Sistema (.PDF)</span>
@@ -1227,165 +1468,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </button>
                     </div>
 
-                    {/* Formulários rápidos adaptativos de Inserção Individual Manual */}
-                    <div className="border-t border-slate-100 pt-3">
-                      <span className="text-[10px] font-black text-slate-800 uppercase tracking-wider block mb-2">Lançamento Avulso Manual:</span>
-                      
-                      {activeSubData === 'estoque' && (
-                        <form onSubmit={handleAddEstoque} className="space-y-2 text-left">
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="text" placeholder="Código (Ex: 04808)"
-                              value={formEstoque.codigo} onChange={e => setFormEstoque({...formEstoque, codigo: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none font-mono"
-                            />
-                            <select
-                              value={formEstoque.situacao_lote} onChange={e => setFormEstoque({...formEstoque, situacao_lote: e.target.value, lote: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            >
-                              <option value="LIBERADO">LIBERADO</option>
-                              <option value="BLOQUEADO">BLOQUEADO</option>
-                              <option value="CERTIFICACAO">CERTIFICACAO</option>
-                            </select>
-                          </div>
-                          
-                          <input
-                            type="text" required placeholder="Nome do Item / Insumo"
-                            value={formEstoque.item} onChange={e => setFormEstoque({...formEstoque, item: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                          />
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="text" placeholder="Lote (Ex: LOT2026)"
-                              value={formEstoque.lote} onChange={e => setFormEstoque({...formEstoque, lote: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            />
-                            <input
-                              type="number" required placeholder="Qtd Saldo"
-                              value={formEstoque.quantidade === 0 ? '' : formEstoque.quantidade} onChange={e => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none font-mono"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="number" placeholder="Est. Mínimo"
-                              value={formEstoque.min_stock === 0 ? '' : formEstoque.min_stock} onChange={e => setFormEstoque({...formEstoque, min_stock: parseInt(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            />
-                            <input
-                              type="number" placeholder="Custo Unit. (R$)"
-                              value={formEstoque.custo_unitario === 0 ? '' : formEstoque.custo_unitario} onChange={e => setFormEstoque({...formEstoque, custo_unitario: parseFloat(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="number" placeholder="Preço Venda (R$)"
-                              value={formEstoque.preco_venda === 0 ? '' : formEstoque.preco_venda} onChange={e => setFormEstoque({...formEstoque, preco_venda: parseFloat(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            />
-                            <select
-                              value={formEstoque.unidade} onChange={e => setFormEstoque({...formEstoque, unidade: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2 focus:outline-none"
-                            >
-                              <option value="G">G (Gramas)</option>
-                              <option value="ML">ML (Mililitros)</option>
-                              <option value="KG">KG (Quilos)</option>
-                              <option value="unidades">unidades</option>
-                              <option value="potes">potes</option>
-                            </select>
-                          </div>
-                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-850 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer block text-center uppercase tracking-wider">
-                            Incluir no Saldo
-                          </button>
-                        </form>
-                      )}
 
-                      {activeSubData === 'consumo' && (
-                        <form onSubmit={handleAddConsumo} className="space-y-2 text-left">
-                          <input
-                            type="text" required placeholder="Nome do Insumo Consumido"
-                            value={formConsumo.item} onChange={e => setFormConsumo({...formConsumo, item: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                          />
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="text" placeholder="Mês/Ano (06/2026)"
-                              value={formConsumo.mes_ano} onChange={e => setFormConsumo({...formConsumo, mes_ano: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                            />
-                            <input
-                              type="number" required placeholder="Qtd Consumo"
-                              value={formConsumo.quantidade_consumida === 0 ? '' : formConsumo.quantidade_consumida} onChange={e => setFormConsumo({...formConsumo, quantidade_consumida: parseInt(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                            />
-                          </div>
-                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
-                            Salvar em Consumos
-                          </button>
-                        </form>
-                      )}
-
-                      {activeSubData === 'historico_precos' && (
-                        <form onSubmit={handleAddPreco} className="space-y-2 text-left">
-                          <input
-                            type="text" required placeholder="Insumo / Item comprado"
-                            value={formPrecos.item} onChange={e => setFormPrecos({...formPrecos, item: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                          />
-                          <input
-                            type="text" placeholder="Fornecedor / S/A"
-                            value={formPrecos.fornecedor} onChange={e => setFormPrecos({...formPrecos, fornecedor: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                          />
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="number" step="0.01" required placeholder="Preço Pago (R$)"
-                              value={formPrecos.preco_unitario === 0 ? '' : formPrecos.preco_unitario} onChange={e => setFormPrecos({...formPrecos, preco_unitario: parseFloat(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                            />
-                            <input
-                              type="date"
-                              value={formPrecos.data_compra} onChange={e => setFormPrecos({...formPrecos, data_compra: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[10px] p-1.5"
-                            />
-                          </div>
-                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
-                            Registrar Faturamento
-                          </button>
-                        </form>
-                      )}
-
-                      {activeSubData === 'validade' && (
-                        <form onSubmit={handleAddValidade} className="space-y-2 text-left">
-                          <input
-                            type="text" required placeholder="Nome do Item / Lote"
-                            value={formValidade.item} onChange={e => setFormValidade({...formValidade, item: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                          />
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <input
-                              type="text" placeholder="Lote ID"
-                              value={formValidade.lote} onChange={e => setFormValidade({...formValidade, lote: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                            />
-                            <input
-                              type="number" required placeholder="Qtd Lote"
-                              value={formValidade.quantidade === 0 ? '' : formValidade.quantidade} onChange={e => setFormValidade({...formValidade, quantidade: parseInt(e.target.value) || 0})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                            />
-                          </div>
-                          <input
-                            type="date" required
-                            value={formValidade.validade} onChange={e => setFormValidade({...formValidade, validade: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl text-[11px] p-2"
-                          />
-                          <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] py-2 rounded-xl transition-all select-none cursor-pointer uppercase tracking-wider">
-                            Registrar Validade
-                          </button>
-                        </form>
-                      )}
-                    </div>
                   </div>
 
                   {/* Tabela Dinâmica do Componente Selecionado */}

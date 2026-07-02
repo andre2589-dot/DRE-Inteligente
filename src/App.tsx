@@ -22,6 +22,7 @@ import PlanoContas from './components/PlanoContas';
 import AiAssistant from './components/AiAssistant';
 import ProcurementModule from './components/ProcurementModule';
 import SupabaseDiag from './components/SupabaseDiag';
+import { DatabaseUploadModule } from './components/DatabaseUploadModule';
 
 // Icons
 import { 
@@ -73,7 +74,10 @@ export default function App() {
   const [monthConfigs, setMonthConfigs] = useState<MonthConfig[]>([]);
 
   // Tab control state (Unifying financial DRE, BI charts, and procurement-supply chain)
-  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'procurement'>('dre');
+  const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'procurement' | 'database_import' | 'supabase'>('dre');
+
+  // State to hold query passed from DatabaseUploadModule to AiAssistant
+  const [pendingAiQuery, setPendingAiQuery] = useState<string | null>(null);
 
   // Active subtab inside procurement module
   const [procurementSubTab, setProcurementSubTab] = useState<'indicators' | 'quotes'>('indicators');
@@ -747,13 +751,13 @@ export default function App() {
               onClick={() => setIsCompraExpanded(!isCompraExpanded)}
               style={{ cursor: 'pointer' }}
               className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center gap-2.5 transition-all border cursor-pointer select-none ${
-                activeTab === 'procurement'
+                activeTab === 'procurement' || activeTab === 'database_import'
                   ? 'bg-indigo-950/40 border-indigo-500/20 text-white font-bold'
                   : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/15'
               }`}
             >
               <div className="p-1 rounded bg-indigo-505/10">
-                <ShoppingCart className={`h-4 w-4 shrink-0 ${activeTab === 'procurement' ? 'text-emerald-400 font-bold' : 'text-slate-500'}`} />
+                <ShoppingCart className={`h-4 w-4 shrink-0 ${activeTab === 'procurement' || activeTab === 'database_import' ? 'text-emerald-400 font-bold' : 'text-slate-500'}`} />
               </div>
               <span className="text-xs font-bold uppercase tracking-wider">Compra Inteligente</span>
               <div className="ml-auto flex items-center gap-1.5">
@@ -802,6 +806,18 @@ export default function App() {
                     Gestão de Estoque
                   </button>
 
+                  <button
+                    onClick={() => { setActiveTab('database_import'); setIsSidebarOpen(false); }}
+                    style={{ cursor: 'pointer' }}
+                    className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+                      activeTab === 'database_import'
+                        ? 'bg-emerald-650 text-white font-bold shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'database_import' ? 'bg-white' : 'bg-transparent'}`} />
+                    Banco de Dados (IBK)
+                  </button>
 
                 </motion.div>
               )}
@@ -867,6 +883,7 @@ export default function App() {
                 {activeTab === 'projections' && 'DRE Inteligente • Metas & Simulações • Viabilidade e Pacing'}
                 {activeTab === 'ai' && 'DRE Inteligente • CFO Virtual • Assistência e Auditoria IA'}
                 {activeTab === 'procurement' && 'Compra Inteligente • Gestão de Compras, Estoques e Sourcing'}
+                {activeTab === 'database_import' && 'Compra Inteligente • Importação de Banco de Dados (.IBK)'}
               </span>
             </div>
             <h2 className="text-base font-extrabold text-slate-900 tracking-tight mt-0.5">
@@ -897,9 +914,11 @@ export default function App() {
               </div>
               <h3 className="text-lg font-bold mt-1 tracking-tight text-white">{activeCompany.name}</h3>
               <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                {activeTab === 'procurement' 
-                  ? 'Análise de compras e cotações sob demanda, auditoria de estoque de reposição e integridade da sua cadeia de suprimentos sob tutela de IA Senior.'
-                  : 'Consolide sua DRE, gerencie subcategorias do seu plano de contas, e obtenha previsões matemáticas avançadas baseadas em múltiplos de EBITDA.'}
+                {activeTab === 'database_import'
+                  ? 'Importe o backup do banco de dados relacional (.IBK) da sua empresa para que o Assistente de IA de livre acesso cruze as tabelas em queries SQL complexas.'
+                  : activeTab === 'procurement' 
+                    ? 'Análise de compras e cotações sob demanda, auditoria de estoque de reposição e integridade da sua cadeia de suprimentos sob tutela de IA Senior.'
+                    : 'Consolide sua DRE, gerencie subcategorias do seu plano de contas, e obtenha previsões matemáticas avançadas baseadas em múltiplos de EBITDA.'}
               </p>
             </div>
 
@@ -995,6 +1014,20 @@ export default function App() {
                 dreContext={computeFinancialContext()} 
                 companyId={activeCompany.id}
                 userId={activeRole}
+                pendingQuery={pendingAiQuery}
+                onClearPendingQuery={() => setPendingAiQuery(null)}
+              />
+            )}
+
+            {activeTab === 'database_import' && (
+              <DatabaseUploadModule 
+                onDatabaseIntegrated={(dbInfo) => {
+                  console.log('Database integrated:', dbInfo);
+                }}
+                onRunQueryInChat={(queryText) => {
+                  setPendingAiQuery(queryText);
+                  setActiveTab('ai');
+                }}
               />
             )}
 

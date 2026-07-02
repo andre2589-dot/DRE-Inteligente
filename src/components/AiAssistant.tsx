@@ -8,9 +8,17 @@ interface AiAssistantProps {
   dreContext: any; // calculated figures for contextual injection
   companyId: string;
   userId: string;
+  pendingQuery?: string | null;
+  onClearPendingQuery?: () => void;
 }
 
-export default function AiAssistant({ dreContext, companyId, userId }: AiAssistantProps) {
+export default function AiAssistant({ 
+  dreContext, 
+  companyId, 
+  userId,
+  pendingQuery,
+  onClearPendingQuery
+}: AiAssistantProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -80,6 +88,15 @@ export default function AiAssistant({ dreContext, companyId, userId }: AiAssista
   useEffect(() => {
     scrollToBottom();
   }, [messages, isSending]);
+
+  useEffect(() => {
+    if (pendingQuery) {
+      handleSend(pendingQuery);
+      if (onClearPendingQuery) {
+        onClearPendingQuery();
+      }
+    }
+  }, [pendingQuery]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
