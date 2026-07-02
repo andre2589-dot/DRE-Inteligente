@@ -4,8 +4,6 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
-import { whatsappService } from "./src/services/whatsapp/whatsappService";
-import { whatsappSessionManager } from "./src/services/whatsapp/multiUser/sessionManager";
 
 dotenv.config();
 
@@ -45,13 +43,7 @@ const initServer = async () => {
       supabase = createClient(supabaseUrl, supabaseAnonKey);
       supabaseActive = true;
       console.log("🚀 Supabase Client initialized successfully.");
-      whatsappService.setSupabase(supabase);
     }
-    
-    // Initialize the WhatsApp service (it will run with real Puppeteer if possible, or fall back immediately and safely)
-    whatsappService.initialize().catch(err => {
-      console.error("❌ Failed to initialize WhatsApp service asynchronously:", err);
-    });
 
     // 2. Resolve DB promise
     resolveDbReady(true);
@@ -306,166 +298,8 @@ app.get("/api/status", async (req, res) => {
 });
 
 // ==========================================
-// WHATSAPP INTEGRATION ENDPOINTS
+// GEMINI INTELLIGENT HELPER ENDPOINTS
 // ==========================================
-app.get("/api/whatsapp/status", (req, res) => {
-  try {
-    const statusInfo = whatsappService.getStatus();
-    res.json(statusInfo);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/whatsapp/qrcode", (req, res) => {
-  try {
-    const statusInfo = whatsappService.getStatus();
-    res.json({
-      status: statusInfo.status,
-      mode: statusInfo.mode,
-      qrCodeUrl: statusInfo.qrCodeUrl || null
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/whatsapp/send", async (req, res) => {
-  const { companyId, phone, text, supplierId } = req.body;
-  if (!phone || !text) {
-    return res.status(400).json({ error: "Parâmetros 'phone' e 'text' são obrigatórios." });
-  }
-  try {
-    const msg = await whatsappService.sendMessage(companyId || 'c1', phone, text, supplierId);
-    res.json({ success: true, message: msg });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get("/api/whatsapp/messages", async (req, res) => {
-  const companyId = (req.query.companyId as string) || 'c1';
-  try {
-    const messages = await whatsappService.getMessages(companyId);
-    const conversations = await whatsappService.getConversations(companyId);
-    const contacts = await whatsappService.getContacts(companyId);
-    res.json({ messages, conversations, contacts });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post("/api/whatsapp/simulate-scan", async (req, res) => {
-  try {
-    await whatsappService.simulateScan();
-    res.json({ success: true, status: whatsappService.getStatus() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post("/api/whatsapp/disconnect", async (req, res) => {
-  try {
-    await whatsappService.disconnect();
-    res.json({ success: true, status: whatsappService.getStatus() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post("/api/whatsapp/clear-unreads", async (req, res) => {
-  const { companyId, conversationId } = req.body;
-  try {
-    await whatsappService.clearUnreads(companyId || 'c1', conversationId);
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ==========================================
-// WHATSAPP MULTI-USER API ROUTESTEMPLATE (Vazias/Simulação estrutural integrada)
-// ==========================================
-
-// Criar/Inicializar uma sessão para um usuário/empresa específico
-app.post("/api/whatsapp/multi/create", async (req, res) => {
-  const { sessionId, userId, companyId } = req.body;
-  if (!sessionId || !userId || !companyId) {
-    return res.status(400).json({ error: "Os campos sessionId, userId e companyId são obrigatórios." });
-  }
-  try {
-    const session = await whatsappSessionManager.createSession({ sessionId, userId, companyId });
-    res.json({ success: true, session });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Consultar estado de uma sessão de WhatsApp multi-usuário
-app.get("/api/whatsapp/multi/session/:sessionId", (req, res) => {
-  const { sessionId } = req.params;
-  try {
-    const session = whatsappSessionManager.getSession(sessionId);
-    if (!session) {
-      return res.status(404).json({ error: `Sessão ${sessionId} não encontrada.` });
-    }
-    res.json({ success: true, session });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Consultar todas as sessões cadastradas
-app.get("/api/whatsapp/multi/sessions", (req, res) => {
-  try {
-    const sessions = whatsappSessionManager.getAllSessions();
-    res.json({ success: true, sessions });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Enviar mensagem utilizando uma sessão específica de faturamento do usuário
-app.post("/api/whatsapp/multi/send", async (req, res) => {
-  const { sessionId, toPhone, message } = req.body;
-  if (!sessionId || !toPhone || !message) {
-    return res.status(400).json({ error: "Os campos sessionId, toPhone e message são obrigatórios." });
-  }
-  try {
-    const result = await whatsappSessionManager.sendMessage({ sessionId, toPhone, message });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Desconectar sessão ativa
-app.post("/api/whatsapp/multi/disconnect", async (req, res) => {
-  const { sessionId } = req.body;
-  if (!sessionId) {
-    return res.status(400).json({ error: "O campo sessionId é obrigatório." });
-  }
-  try {
-    const success = await whatsappSessionManager.disconnectSession(sessionId);
-    res.json({ success });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Simular escaneamento com sucesso de QR Code para testes rápidos de sandbox
-app.post("/api/whatsapp/multi/simulate-scan", async (req, res) => {
-  const { sessionId, phone } = req.body;
-  if (!sessionId) {
-    return res.status(400).json({ error: "O campo sessionId é obrigatório." });
-  }
-  try {
-    const success = await whatsappSessionManager.simulateScanSuccess(sessionId, phone);
-    res.json({ success });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // API endpoint for Gemini-powered financial and supply chain helper
 app.post("/api/gemini/chat", async (req, res) => {
@@ -812,7 +646,6 @@ app.get("/api/supabase/diagnose", async (req, res) => {
         console.log("⚡ [AUTO-HEAL] Supabase diagnostics passed! Automatically restoring live database connection.");
         supabaseActive = true;
         supabase = client;
-        whatsappService.setSupabase(client);
       }
     }
 
@@ -1584,7 +1417,6 @@ async function setupViteOrStatic() {
       } else {
         console.log("✅ Conexão com as tabelas do Supabase estabelecida com sucesso! Integração ativa.");
         supabaseActive = true;
-        whatsappService.setSupabase(supabase);
 
         // Pro-active automatic seeding if database is connected but empty
         try {

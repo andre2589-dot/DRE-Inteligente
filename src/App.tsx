@@ -21,6 +21,7 @@ import ForecastModule from './components/ForecastModule';
 import PlanoContas from './components/PlanoContas';
 import AiAssistant from './components/AiAssistant';
 import ProcurementModule from './components/ProcurementModule';
+import SupabaseDiag from './components/SupabaseDiag';
 
 // Icons
 import { 
@@ -74,15 +75,12 @@ export default function App() {
   // Tab control state (Unifying financial DRE, BI charts, and procurement-supply chain)
   const [activeTab, setActiveTab] = useState<'dre' | 'charts' | 'import' | 'plano' | 'projections' | 'ai' | 'procurement'>('dre');
 
-  // Feature Flag to hide WhatsApp feature temporarily
-  const ENABLE_WHATSAPP_FORNECEDORES = false;
+  // Active subtab inside procurement module
+  const [procurementSubTab, setProcurementSubTab] = useState<'indicators' | 'quotes'>('indicators');
 
   // Sidebar expanded / collapsed states
   const [isDreExpanded, setIsDreExpanded] = useState(true);
   const [isCompraExpanded, setIsCompraExpanded] = useState(true);
-
-  // Active subtab inside procurement module
-  const [procurementSubTab, setProcurementSubTab] = useState<'indicators' | 'quotes' | 'whatsapp'>('indicators');
 
   // Load category goals and month configs based on active company
   useEffect(() => {
@@ -804,20 +802,7 @@ export default function App() {
                     Gestão de Estoque
                   </button>
 
-                  {ENABLE_WHATSAPP_FORNECEDORES && (
-                    <button
-                      onClick={() => { setActiveTab('procurement'); setProcurementSubTab('whatsapp'); setIsSidebarOpen(false); }}
-                      style={{ cursor: 'pointer' }}
-                      className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                        activeTab === 'procurement' && procurementSubTab === 'whatsapp'
-                          ? 'bg-emerald-650 text-white font-bold shadow-xs'
-                          : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
-                      }`}
-                    >
-                      <div className={`h-1.5 w-1.5 rounded-full ${activeTab === 'procurement' && procurementSubTab === 'whatsapp' ? 'bg-white' : 'bg-transparent'}`} />
-                      Zap de Fornecedores
-                    </button>
-                  )}
+
                 </motion.div>
               )}
             </AnimatePresence>
@@ -827,10 +812,21 @@ export default function App() {
 
         {/* Sidebar Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/45 space-y-3 shrink-0">
-          <div className="flex items-center gap-2 px-1">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-slate-400">Banco de Dados Ativo</span>
-          </div>
+          <button
+            onClick={() => { setActiveTab('supabase'); setIsSidebarOpen(false); }}
+            style={{ cursor: 'pointer' }}
+            className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none ${
+              activeTab === 'supabase'
+                ? 'bg-indigo-950 border-indigo-500/30 text-white shadow-xs'
+                : 'bg-slate-900/40 border-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Database className={`h-3.5 w-3.5 ${activeTab === 'supabase' ? 'text-indigo-400' : 'text-slate-500'}`} />
+              <span className="text-[10.5px]">Conexão Supabase</span>
+            </div>
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          </button>
           
           <div className="space-y-1">
             <label className="text-[8.5px] uppercase font-black tracking-wider text-slate-500 block pl-1">Perfil de Acesso</label>
@@ -1010,6 +1006,10 @@ export default function App() {
                 activeSubTab={procurementSubTab}
                 onSubTabChange={(tab) => setProcurementSubTab(tab)}
               />
+            )}
+
+            {activeTab === 'supabase' && (
+              <SupabaseDiag />
             )}
           </div>
         </div>

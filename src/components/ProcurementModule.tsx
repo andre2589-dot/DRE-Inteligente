@@ -120,8 +120,8 @@ interface ProcurementModuleProps {
   companyId: string;
   userId: string;
   dreContext: any;
-  activeSubTab?: 'indicators' | 'quotes' | 'whatsapp';
-  onSubTabChange?: (tab: 'indicators' | 'quotes' | 'whatsapp') => void;
+  activeSubTab?: 'indicators' | 'quotes';
+  onSubTabChange?: (tab: 'indicators' | 'quotes') => void;
 }
 
 export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab = 'indicators' }: ProcurementModuleProps) {
