@@ -992,17 +992,90 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const valueC = itemsABCClassification.filter(i => i.classification === 'C').reduce((acc, cur) => acc + cur.value, 0);
 
   // ROTINA DO ASSISTENTE IA (Livre acesso para cruzamento de dados, cumprindo o critério fidedigno)
-  const handleSendChatMessage = (alternativeQuery?: string) => {
+  const handleSendChatMessage = async (alternativeQuery?: string) => {
     const query = alternativeQuery || chatInput;
     if (!query.trim()) return;
     
-    const newMsgArr = [...chatHistory, { role: 'user' as const, content: query, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }];
+    const userTimestamp = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const newMsgArr = [...chatHistory, { role: 'user' as const, content: query, timestamp: userTimestamp }];
     setChatHistory(newMsgArr);
     if (!alternativeQuery) setChatInput('');
     setIsAiTyping(true);
 
-    setTimeout(() => {
-      let response = '';
+    try {
+      // Prepare full context containing live, real-time datasets
+      const procurementContext = {
+        estoqueData: estoqueData.map(e => ({
+          codigo: e.codigo,
+          item: e.item,
+          lote: e.lote,
+          quantidade: e.quantidade,
+          unidade: e.unidade,
+          custo_unitario: e.custo_unitario,
+          preco_venda: e.preco_venda || (e.custo_unitario * 1.5),
+          situacao_lote: e.situacao_lote,
+          local: e.local,
+          min_stock: e.min_stock,
+          safety_stock: e.safety_stock,
+          frequencia_venda: e.frequencia_venda
+        })),
+        consumoData: consumoData.map(c => ({
+          item: c.item,
+          quantidade_consumida: c.quantidade_consumida,
+          unidade: c.unidade,
+          data_inicio: c.data_inicio,
+          data_fim: c.data_fim
+        })),
+        historicoPrecosData: historicoPrecosData.map(h => ({
+          item: h.item,
+          fornecedor: h.fornecedor,
+          preco_unitario: h.preco_unitario,
+          data_compra: h.data_compra,
+          condicao_pagamento: h.condicao_pagamento,
+          codigo_pedido: h.codigo_pedido
+        })),
+        validadeLotesData: validadeLotesData.map(v => ({
+          item: v.item,
+          lote: v.lote,
+          quantidade: v.quantidade,
+          validade: v.validade,
+          status: v.status,
+          valor_economico: v.valor_economico
+        }))
+      };
+
+      const response = await fetch('/api/gemini/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: query,
+          assistantType: 'procurement',
+          procurementContext: procurementContext,
+          dreContext: dreContext,
+          history: chatHistory.slice(-6).map(h => ({
+            role: h.role,
+            content: h.content,
+            timestamp: h.timestamp
+          }))
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na chamada do servidor: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const botAnswer = data.text || 'Desculpe, não consegui obter resposta da inteligência artificial.';
+
+      setChatHistory(prev => [...prev, {
+        role: 'assistant' as const,
+        content: botAnswer,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      }]);
+    } catch (err) {
+      console.error("Gemini fetch error, using local fallback:", err);
+      // Fallback local caso a API falhe ou dê erro (preserva as respostas locais pré-programadas)
+      let responseText = '';
       const queryLower = query.toLowerCase();
 
       // REGRA DE VERIFICACAO DOS CAMPOS OPCIONAIS NO MAPPER (Cria alerta dinâmico se algum mapeamento estiver vazio ou ausente)
@@ -1015,17 +1088,81 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         ? `\n\n_Nota do Mapeador de Dados:_ Detectei que algumas colunas de correspondência personalizada não estão mapeadas:${warningsMapeador}\nIsso pode limitar a profundidade de faturamento de minhas deduções.` 
         : '';
 
+      // 0. VERIFICAÇÃO DE CONSULTA DE ITEM DE ESTOQUE ESPECÍFICO (Fidedigno para Peptistrong, Creatina, etc.)
+      const normalizeStr = (str: string) => {
+        return String(str || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+      };
+      const queryNormalized = normalizeStr(query);
+      let matchedLocalItem: any = null;
+
+      // Tentar por código numérico exato (de 3 a 8 dígitos)
+      const anyDigitMatch = queryNormalized.match(/\b(\d{3,8})\b/);
+      if (anyDigitMatch) {
+        const code = anyDigitMatch[1];
+        matchedLocalItem = estoqueData.find(e => normalizeStr(e.codigo).includes(code));
+      }
+
+      // Se não achou por código, tentar por correspondência do nome do insumo completo
+      if (!matchedLocalItem) {
+        const sortedEstoque = [...estoqueData].sort((a, b) => normalizeStr(b.item).length - normalizeStr(a.item).length);
+        for (const item of sortedEstoque) {
+          const itemName = normalizeStr(item.item);
+          if (itemName && itemName.length > 2 && queryNormalized.includes(itemName)) {
+            matchedLocalItem = item;
+            break;
+          }
+        }
+      }
+
+      // Se ainda não achou, tentar por correspondência parcial de palavras
+      if (!matchedLocalItem) {
+        for (const item of estoqueData) {
+          const itemName = normalizeStr(item.item);
+          const words = itemName.split(/[^a-z0-9]/).filter(w => w.length > 3);
+          if (words.length > 0 && words.every(word => queryNormalized.includes(word))) {
+            matchedLocalItem = item;
+            break;
+          }
+        }
+      }
+
+      if (matchedLocalItem) {
+        const qty = Number(matchedLocalItem.quantidade || 0);
+        const minStr = matchedLocalItem.min_stock !== undefined ? matchedLocalItem.min_stock : Math.round(qty * 0.8);
+        const safetyStr = matchedLocalItem.safety_stock !== undefined ? matchedLocalItem.safety_stock : Math.round(qty * 0.3);
+        const unit = matchedLocalItem.unidade || 'potes';
+        const status = matchedLocalItem.situacao_lote || 'LIBERADO';
+        const loc = matchedLocalItem.local || 'Almoxarifado Principal';
+        const codeStr = matchedLocalItem.codigo ? ` (código ${matchedLocalItem.codigo})` : '';
+
+        const isAboveMin = qty >= minStr;
+        const isAboveSafety = qty >= safetyStr;
+
+        responseText = `O saldo de estoque atual de ${matchedLocalItem.item.toUpperCase()}${codeStr} é de ${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}.\n\n`;
+        responseText += `Esse saldo está com lote ${status.toLowerCase()} e armazenado no ${loc}, estando `;
+        
+        if (isAboveMin) {
+          responseText += `acima do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+        } else if (isAboveSafety) {
+          responseText += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit}, mas acima do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+        } else {
+          responseText += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e abaixo do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}, estando em nível crítico de reabastecimento.`;
+        }
+      }
       // CASO CÓDIGO/SALDO: Checar se a mensagem contém menção a um código de produto (padrão de controle de estoque do PDF, ex: "04808", "00633") ou solicita saldo
-      const digitMatch = queryLower.match(/\b(\d{5,6})\b/);
-      if (digitMatch || (queryLower.includes('código') && queryLower.includes('saldo')) || queryLower.includes('somar por código') || queryLower.includes('soma de código') || queryLower.includes('soma pelos códigos')) {
-        const foundCode = digitMatch ? digitMatch[1] : '';
+      else if (anyDigitMatch || (queryLower.includes('código') && queryLower.includes('saldo')) || queryLower.includes('somar por código') || queryLower.includes('soma de código') || queryLower.includes('soma pelos códigos')) {
+        const foundCode = anyDigitMatch ? anyDigitMatch[1] : '';
         const matchingItems = foundCode ? estoqueData.filter(e => e.codigo === foundCode) : [];
         
         if (matchingItems.length > 0) {
           const totalAggQty = matchingItems.reduce((acc, curr) => acc + curr.quantidade, 0);
           const firstItem = matchingItems[0];
           
-          response = `### 📦 Consulta de Saldo por Código: \`${foundCode}\`\n\n` +
+          responseText = `### 📦 Consulta de Saldo por Código: \`${foundCode}\`\n\n` +
                      `Encontrei o padrão de informação do relatório de estoque para o insumo **${firstItem.item}**.\n\n` +
                      `* 🔢 **Código Relatório:** \`${foundCode}\`\n` +
                      `* 🧪 **Descrição do Item:** ${firstItem.item}\n` +
@@ -1038,14 +1175,13 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                      `👉 **SALDO CONSOLIDADO TOTAL:** **${totalAggQty.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${firstItem.unidade?.toUpperCase()}**\n\n` +
                      `_Isso consolida os saldos de diferentes lotes/bloqueios de forma imediata. Deseja registrar cotações ou novos faturamentos?_`;
         } else if (foundCode) {
-          response = `Encontrei a menção ao código **\`${foundCode}\`**, mas esse item não está cadastrado no saldo físico de estoque atual.\n\nVocê pode cadastrá-lo manualmente no menu à esquerda ou colar as linhas do relatório em PDF usando nosso **Importador por Cópia de PDF** que a soma automática será realizada no ato!`;
+          responseText = `Encontrei a menção ao código **\`${foundCode}\`**, mas esse item não está cadastrado no saldo físico de estoque atual.\n\nVocê pode cadastrá-lo manualmente no menu à esquerda ou colar as linhas do relatório em PDF usando nosso **Importador por Cópia de PDF** que a soma automática será realizada no ato!`;
         } else {
-          // O usuário pediu consulta geral de saldos ou soma por código
           const itemsWithCode = estoqueData.filter(e => e.codigo);
           const duplicates = itemsWithCode.filter(e => estoqueData.filter(other => other.codigo === e.codigo).length > 1);
           const uniqueDupCodes = Array.from(new Set(duplicates.map(d => d.codigo)));
           
-          response = `### 📊 Consolidação Geral de Saldos por Código\n\nIdentifiquei o padrão de controle de estoque do sistema. Atualmente, temos **${uniqueDupCodes.length} matérias-primas** que constam mais de uma vez na base original e foram agrupadas com sucesso:\n\n` +
+          responseText = `### 📊 Consolidação Geral de Saldos por Código\n\nIdentifiquei o padrão de controle de estoque do sistema. Atualmente, temos **${uniqueDupCodes.length} matérias-primas** que constam mais de uma vez na base original e foram agrupadas com sucesso:\n\n` +
                      uniqueDupCodes.map(code => {
                        const matches = estoqueData.filter(e => e.codigo === code);
                        const total = matches.reduce((acc, curr) => acc + curr.quantidade, 0);
@@ -1058,24 +1194,17 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                      `\n\n_Dica:_ O botão **"Consolidar por Código (Soma)"** no cabeçalho da planilha permite alternar visualmente entre a visualização de lotes individualizados (prazos ou lotes LIBERADO, BLOQUEADO, CERTIFICACAO) e a soma consolidada de cada insumo!`;
         }
       }
-      
-      // CASO 1: Pergunta sobre a Creatina (Último preço, Fornecedor e cruzamento de estoques)
       else if (queryLower.includes('creatina') && (queryLower.includes('preco') || queryLower.includes('preço') || queryLower.includes('compra') || queryLower.includes('fornecedor'))) {
-        
-        // Pesquisar no histórico de preços
         const comprasCreatina = historicoPrecosData
           .filter(h => h.item.toLowerCase().includes('creatina'))
           .sort((a, b) => new Date(b.data_compra).getTime() - new Date(a.data_compra).getTime());
 
-        // Pesquisar no saldo
         const estoqueCreatina = estoqueData.find(e => e.item.toLowerCase().includes('creatina'));
-
-        // Pesquisar na validade
         const validadeCreatina = validadeLotesData.find(v => v.item.toLowerCase().includes('creatina'));
 
         if (comprasCreatina.length > 0) {
           const ultimaCompra = comprasCreatina[0];
-          response = `### 🔍 Auditoria Comercial: Creatina Monohidratada\n\nCom base nos arquivos estruturados registrados no sistema, localizei os seguintes dados fidedignos:\n\n` +
+          responseText = `### 🔍 Auditoria Comercial: Creatina Monohidratada\n\nCom base nos arquivos estruturados registrados no sistema, localizei os seguintes dados fidedignos:\n\n` +
                      `* 👤 **Último Fornecedor:** **${ultimaCompra.fornecedor}**\n` +
                      `* 🪙 **Último Preço Pago:** **R$ ${ultimaCompra.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**\n` +
                      `* 📅 **Data da Aquisição:** ${new Date(ultimaCompra.data_compra).toLocaleDateString('pt-BR')}\n` +
@@ -1085,81 +1214,73 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                      `### 📊 Cruzamento com Saldos e Validades Vigentes:\n`;
 
           if (estoqueCreatina) {
-            response += `* 📥 **Estoque Físico Atual:** **${estoqueCreatina.quantidade} potes** (Estoque mínimo configurado: ${estoqueCreatina.min_stock} potes).\n` +
+            responseText += `* 📥 **Estoque Físico Atual:** **${estoqueCreatina.quantidade} potes** (Estoque mínimo configurado: ${estoqueCreatina.min_stock} potes).\n` +
                         `  * ⚠️ *Ruptura de Segurança:* Faltam **${estoqueCreatina.min_stock - estoqueCreatina.quantidade} potes** para restabelecer a segurança operacional.\n`;
           }
           if (validadeCreatina) {
-            response += `* 📅 **Validade Rastreável:** Lote \`${validadeCreatina.lote}\` vence em **${new Date(validadeCreatina.validade).toLocaleDateString('pt-BR')}** (Status: **${validadeCreatina.status}**).\n`;
+            responseText += `* 📅 **Validade Rastreável:** Lote \`${validadeCreatina.lote}\` vence em **${new Date(validadeCreatina.validade).toLocaleDateString('pt-BR')}** (Status: **${validadeCreatina.status}**).\n`;
           }
           
-          response += `\n*Nota Histórica:* Rastreie ${comprasCreatina.length} faturamentos de Creatina em sua base histórica. O preço oscilou de R$ 38,50 (com SupleMax em Março/2026) até R$ 42,00 (Atacadão Vida Saudável em Junho/2026), demonstrando inflação física de suprimentos de **+9,09%** no trimestre.`;
+          responseText += `\n*Nota Histórica:* Rastreie ${comprasCreatina.length} faturamentos de Creatina em sua base histórica. O preço oscilou de R$ 38,50 (com SupleMax em Março/2026) até R$ 42,00 (Atacadão Vida Saudável em Junho/2026), demonstrando inflação física de suprimentos de **+9,09%** no trimestre.`;
         } else {
-          response = `Localizei itens de Creatina listados no seu painel de saldo físico, porém **não encontrei registros de compra desse item** nos relatórios de faturas de fornecedores importados.\n\nPor favor, cadastre uma fatura de compra para a Creatina ou mapeie a coluna correspondente no Mapeador de Colunas para que eu possa responder no ato.`;
+          responseText = `Localizei itens de Creatina listados no seu painel de saldo físico, porém **não encontrei registros de compra desse item** nos relatórios de faturas de fornecedores importados.\n\nPor favor, cadastre uma fatura de compra para a Creatina ou mapeie a coluna correspondente no Mapeador de Colunas para que eu possa responder no ato.`;
         }
       }
-      
-      // CASO 2: Pergunta sobre Ruptura / Itens abaixo do mínimo ou consumo ativo zerado no estoque
       else if (queryLower.includes('zerado') || queryLower.includes('ruptura') || queryLower.includes('mínimo') || queryLower.includes('reposição') || queryLower.includes('falta')) {
         const abaixoDoMinimo = estoqueData.filter(e => e.quantidade < e.min_stock);
         
         if (abaixoDoMinimo.length > 0) {
-          response = `### ⚠️ Alerta Crítico: Diagnóstico de Rupturas e Reposição de Ativos\n\nCruzei seu saldo de estoque com o histórico de consumo enviado. Temos **${abaixoDoMinimo.length} insumos** em situação de reabastecimento imediato:\n\n`;
+          responseText = `### ⚠️ Alerta Crítico: Diagnóstico de Rupturas e Reposição de Ativos\n\nCruzei seu saldo de estoque com o histórico de consumo enviado. Temos **${abaixoDoMinimo.length} insumos** em situação de reabastecimento imediato:\n\n`;
           
           abaixoDoMinimo.forEach((item, index) => {
             const cons = consumoData.find(c => c.item.toLowerCase() === item.item.toLowerCase());
             const consQtd = cons ? cons.quantidade_consumida : 0;
             const coberturaDias = consQtd > 0 ? Math.round((item.quantidade / consQtd) * 30) : 0;
             
-            response += `${index + 1}. **${item.item}** (Lote: \`${item.lote}\`)\n` +
+            responseText += `${index + 1}. **${item.item}** (Lote: \`${item.lote}\`)\n` +
                         `   * 📦 Saldo: **${item.quantidade}** vs Mínimo: ${item.min_stock} de segurança.\n` +
                         `   * 📈 Histórico de Consumo mensal: ~${consQtd} ${item.unidade}/mês.\n` +
                         `   * ⏳ Cobertura Física: **${coberturaDias} dias** de operação.\n` +
                         `   * 🛒 Reposição Sugerida: **+${item.min_stock - item.quantidade} ${item.unidade}** para sanar.\n\n`;
           });
           
-          response += `Recomendo disparar ordens de compras sob as condições de pagamento dos últimos faturamentos arquivados. Quer que eu faça uma simulação de orçamento?`;
+          responseText += `Recomendo disparar ordens de compras sob as condições de pagamento dos últimos faturamentos arquivados. Quer que eu faça uma simulação de orçamento?`;
         } else {
-          response = `Excelente! Todos os itens do estoque estão operando acima dos seus limites de segurança configurados. Nenhuma ruptura detectada.`;
+          responseText = `Excelente! Todos os itens do estoque estão operando acima dos seus limites de segurança configurados. Nenhuma ruptura detectada.`;
         }
       }
-
-      // CASO 3: Perdegas por prazos de Validade vencendo
       else if (queryLower.includes('venc') || queryLower.includes('validade') || queryLower.includes('perda') || queryLower.includes('expir')) {
         const lotesCriticos = validadeLotesData.filter(v => v.status === 'Crítico');
         
         if (lotesCriticos.length > 0) {
-          response = `### 📅 Auditoria de Validade e Prazos Críticos\n\nIdentifiquei lotes vigentes com expiração imediata. Cruzei esses insumos com o consumo mensal para prever perda financeira:\n\n`;
+          responseText = `### 📅 Auditoria de Validade e Prazos Críticos\n\nIdentifiquei lotes vigentes com expiração imediata. Cruzei esses insumos com o consumo mensal para prever perda financeira:\n\n`;
           
           lotesCriticos.forEach(lote => {
             const cons = consumoData.find(c => c.item.toLowerCase() === lote.item.toLowerCase());
             const consMensal = cons ? cons.quantidade_consumida : 0;
             const velocidadeVenda = consMensal > 100 ? 'Velocidade Alta 🟢' : 'Velocidade Moderada / Baixa 🟡';
             
-            response += `* 📦 **Produto:** **${lote.item}** (Lote \`${lote.lote}\`)\n` +
+            responseText += `* 📦 **Produto:** **${lote.item}** (Lote \`${lote.lote}\`)\n` +
                         `  * ⏳ Vence em: **${new Date(lote.validade).toLocaleDateString('pt-BR')}** (Estado: **${lote.status}**)\n` +
                         `  * 🪙 Valor Comercial Impedido: **R$ ${lote.valor_economico.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**\n` +
                         `  * 📉 Consumo Físico Rastreável: ~${consMensal} un/mês (${velocidadeVenda})\n\n`;
           });
           
-          response += `*Recomendações IA:* Desencadeie promoções de escoamento rápido no PDV para esses lotes críticos antes do prazo limite de expiração.`;
+          responseText += `*Recomendações IA:* Desencadeie promoções de escoamento rápido no PDV para esses lotes críticos antes do prazo limite de expiração.`;
         } else {
-          response = `Muito bem! Todas as validades físicas ativas apontam maturidade segura com tempo superior a 45 dias operáveis.`;
+          responseText = `Muito bem! Todas as validades físicas ativas apontam maturidade segura com tempo superior a 45 dias operáveis.`;
         }
       }
-
-      // CASO 4: Curva ABC de Estoques
       else if (queryLower.includes('abc') || queryLower.includes('curva') || queryLower.includes('classificação')) {
-        response = `### 📊 Análise de Curva ABC sobre Ativos de Estoques\n\nA Curva ABC prioriza a relevância financeira dos seus insumos no almoxarifado:\n\n` +
+        responseText = `### 📊 Análise de Curva ABC sobre Ativos de Estoques\n\nA Curva ABC prioriza a relevância financeira dos seus insumos no almoxarifado:\n\n` +
                    `* 🟥 **Classe A (Alta Relevância - 80% do Valor):** **${countA} itens** totalizando **R$ ${valueA.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n` +
                    `* 🟨 **Classe B (Média Relevância - 15% do Valor):** **${countB} itens** totalizando **R$ ${valueB.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n` +
                    `* 🟦 **Classe C (Baixa Relevância - 5% do Valor):** **${countC} itens** totalizando **R$ ${valueC.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n` +
                    `### 💡 Insight de Gestão:\n` +
                    `Os itens de Classe A contêm seu maior capital parado e necessitam de processos de aquisições de Just-in-Time sob boletos enxutos, enquanto os itens de Classe C podem ser comprados em maior volume sob parcelas dilatadas.`;
       }
-
-      // CASO 5: Outras perguntas comerciais (Padrão de IA)
       else {
-        response = `### 🧠 Diagnóstico Comercial Inteligente\n\nRealizei uma busca ampla nas suas bases integradas de suprimentos:\n` +
+        responseText = `### 🧠 Diagnóstico Comercial Inteligente\n\nRealizei uma busca ampla nas suas bases integradas de suprimentos:\n` +
                    `* 📦 **Saldo Geral:** ${estoqueData.length} produtos em almoxarifados catalogados.\n` +
                    `* 📈 **Histórico de Saídas:** Média de consumo rastreado para os principais produtos comercializados.\n` +
                    `* 💰 **Capital Imobiliário:** R$ ${valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} total de valor de estocagem física.\n\n` +
@@ -1169,11 +1290,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                    `3. *"Qual a curva ABC de estocagem de capital parado?"*`;
       }
 
-      response += mapperNotice;
+      responseText += mapperNotice;
 
-      setChatHistory(prev => [...prev, { role: 'assistant', content: response, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }]);
+      setChatHistory(prev => [...prev, { role: 'assistant' as const, content: responseText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }]);
+    } finally {
       setIsAiTyping(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -1980,7 +2102,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                                   </span>
                                                 </div>
                                                 <div className="text-[8.5px] text-slate-500 font-mono">
-                                                  Qtd: {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                                  Qtd: {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
                                                 </div>
                                                 {l.vencendo && (
                                                   <span className="text-[8px] font-black text-red-600 bg-red-50 px-1 py-0.5 rounded border border-red-100 inline-block w-fit mt-0.5 animate-pulse">
@@ -1998,7 +2120,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                             <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
                                               totalQuantidadeSegura <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
                                             }`}>
-                                              {totalQuantidadeSegura.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} {row.unidade}
+                                              {totalQuantidadeSegura.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
                                             </span>
                                             {temLoteVencendo && (
                                               <span className="text-[8.5px] text-red-500 font-bold mt-1 bg-red-50 px-1 py-0.5 rounded border border-red-100 block" title="Lotes vencendo nos próximos 2 meses foram excluídos deste saldo">
@@ -2025,12 +2147,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       )}
                                       {selectedEstoqueColumns.includes('min_stock') && (
                                         <td className="py-2.5 text-right font-mono font-medium text-slate-600">
-                                          {(row.min_stock || 0).toLocaleString('pt-BR')} {row.unidade}
+                                          {(row.min_stock || 0).toLocaleString('pt-BR')}
                                         </td>
                                       )}
                                       {selectedEstoqueColumns.includes('safety_stock') && (
                                         <td className="py-2.5 text-right font-mono font-medium text-slate-600">
-                                          {(row.safety_stock || 0).toLocaleString('pt-BR')} {row.unidade}
+                                          {(row.safety_stock || 0).toLocaleString('pt-BR')}
                                         </td>
                                       )}
                                     </tr>

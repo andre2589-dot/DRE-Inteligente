@@ -257,7 +257,8 @@ function saveDb(data: DbSchema) {
 }
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Initialize server-side Geminiclient
 const apiKey = process.env.GEMINI_API_KEY;
@@ -301,6 +302,103 @@ app.get("/api/status", async (req, res) => {
 // GEMINI INTELLIGENT HELPER ENDPOINTS
 // ==========================================
 
+function findRealStockAnswer(prompt: string, procurementContext: any): string | null {
+  if (!procurementContext || !procurementContext.estoqueData || !Array.isArray(procurementContext.estoqueData)) {
+    return null;
+  }
+
+  const normalizeStr = (str: string) => {
+    return String(str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  };
+
+  const lowerPrompt = normalizeStr(prompt);
+  const estoque: any[] = procurementContext.estoqueData;
+
+  // 1. Tentar encontrar correspondência por código de produto ou por nome de insumo
+  let matchedItem: any = null;
+
+  // Procurar por código numérico exato mencionado no prompt (ex: "7165" ou "1918")
+  const digitMatch = lowerPrompt.match(/\b(\d{3,8})\b/);
+  if (digitMatch) {
+    const code = digitMatch[1];
+    matchedItem = estoque.find(e => normalizeStr(e.codigo).includes(code));
+  }
+
+  // Se não achou por código, tentar por correspondência de nome do insumo completo
+  if (!matchedItem) {
+    // Ordenamos os itens por comprimento do nome decrescente para bater termos maiores antes de menores
+    const sortedEstoque = [...estoque].sort((a, b) => normalizeStr(b.item).length - normalizeStr(a.item).length);
+    for (const item of sortedEstoque) {
+      const itemName = normalizeStr(item.item);
+      if (itemName && itemName.length > 2 && lowerPrompt.includes(itemName)) {
+        matchedItem = item;
+        break;
+      }
+    }
+  }
+
+  // Se ainda não achou, tentar por partes das palavras do nome do item
+  if (!matchedItem) {
+    for (const item of estoque) {
+      const itemName = normalizeStr(item.item);
+      const words = itemName.split(/[^a-z0-9]/).filter(w => w.length > 3);
+      if (words.length > 0 && words.some(word => lowerPrompt.includes(word))) {
+        matchedItem = item;
+        break;
+      }
+    }
+  }
+
+  if (matchedItem) {
+    const qty = Number(matchedItem.quantidade || 0);
+    const minStr = matchedItem.min_stock !== undefined ? matchedItem.min_stock : Math.round(qty * 0.8);
+    const safetyStr = matchedItem.safety_stock !== undefined ? matchedItem.safety_stock : Math.round(qty * 0.3);
+    const unit = matchedItem.unidade || 'potes';
+    const status = matchedItem.situacao_lote || 'LIBERADO';
+    const loc = matchedItem.local || 'Almoxarifado Principal';
+    const codeStr = matchedItem.codigo ? ` (código ${matchedItem.codigo})` : '';
+
+    const isAboveMin = qty >= minStr;
+    const isAboveSafety = qty >= safetyStr;
+
+    let response = `O saldo de estoque atual de ${matchedItem.item.toUpperCase()}${codeStr} é de ${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}.\n\n`;
+    response += `Esse saldo está com lote ${status.toLowerCase()} e armazenado no ${loc}, estando `;
+    
+    if (isAboveMin) {
+      response += `acima do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+    } else if (isAboveSafety) {
+      response += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit}, mas acima do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+    } else {
+      response += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e abaixo do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}, estando em nível crítico de reabastecimento.`;
+    }
+
+    return response;
+  }
+
+  // Se pedir itens críticos ou abaixo do estoque mínimo
+  if (lowerPrompt.includes("estoque minimo") || lowerPrompt.includes("critico") || lowerPrompt.includes("abaixo do minimo") || lowerPrompt.includes("ruptura") || lowerPrompt.includes("reabastecimento")) {
+    const abaixoDoMinimo = estoque.filter(e => Number(e.quantidade || 0) < Number(e.min_stock || 0));
+    if (abaixoDoMinimo.length > 0) {
+      let response = `Identifiquei que temos ${abaixoDoMinimo.length} itens abaixo do estoque mínimo de segurança no momento:\n\n`;
+      abaixoDoMinimo.forEach((item, index) => {
+        const qty = Number(item.quantidade || 0);
+        const min = Number(item.min_stock || 0);
+        const unit = item.unidade || 'potes';
+        response += `${index + 1}. ${item.item.toUpperCase()} (Código: ${item.codigo || 'S/C'}): ${qty.toLocaleString('pt-BR')} ${unit} em estoque (Estoque mínimo: ${min.toLocaleString('pt-BR')} ${unit}).\n`;
+      });
+      return response;
+    } else {
+      return "Todos os itens cadastrados no estoque estão operando acima dos seus limites mínimos de segurança no momento.";
+    }
+  }
+
+  return null;
+}
+
 // API endpoint for Gemini-powered financial and supply chain helper
 app.post("/api/gemini/chat", async (req, res) => {
   const { prompt, dreContext, history, attachedContext, assistantType, procurementContext } = req.body;
@@ -311,6 +409,15 @@ app.post("/api/gemini/chat", async (req, res) => {
   }
 
   const isProcurement = assistantType === "procurement";
+
+  // Se for uma pergunta direta de estoque que pode ser respondida com dados 100% reais do momento da pergunta
+  if (isProcurement && procurementContext) {
+    const realStockResponse = findRealStockAnswer(prompt, procurementContext);
+    if (realStockResponse) {
+      res.json({ text: realStockResponse });
+      return;
+    }
+  }
 
   try {
     // Simulation mode if API Key is missing
