@@ -450,20 +450,73 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
         
-        // Obter linhas em JSON
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
-        
+        let rows: Record<string, any>[] = [];
+        let detectedHeaders: string[] = [];
+        let finalSheetUsed = '';
+
+        // Iterar por todas as planilhas do arquivo para achar dados válidos
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet) continue;
+
+          // Converter para array de arrays (linha a linha, coluna a coluna) para analisar estrutura
+          const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
+          if (!rawRows || rawRows.length === 0) continue;
+
+          // Achar a primeira linha que parece conter cabeçalhos (ex: pelo menos 2 colunas preenchidas)
+          let headerIdx = -1;
+          for (let i = 0; i < rawRows.length; i++) {
+            const row = rawRows[i];
+            const nonBlankCount = row.filter((val: any) => val !== null && val !== undefined && String(val).trim() !== '').length;
+            if (nonBlankCount >= 2) {
+              headerIdx = i;
+              break;
+            }
+          }
+
+          // Se não achou uma linha com mais de 2 colunas, mas tem dados, usa a primeira que tiver qualquer dado
+          if (headerIdx === -1 && rawRows.length > 0) {
+            headerIdx = rawRows.findIndex(row => row.some((val: any) => val !== null && val !== undefined && String(val).trim() !== ''));
+          }
+
+          if (headerIdx !== -1) {
+            const rawHeaders = rawRows[headerIdx];
+            // Formatamos cabeçalhos, preenchendo vazios com "Coluna X"
+            const headers = rawHeaders.map((h: any, colIdx: number) => {
+              const str = String(h || '').trim();
+              return str ? str : `Coluna_${colIdx + 1}`;
+            });
+
+            const sheetRows: Record<string, any>[] = [];
+            // Coletar linhas após a linha de cabeçalho
+            for (let i = headerIdx + 1; i < rawRows.length; i++) {
+              const row = rawRows[i];
+              // Pular linhas totalmente vazias
+              const isRowEmpty = row.every((val: any) => val === null || val === undefined || String(val).trim() === '');
+              if (isRowEmpty) continue;
+
+              const rowObj: Record<string, any> = {};
+              headers.forEach((header: string, colIdx: number) => {
+                rowObj[header] = row[colIdx] !== undefined ? row[colIdx] : '';
+              });
+              sheetRows.push(rowObj);
+            }
+
+            if (sheetRows.length > 0) {
+              rows = sheetRows;
+              detectedHeaders = headers;
+              finalSheetUsed = sheetName;
+              break; // Achou uma planilha com dados reais! Paramos aqui.
+            }
+          }
+        }
+
         if (rows.length === 0) {
-          triggerToast("A planilha está vazia.");
+          triggerToast("Não conseguimos extrair dados válidos da planilha. Verifique se há dados nela.");
           return;
         }
 
-        // Detectar colunas/cabeçalhos
-        const detectedHeaders = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
-        
         // Mapear automaticamente com base em semelhança de nomes de colunas
         const findBestMatch = (aliases: string[]): string => {
           for (const alias of aliases) {
