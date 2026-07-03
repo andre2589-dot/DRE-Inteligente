@@ -365,6 +365,49 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
     const isAboveMin = qty >= minStr;
     const isAboveSafety = qty >= safetyStr;
 
+    // Verificar se o usuário está perguntando quanto tempo o estoque vai durar ou quando vai acabar
+    const isDurationQuery = lowerPrompt.includes("acabar") || 
+                            lowerPrompt.includes("esgotar") || 
+                            lowerPrompt.includes("tempo") || 
+                            lowerPrompt.includes("dura") || 
+                            lowerPrompt.includes("fim") || 
+                            lowerPrompt.includes("terminar") || 
+                            lowerPrompt.includes("esgotamento") || 
+                            lowerPrompt.includes("dias") || 
+                            lowerPrompt.includes("meses");
+
+    if (isDurationQuery) {
+      const monthsFilter = Number(procurementContext.consumoMonthsFilter || 1);
+      const consumoList = procurementContext.consumoData || [];
+      const matchedConsumoRows = consumoList.filter((c: any) => 
+        (c.codigo && matchedItem.codigo && normalizeStr(c.codigo) === normalizeStr(matchedItem.codigo)) || 
+        normalizeStr(c.item).includes(normalizeStr(matchedItem.item)) ||
+        normalizeStr(matchedItem.item).includes(normalizeStr(c.item))
+      );
+
+      if (matchedConsumoRows.length > 0) {
+        const totalConsRaw = matchedConsumoRows.reduce((sum: number, c: any) => sum + Number(c.quantidade_consumida || 0), 0);
+        const consQty = totalConsRaw / monthsFilter;
+        if (consQty > 0) {
+          const durationMonths = qty / consQty;
+          const durationDays = Math.round(durationMonths * 30);
+          
+          let response = `### ⏳ Previsão de Esgotamento de Estoque: **${matchedItem.item.toUpperCase()}**\n\n`;
+          response += `* 📦 **Estoque Físico Atual:** **${qty.toLocaleString('pt-BR')} ${unit}**\n`;
+          response += `* 📈 **Consumo Médio Mensal (Calculado sobre ${monthsFilter} ${monthsFilter === 1 ? 'mês' : 'meses'}):** **${consQty.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}**\n\n`;
+          response += `👉 **Cálculo de Cobertura:**\n`;
+          response += `O sistema cruzou as informações do estoque atual com o consumo médio mensal e realizou os cálculos:\n`;
+          response += `**${qty.toLocaleString('pt-BR')} ${unit}** (estoque atual) ÷ **${consQty.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}** (consumo médio mensal) = **${durationMonths.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} meses**.\n\n`;
+          response += `Portanto, seu estoque atual de **${matchedItem.item.toUpperCase()}** vai acabar em aproximadamente **${durationMonths.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} meses** (cerca de **${durationDays} dias**).\n\n`;
+          response += `_Nota: Este cálculo assume uma taxa de consumo mensal constante baseada na média dos meses selecionados no painel._`;
+          return response;
+        }
+      }
+      
+      let response = `O estoque atual de **${matchedItem.item.toUpperCase()}** é de **${qty.toLocaleString('pt-BR')} ${unit}**.\n\nNão encontrei registros de consumo mensal ativo para este item na sua base de dados, por isso não é possível prever em quanto tempo irá acabar de forma automatizada.`;
+      return response;
+    }
+
     let response = `O saldo de estoque atual de ${matchedItem.item.toUpperCase()}${codeStr} é de ${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}.\n\n`;
     response += `Esse saldo está com lote ${status.toLowerCase()} e armazenado no ${loc}, estando `;
     
@@ -377,6 +420,30 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
     }
 
     return response;
+  }
+
+  // Se perguntar sobre consumo em geral
+  if (lowerPrompt.includes("consumo") || lowerPrompt.includes("media de consumo") || lowerPrompt.includes("gasto mensal") || lowerPrompt.includes("saida mensal")) {
+    const filterMonths = Number(procurementContext.consumoMonthsFilter || 1);
+    const useConsumoList = procurementContext.consumoAnaliseData && procurementContext.consumoAnaliseData.length > 0 
+      ? procurementContext.consumoAnaliseData 
+      : (procurementContext.consumoData || []).map((c: any) => ({
+          codigo: c.codigo,
+          item: c.item,
+          quantidade_consumida: Number(c.quantidade_consumida || 0) / filterMonths,
+          mes_ano: `${filterMonths} ${filterMonths === 1 ? 'mês' : 'meses'}`
+        }));
+
+    if (useConsumoList && useConsumoList.length > 0) {
+      let response = `### 📈 Análise de Consumo Médio de Insumos\n\nIdentifiquei as seguintes médias calculadas de consumo (período de divisão configurado em **${filterMonths} ${filterMonths === 1 ? 'mês' : 'meses'}**):\n\n`;
+      useConsumoList.forEach((item: any, idx: number) => {
+        const qtyCons = Number(item.quantidade_consumida || 0);
+        const codeStr = item.codigo ? ` (Código: ${item.codigo})` : '';
+        response += `${idx + 1}. **${item.item.toUpperCase()}**${codeStr}: Média de **${qtyCons.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}** por período.\n`;
+      });
+      response += `\n_Dica: Você pode alterar o número de meses do filtro do cabeçalho da tabela de Consumo para recalcular instantaneamente as médias e estimativas do estoque!_`;
+      return response;
+    }
   }
 
   // Se pedir itens críticos ou abaixo do estoque mínimo
