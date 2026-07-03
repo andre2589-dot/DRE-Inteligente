@@ -713,9 +713,11 @@ app.post("/api/procurement/consumption", async (req, res) => {
   const cleanItems = consumption_items.map((item: any) => ({
     id: item.id || `cons_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     company_id: String(company_id),
+    codigo: item.codigo || '',
     item: item.item,
     quantidade_consumida: Number(item.quantidade_consumida) || 0,
     mes_ano: item.mes_ano || '06/2026',
+    custo_total: Number(item.custo_total) || 0,
     created_at: item.created_at || new Date().toISOString()
   }));
 

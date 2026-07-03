@@ -77,6 +77,7 @@ interface EstoqueItem {
 
 interface ConsumoItem {
   id: string;
+  codigo?: string;
   item: string;
   quantidade_consumida: number;
   mes_ano: string;
@@ -542,7 +543,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
             qtyCol: findBestMatch(['quantidade', 'qtd', 'consumido', 'saídas', 'vendas', 'volume']),
             mesAnoCol: findBestMatch(['mês', 'mes', 'ano', 'referência', 'data', 'periodo', 'período']),
-            custoTotalCol: findBestMatch(['custo', 'total', 'custo total', 'valor', 'custo acumulado'])
+            custoTotalCol: findBestMatch(['custo', 'total', 'custo total', 'valor', 'custo acumulado']),
+            codigoCol: findBestMatch(['código', 'codigo', 'cod', 'id', 'produto'])
           };
         } else if (tipo === 'historico_precos') {
           suggestedMapping = {
@@ -655,9 +657,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const qty = Number(row[suggestedMapping.qtyCol]) || 0;
         const mesAno = String(row[suggestedMapping.mesAnoCol] || '').trim() || new Date().toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric' });
         const custoTotal = Number(row[suggestedMapping.custoTotalCol]) || (qty * 10);
+        const codigo = suggestedMapping.codigoCol ? String(row[suggestedMapping.codigoCol] || '').trim() : '';
         
         return {
           id: 'cons_import_' + Date.now() + '_' + idx,
+          codigo,
           item,
           quantidade_consumida: qty,
           mes_ano: mesAno,
@@ -666,13 +670,20 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       }).filter(r => r.item !== '');
 
       const baseMockData = mappedRows.length > 0 ? mappedRows : [
-        { id: 'cons_up_1', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
-        { id: 'cons_up_2', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
-        { id: 'cons_up_3', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 }
+        { id: 'cons_up_1', codigo: '01918', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
+        { id: 'cons_up_2', codigo: '04808', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
+        { id: 'cons_up_3', codigo: '00633', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 }
       ];
 
       setConsumoData(prev => {
         if (mappedRows.length > 0) {
+          // Ajustar as colunas exibidas para se encaixarem com a planilha mapeada
+          const colsToDisplay = ['item', 'quantidade_consumida'];
+          if (suggestedMapping.codigoCol) colsToDisplay.unshift('codigo');
+          if (suggestedMapping.mesAnoCol) colsToDisplay.push('mes_ano');
+          if (suggestedMapping.custoTotalCol) colsToDisplay.push('custo_total');
+          setSelectedConsumoColumns(colsToDisplay);
+          
           return mappedRows;
         }
         const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
@@ -763,6 +774,10 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   // Colunas selecionadas para exibição no painel Saldo de Estoque Atual e controle do dropdown de seleção
   const [selectedEstoqueColumns, setSelectedEstoqueColumns] = useState<string[]>(['codigo', 'item', 'lote', 'quantidade', 'custo', 'venda']);
   const [isColumnDropdownOpen, setIsColumnDropdownOpen] = useState<boolean>(false);
+
+  // Colunas selecionadas para exibição no painel Consumo Mensal e controle do dropdown de seleção
+  const [selectedConsumoColumns, setSelectedConsumoColumns] = useState<string[]>(['codigo', 'item', 'mes_ano', 'quantidade_consumida', 'custo_total']);
+  const [isConsumoColumnDropdownOpen, setIsConsumoColumnDropdownOpen] = useState<boolean>(false);
 
   // Estados do Chatbot IA Inteligente
   const [chatInput, setChatInput] = useState('');
@@ -1498,6 +1513,20 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                 {pendingUpload.tipo === 'consumo' && (
                   <>
                     <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código do Produto (Chave Primária) *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
                       <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição do Item *</label>
                       <select
                         value={pendingUpload.suggestedMapping.itemCol}
@@ -2000,6 +2029,60 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                             </select>
                           </>
                         )}
+                        {activeSubData === 'consumo' && (
+                          <div className="relative inline-block text-left">
+                            <button
+                              onClick={() => setIsConsumoColumnDropdownOpen(!isConsumoColumnDropdownOpen)}
+                              className={`px-3 py-1.5 rounded-xl font-bold uppercase text-[9px] tracking-wide transition-all select-none cursor-pointer border flex items-center gap-1.5 shrink-0 ${
+                                isConsumoColumnDropdownOpen 
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-extrabold' 
+                                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'
+                              }`}
+                              title="Selecionar colunas visíveis para exibição no consumo mensal"
+                            >
+                              <Settings className="h-3.5 w-3.5 text-emerald-500" />
+                              <span>Colunas ({selectedConsumoColumns.length})</span>
+                            </button>
+                            {isConsumoColumnDropdownOpen && (
+                              <>
+                                <div className="fixed inset-0 z-10" onClick={() => setIsConsumoColumnDropdownOpen(false)} />
+                                <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-white border border-slate-200 shadow-xl z-20 p-3.5 space-y-2.5">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Colunas Visíveis</p>
+                                  <div className="space-y-1.5 max-h-60 overflow-y-auto font-sans">
+                                    {[
+                                      { id: 'codigo', label: 'Código' },
+                                      { id: 'item', label: 'Descrição' },
+                                      { id: 'mes_ano', label: 'Mês Ref.' },
+                                      { id: 'quantidade_consumida', label: 'Consumo Mensal' },
+                                      { id: 'custo_total', label: 'Custo Mensal' }
+                                    ].map((col) => {
+                                      const isChecked = selectedConsumoColumns.includes(col.id);
+                                      return (
+                                        <label key={col.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => {
+                                              if (isChecked) {
+                                                if (selectedConsumoColumns.length > 1) {
+                                                  setSelectedConsumoColumns(selectedConsumoColumns.filter(c => c !== col.id));
+                                                }
+                                              } else {
+                                                setSelectedConsumoColumns([...selectedConsumoColumns, col.id]);
+                                              }
+                                            }}
+                                            className="rounded border-slate-300 text-emerald-650 focus:ring-emerald-500 h-3.5 w-3.5"
+                                          />
+                                          <span>{col.label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
                         <div className="relative flex-1 sm:w-44">
                           <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-slate-400" />
                           <input
@@ -2170,10 +2253,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         <table className="w-full text-left bg-white rounded-xl">
                           <thead>
                             <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
-                              <th className="pb-1.5">Descrição</th>
-                              <th className="pb-1.5">Mês Ref.</th>
-                              <th className="pb-1.5 text-right">Consumo Mensal</th>
-                              <th className="pb-1.5 text-right">Custo Mensal Consumido</th>
+                              {selectedConsumoColumns.includes('codigo') && <th className="pb-1.5">Código</th>}
+                              {selectedConsumoColumns.includes('item') && <th className="pb-1.5">Descrição</th>}
+                              {selectedConsumoColumns.includes('mes_ano') && <th className="pb-1.5">Mês Ref.</th>}
+                              {selectedConsumoColumns.includes('quantidade_consumida') && <th className="pb-1.5 text-right">Consumo Mensal</th>}
+                              {selectedConsumoColumns.includes('custo_total') && <th className="pb-1.5 text-right">Custo Mensal Consumido</th>}
                               <th className="pb-1.5 text-center">Excluir</th>
                             </tr>
                           </thead>
@@ -2182,10 +2266,21 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                               .filter(c => c.item.toLowerCase().includes(searchQuery.toLowerCase()))
                               .map((row) => (
                                 <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                  <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
-                                  <td className="py-2.5 font-mono font-semibold text-emerald-700">{row.mes_ano}</td>
-                                  <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">{row.quantidade_consumida.toLocaleString('pt-BR')} unidades</td>
-                                  <td className="py-2.5 text-right font-mono font-extrabold text-emerald-650">R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  {selectedConsumoColumns.includes('codigo') && (
+                                    <td className="py-2.5 font-mono text-slate-500 font-semibold">{row.codigo || '—'}</td>
+                                  )}
+                                  {selectedConsumoColumns.includes('item') && (
+                                    <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
+                                  )}
+                                  {selectedConsumoColumns.includes('mes_ano') && (
+                                    <td className="py-2.5 font-mono font-semibold text-emerald-700">{row.mes_ano}</td>
+                                  )}
+                                  {selectedConsumoColumns.includes('quantidade_consumida') && (
+                                    <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">{row.quantidade_consumida.toLocaleString('pt-BR')}</td>
+                                  )}
+                                  {selectedConsumoColumns.includes('custo_total') && (
+                                    <td className="py-2.5 text-right font-mono font-extrabold text-emerald-650">R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                  )}
                                   <td className="py-2.5 text-center">
                                     <button onClick={() => handleDeleteConsumo(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
                                       <Trash className="h-3.5 w-3.5" />
