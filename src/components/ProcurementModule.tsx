@@ -583,6 +583,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         // O usuário quer que "O sistema precisa registrar toda planilha, mas mostrar nesse painel...".
         // Portanto, se há linhas mapeadas, podemos substituir tudo da planilha para que as informações sejam 100% reais do arquivo importado!
         if (mappedRows.length > 0) {
+          // Ajustar as colunas exibidas para se encaixarem com a planilha mapeada
+          const colsToDisplay = ['item', 'quantidade'];
+          if (suggestedMapping.codigoCol) colsToDisplay.unshift('codigo');
+          if (suggestedMapping.loteCol) colsToDisplay.push('lote');
+          if (suggestedMapping.costCol) colsToDisplay.push('custo');
+          if (suggestedMapping.precoVendaCol) colsToDisplay.push('venda');
+          setSelectedEstoqueColumns(colsToDisplay);
+          
           return mappedRows;
         }
         const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
@@ -700,7 +708,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [consolidatedByCode, setConsolidatedByCode] = useState<boolean>(true);
 
   // Colunas selecionadas para exibição no painel Saldo de Estoque Atual e controle do dropdown de seleção
-  const [selectedEstoqueColumns, setSelectedEstoqueColumns] = useState<string[]>(['codigo', 'item', 'lote', 'quantidade']);
+  const [selectedEstoqueColumns, setSelectedEstoqueColumns] = useState<string[]>(['codigo', 'item', 'lote', 'quantidade', 'custo', 'venda']);
   const [isColumnDropdownOpen, setIsColumnDropdownOpen] = useState<boolean>(false);
 
   // Estados do Chatbot IA Inteligente
@@ -1661,7 +1669,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           setUploadLoading(activeSubData);
                           setTimeout(() => {
                             setUploadLoading(null);
-                            initiateFileUpload(activeSubData, file.name);
+                            initiateFileUpload(activeSubData, file);
                           }, 800);
                         }
                       }}
@@ -1675,7 +1683,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                             setUploadLoading(activeSubData);
                             setTimeout(() => {
                               setUploadLoading(null);
-                              initiateFileUpload(activeSubData, file.name);
+                              initiateFileUpload(activeSubData, file);
                             }, 800);
                           }
                         };
