@@ -302,12 +302,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           }));
         }
         if (mappedInv.length === 0) {
-          mappedInv = [
-            { id: 'est_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, unidade: 'potes', min_stock: 60, safety_stock: 20, custo_unitario: 41.50, preco_venda: 89.90, local: 'Prateleira Especial', frequencia_venda: 'Alta', codigo: '01918', situacao_lote: 'LIBERADO' },
-            { id: 'est_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, unidade: 'potes', min_stock: 40, safety_stock: 15, custo_unitario: 28.90, preco_venda: 59.90, local: 'Almoxarifado', frequencia_venda: 'Média', codigo: '04808', situacao_lote: 'LIBERADO' },
-            { id: 'est_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, unidade: 'potes', min_stock: 80, safety_stock: 25, custo_unitario: 119.00, preco_venda: 249.90, local: 'Câmara Fria', frequencia_venda: 'Alta', codigo: '00633', situacao_lote: 'LIBERADO' },
-            { id: 'est_up_4', item: 'PEG 4000', lote: 'PG-400', quantidade: 850, unidade: 'kg', min_stock: 300, safety_stock: 100, custo_unitario: 12.00, preco_venda: 25.00, local: 'Almoxarifado Principal', frequencia_venda: 'Alta', codigo: '00642', situacao_lote: 'LIBERADO' }
-          ];
+          mappedInv = [];
         }
         setEstoqueData(mappedInv);
         
@@ -322,12 +317,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           }));
         }
         if (mappedCons.length === 0) {
-          mappedCons = [
-            { id: 'cons_up_1', codigo: '01918', item: 'Creatina Monohidratada 250g', quantidade_consumida: 140, mes_ano: '06/2026', custo_total: 5880.00 },
-            { id: 'cons_up_2', codigo: '04808', item: 'BCAA Ultra Pure', quantidade_consumida: 55, mes_ano: '06/2026', custo_total: 1589.50 },
-            { id: 'cons_up_3', codigo: '00633', item: 'Whey Protein Isolado 1kg', quantidade_consumida: 125, mes_ano: '06/2026', custo_total: 14875.00 },
-            { id: 'cons_up_4', codigo: '00642', item: 'PEG 4000', quantidade_consumida: 170, mes_ano: '06/2026', custo_total: 2040.00 }
-          ];
+          mappedCons = [];
         }
         setConsumoData(mappedCons);
  
@@ -343,11 +333,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           }));
         }
         if (mappedPrices.length === 0) {
-          mappedPrices = [
-            { id: 'pre_up_1', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriAtacado Brasil', preco_unitario: 39.90, data_compra: '2026-06-19', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-11582' },
-            { id: 'pre_up_2', item: 'Whey Protein Isolado 1kg', fornecedor: 'SupleMax Distribuidora', preco_unitario: 115.00, data_compra: '2026-06-18', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-11579' },
-            { id: 'pre_up_3', item: 'BCAA Ultra Pure', fornecedor: 'Globo Suplementos', preco_unitario: 27.50, data_compra: '2026-06-17', condicao_pagamento: 'Pix', codigo_pedido: 'PED-11511' }
-          ];
+          mappedPrices = [];
         }
         setHistoricoPrecosData(mappedPrices);
  
@@ -372,11 +358,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           });
         }
         if (mappedVal.length === 0) {
-          mappedVal = [
-            { id: 'val_up_1', item: 'Creatina Monohidratada 250g', lote: 'CR-905', quantidade: 65, validade: '2027-02-14', status: 'Saudável', valor_economico: 2697.50 },
-            { id: 'val_up_2', item: 'BCAA Ultra Pure', lote: 'BC-11', quantidade: 90, validade: '2026-07-28', status: 'Atenção', valor_economico: 2601.00 },
-            { id: 'val_up_3', item: 'Whey Protein Isolado 1kg', lote: 'WP-742', quantidade: 110, validade: '2026-06-25', status: 'Crítico', valor_economico: 13090.00 }
-          ];
+          mappedVal = [];
         }
         setValidadeLotesData(mappedVal);
       } catch (err) {
@@ -1437,12 +1419,18 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           condicao_pagamento: h.condicao_pagamento,
           codigo_pedido: h.codigo_pedido
         })),
-        validadeLotesData: validadeLotesData.map(v => ({
+        validadeLotesData: getProcessedValidadeData().map(v => ({
+          codigo: v.codigo || '',
           item: v.item,
           lote: v.lote,
           quantidade: v.quantidade,
           validade: v.validade,
-          status: v.status,
+          status: v.riscoStatus,
+          diasParaVencer: v.diasParaVencer,
+          consumoMensal: v.consumoMensal,
+          sobraProjetada: v.sobraProjetada,
+          perdaFinanceiraProjetada: v.perdaFinanceiraProjetada,
+          sugestaoCompra: v.sugestaoCompra,
           valor_economico: v.valor_economico
         }))
       };

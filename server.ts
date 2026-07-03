@@ -318,6 +318,81 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   const lowerPrompt = normalizeStr(prompt);
   const estoque: any[] = procurementContext.estoqueData;
 
+  const isValidadeQuery = lowerPrompt.includes("vencid") || 
+                          lowerPrompt.includes("vencer") || 
+                          lowerPrompt.includes("validade") || 
+                          lowerPrompt.includes("expir") ||
+                          lowerPrompt.includes("perda");
+
+  if (isValidadeQuery) {
+    const validadeList = procurementContext.validadeLotesData || [];
+    
+    // Função para formatar data em DD/MM/AAAA
+    const formatDateStrBr = (dateStr: string) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      return `${day}/${month}/${d.getFullYear()}`;
+    };
+
+    // Filtros
+    const itensVencidos = validadeList.filter((v: any) => v.diasParaVencer <= 0 || v.status === 'Vencido');
+    const itensRisco = validadeList.filter((v: any) => v.status === 'Risco de Perda' && v.diasParaVencer > 0);
+
+    const asksSpecificallyForVencidos = lowerPrompt.includes("vencido") || lowerPrompt.includes("vencida") || lowerPrompt.includes("venceu");
+
+    if (asksSpecificallyForVencidos) {
+      if (itensVencidos.length > 0) {
+        let response = `Sim, identifiquei itens vencidos em seu estoque:\n\n`;
+        itensVencidos.forEach((item: any, idx: number) => {
+          const formattedVal = formatDateStrBr(item.validade);
+          const diasAtras = Math.abs(item.diasParaVencer);
+          const consText = item.consumoMensal > 0 ? `${item.consumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'não registrado';
+          response += `${idx + 1}. ⚠️ **${item.item.toUpperCase()}** (Código: ${item.codigo || 'S/C'} | Lote: ${item.lote})\n`;
+          response += `  * **Quantidade Vencida:** ${Number(item.quantidade).toLocaleString('pt-BR')} un\n`;
+          response += `  * **Data de Vencimento:** ${formattedVal} (vencido em relação à data atual de 03/07/2026)\n`;
+          response += `  * **Consumo Médio:** ${consText}\n`;
+          response += `  * **Status:** Vencido\n\n`;
+        });
+        return response;
+      } else {
+        return "Atualmente, você não possui nenhum item vencido em seu estoque. Todos os lotes analisados apresentam vencimentos futuros e estão dentro do prazo de validade.";
+      }
+    }
+
+    // Se for uma pergunta geral de validades/risco de perda
+    let response = `### 📅 Controle de Validade e Análise de Risco de Estoque\n\n`;
+    response += `Analisando os lotes registrados no sistema em relação à data de hoje (03/07/2026):\n\n`;
+
+    if (itensVencidos.length > 0) {
+      response += `🚨 **Lotes Vencidos (${itensVencidos.length}):**\n`;
+      itensVencidos.forEach((item: any) => {
+        const formattedVal = formatDateStrBr(item.validade);
+        response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vencido em ${formattedVal} (${Number(item.quantidade).toLocaleString('pt-BR')} un vencidas).\n`;
+      });
+      response += `\n`;
+    } else {
+      response += `🟢 **Nenhum lote vencido no estoque atualmente.**\n\n`;
+    }
+
+    if (itensRisco.length > 0) {
+      response += `⚠️ **Lotes com Risco de Perda (${itensRisco.length}):**\n`;
+      response += `Esses lotes vencerão antes de serem totalmente consumidos de acordo com o consumo mensal médio:\n`;
+      itensRisco.forEach((item: any) => {
+        const formattedVal = formatDateStrBr(item.validade);
+        response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vence em ${formattedVal} (Faltam ${item.diasParaVencer} dias). Sobra estimada de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
+      });
+    } else {
+      response += `🟢 **Todos os lotes dentro da validade têm cobertura de consumo suficiente antes de vencer (sem risco de perda).**\n`;
+    }
+
+    return response;
+  }
+
   // 1. Tentar encontrar correspondência por código de produto ou por nome de insumo
   let matchedItem: any = null;
 
