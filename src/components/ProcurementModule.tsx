@@ -146,6 +146,14 @@ const parseValidadeDate = (val: any): string => {
   // 3. Fallback para parser padrão do JS
   const d = new Date(valStr);
   if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    if (year > 3000 && year < 100000) {
+      const excelEpoch = new Date(1899, 11, 30);
+      const targetDate = new Date(excelEpoch.getTime() + year * 24 * 60 * 60 * 1000);
+      if (!isNaN(targetDate.getTime())) {
+        return targetDate.toISOString().split('T')[0];
+      }
+    }
     return d.toISOString().split('T')[0];
   }
 
@@ -162,6 +170,33 @@ const cleanFuzzy = (s: string) => {
   // Mantém apenas letras e números
   cleaned = cleaned.replace(/[^a-z0-9]/g, '');
   return cleaned.trim();
+};
+
+const matchWordsFuzzy = (s1: string, s2: string): boolean => {
+  const getWords = (s: string): string[] => {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/\(?usar\)?/gi, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2); // ignora palavras muito curtas
+  };
+
+  const w1 = getWords(s1);
+  const w2 = getWords(s2);
+  if (w1.length === 0 || w2.length === 0) return false;
+
+  // Se alguma palavra significativa e longa (ex: alendronato) bater exatamente, ou se uma contiver a outra
+  const hasCommonSignificantWord = w1.some(word1 => 
+    word1.length >= 6 && w2.some(word2 => word2 === word1 || word2.includes(word1) || word1.includes(word2))
+  );
+  if (hasCommonSignificantWord) return true;
+
+  const common = w1.filter(word => w2.includes(word));
+  const minLength = Math.min(w1.length, w2.length);
+  return common.length / minLength >= 0.5; // pelo menos 50% de match de palavras
 };
 
 interface RegistrosArquivos {
@@ -832,7 +867,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           const matchEstoque = estoqueData.find(e => {
             const eClean = cleanFuzzy(e.item);
             const vClean = cleanFuzzy(item);
-            return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean);
+            return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean) || matchWordsFuzzy(e.item, item);
           });
           if (matchEstoque && matchEstoque.codigo) {
             codigo = matchEstoque.codigo;
@@ -840,7 +875,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             const matchCons = consumoData.find(c => {
               const cClean = cleanFuzzy(c.item);
               const vClean = cleanFuzzy(item);
-              return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean);
+              return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean) || matchWordsFuzzy(c.item, item);
             });
             if (matchCons && matchCons.codigo) {
               codigo = matchCons.codigo;
@@ -1127,7 +1162,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       const matchEstoque = estoqueData.find(e => {
         const eClean = cleanFuzzy(e.item);
         const vClean = cleanFuzzy(v.item);
-        return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean);
+        return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean) || matchWordsFuzzy(e.item, v.item);
       });
 
       if (!codigo && matchEstoque && matchEstoque.codigo) {
@@ -1136,7 +1171,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const matchCons = consumoData.find(c => {
           const cClean = cleanFuzzy(c.item);
           const vClean = cleanFuzzy(v.item);
-          return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean);
+          return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean) || matchWordsFuzzy(c.item, v.item);
         });
         if (matchCons && matchCons.codigo) {
           codigo = matchCons.codigo;
@@ -1157,6 +1192,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         return cClean === vClean || 
                cClean.includes(vClean) || 
                vClean.includes(cClean) || 
+               matchWordsFuzzy(c.item, v.item) ||
                (codigo && c.codigo && c.codigo === codigo);
       });
       const totalConsRaw = matchedConsRows.reduce((sum, c) => sum + Number(c.quantidade_consumida || 0), 0);
@@ -1195,6 +1231,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           return eClean === vClean || 
                  eClean.includes(vClean) || 
                  vClean.includes(eClean) || 
+                 matchWordsFuzzy(e.item, v.item) ||
                  (codigo && e.codigo && e.codigo === codigo);
         })
         .reduce((sum, e) => sum + e.quantidade, 0);
@@ -2810,18 +2847,17 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     {/* RENDER PLANILHA VALIDADES */}
                     {activeSubData === 'validade' && (
                       <div className="overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
-                        <table className="min-w-[1200px] w-full text-left bg-white rounded-xl table-fixed">
+                        <table className="min-w-[1000px] w-full text-left bg-white rounded-xl table-fixed">
                           <thead>
                             <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1.5 text-left bg-slate-50/50">
-                              <th className="pb-2 pt-3 px-3 w-[8%]">Código</th>
-                              <th className="pb-2 pt-3 w-[22%]">Descrição</th>
-                              <th className="pb-2 pt-3 w-[11%]">Número do Lote</th>
-                              <th className="pb-2 pt-3 text-right w-[11%] pr-4">Quantidade do Lote</th>
+                              <th className="pb-2 pt-3 px-3 w-[10%]">Código</th>
+                              <th className="pb-2 pt-3 w-[30%]">Descrição</th>
+                              <th className="pb-2 pt-3 w-[10%]">Número do Lote</th>
+                              <th className="pb-2 pt-3 text-right w-[10%] pr-4">Quantidade do Lote</th>
                               <th className="pb-2 pt-3 text-center w-[10%]">Validade</th>
                               <th className="pb-2 pt-3 text-center w-[10%]">Dias p/ Vencer</th>
                               <th className="pb-2 pt-3 text-right w-[10%] pr-4">Consumo Médio</th>
                               <th className="pb-2 pt-3 w-[15%]">Análise de Risco & Cobertura</th>
-                              <th className="pb-2 pt-3 w-[15%]">Sugestão de Reposição</th>
                               <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
                             </tr>
                           </thead>
@@ -2876,35 +2912,24 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       {row.riscoStatus === 'Vencido' ? (
                                         <div className="flex flex-col">
                                           <span className="text-red-650 font-black flex items-center gap-1 text-[10px]">
-                                            ⚠️ Perda Confirmada
+                                            ⚠️ Perda: {row.quantidade.toLocaleString('pt-BR')} un
                                           </span>
-                                          <span className="text-[9px] text-slate-400">Prejuízo de R$ {row.perdaFinanceiraProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          <span className="text-[9px] text-red-500 font-semibold font-mono uppercase">Vencido</span>
                                         </div>
                                       ) : row.riscoStatus === 'Risco de Perda' ? (
                                         <div className="flex flex-col">
                                           <span className="text-red-550 font-black flex items-center gap-1 text-[10px]">
                                             🚨 Sobrarão {row.sobraProjetada.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un
                                           </span>
-                                          <span className="text-[9px] text-red-450 font-semibold">Preda: R$ {row.perdaFinanceiraProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          <span className="text-[9px] text-amber-600 font-semibold font-mono uppercase">Previsão de Sobra</span>
                                         </div>
                                       ) : (
                                         <div className="flex flex-col">
                                           <span className="text-emerald-600 font-extrabold flex items-center gap-1 text-[10px]">
                                             🟢 Sem Risco
                                           </span>
-                                          <span className="text-[9px] text-slate-400 font-medium">100% consumido</span>
+                                          <span className="text-[9px] text-slate-450 font-medium font-mono uppercase">100% Consumido</span>
                                         </div>
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 pr-2">
-                                      {row.sugestaoCompra.startsWith('🛒') ? (
-                                        <span className="bg-indigo-50 border border-indigo-100 text-indigo-750 px-2 py-0.5 rounded-lg font-extrabold text-[9px] shadow-3xs inline-block animate-pulse truncate max-w-full">
-                                          {row.sugestaoCompra}
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-400 text-[9px] font-medium italic truncate max-w-full block">
-                                          {row.sugestaoCompra}
-                                        </span>
                                       )}
                                     </td>
                                     <td className="py-2.5 text-center">
