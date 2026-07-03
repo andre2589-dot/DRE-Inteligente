@@ -96,6 +96,7 @@ interface PrecoHistoricoItem {
 
 interface ValidadeLoteItem {
   id: string;
+  codigo?: string;
   item: string;
   lote: string;
   quantidade: number;
@@ -103,6 +104,65 @@ interface ValidadeLoteItem {
   status: string; // 'Crítico' | 'Atenção' | 'Saudável' | 'Vencido'
   valor_economico: number;
 }
+
+// Funções utilitárias de suporte a parsing de datas do Excel/CSV e cruzamento difuso (fuzzy match)
+const parseValidadeDate = (val: any): string => {
+  if (!val) {
+    return new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  }
+  const valStr = String(val).trim();
+  if (!valStr) {
+    return new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  }
+
+  // 1. Verifica se é número serial de data do Excel (ex: 46204)
+  if (/^\d+(\.\d+)?$/.test(valStr)) {
+    const num = Number(valStr);
+    if (num > 20000 && num < 100000) {
+      const excelEpoch = new Date(1899, 11, 30);
+      const targetDate = new Date(excelEpoch.getTime() + num * 24 * 60 * 60 * 1000);
+      if (!isNaN(targetDate.getTime())) {
+        return targetDate.toISOString().split('T')[0];
+      }
+    }
+  }
+
+  // 2. Verifica se está em formato DD/MM/YYYY ou DD-MM-YYYY
+  const dmYRegex = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/;
+  const dmYMatch = valStr.match(dmYRegex);
+  if (dmYMatch) {
+    const day = parseInt(dmYMatch[1], 10);
+    const month = parseInt(dmYMatch[2], 10) - 1; // 0-indexed no JS
+    let year = parseInt(dmYMatch[3], 10);
+    if (year < 100) {
+      year += year < 50 ? 2000 : 1900;
+    }
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+  }
+
+  // 3. Fallback para parser padrão do JS
+  const d = new Date(valStr);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().split('T')[0];
+  }
+
+  // Fallback seguro de 180 dias à frente
+  return new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+};
+
+const cleanFuzzy = (s: string) => {
+  let cleaned = String(s || '').toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // remove acentos
+  // Remove menções de "usar" (como (usar), usar)
+  cleaned = cleaned.replace(/\(?usar\)?/gi, '');
+  // Mantém apenas letras e números
+  cleaned = cleaned.replace(/[^a-z0-9]/g, '');
+  return cleaned.trim();
+};
 
 interface RegistrosArquivos {
   id: string;
@@ -262,13 +322,15 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         if (resVal.ok) {
           const data = await resVal.json();
           mappedVal = data.map((item: any) => {
-            const calculatedValDays = Math.round((new Date(item.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+            const parsedVal = parseValidadeDate(item.validade);
+            const calculatedValDays = Math.round((new Date(parsedVal).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
             let calculatedStatus = 'Saudável';
             if (calculatedValDays < 0) calculatedStatus = 'Vencido';
             else if (calculatedValDays <= 15) calculatedStatus = 'Crítico';
             else if (calculatedValDays <= 45) calculatedStatus = 'Atenção';
             return {
               ...item,
+              validade: parsedVal,
               status: calculatedStatus,
               valor_economico: item.valor_economico || (item.quantidade * 50)
             };
@@ -760,10 +822,35 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const item = String(row[suggestedMapping.itemCol] || '').trim();
         const lote = String(row[suggestedMapping.loteCol] || 'Único').trim();
         const qty = Number(row[suggestedMapping.qtyCol]) || 0;
-        const validade = String(row[suggestedMapping.validadeCol] || '').trim() || new Date(Date.now() + 180*24*60*60*1000).toISOString().split('T')[0];
+        const rawValidade = String(row[suggestedMapping.validadeCol] || '').trim();
+        const validade = parseValidadeDate(rawValidade);
+        
+        let codigo = suggestedMapping.codigoCol ? String(row[suggestedMapping.codigoCol] || '').trim() : '';
+        
+        // Se o código estiver em branco no arquivo, cruza dinamicamente com o estoque para obter o código correto
+        if (!codigo) {
+          const matchEstoque = estoqueData.find(e => {
+            const eClean = cleanFuzzy(e.item);
+            const vClean = cleanFuzzy(item);
+            return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean);
+          });
+          if (matchEstoque && matchEstoque.codigo) {
+            codigo = matchEstoque.codigo;
+          } else {
+            const matchCons = consumoData.find(c => {
+              const cClean = cleanFuzzy(c.item);
+              const vClean = cleanFuzzy(item);
+              return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean);
+            });
+            if (matchCons && matchCons.codigo) {
+              codigo = matchCons.codigo;
+            }
+          }
+        }
         
         return {
           id: 'val_import_' + Date.now() + '_' + idx,
+          codigo,
           item,
           lote,
           quantidade: qty,
@@ -1036,28 +1123,42 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
     const list = unifiedList.map(v => {
       // Cruzamento: buscar Código no Estoque ou Consumo
-      let codigo = '';
-      const matchEstoque = estoqueData.find(e => e.item.toLowerCase() === v.item.toLowerCase());
-      if (matchEstoque && matchEstoque.codigo) {
+      let codigo = v.codigo || '';
+      const matchEstoque = estoqueData.find(e => {
+        const eClean = cleanFuzzy(e.item);
+        const vClean = cleanFuzzy(v.item);
+        return eClean === vClean || eClean.includes(vClean) || vClean.includes(eClean);
+      });
+
+      if (!codigo && matchEstoque && matchEstoque.codigo) {
         codigo = matchEstoque.codigo;
-      } else {
-        const matchCons = consumoData.find(c => c.item.toLowerCase() === v.item.toLowerCase());
+      } else if (!codigo) {
+        const matchCons = consumoData.find(c => {
+          const cClean = cleanFuzzy(c.item);
+          const vClean = cleanFuzzy(v.item);
+          return cClean === vClean || cClean.includes(vClean) || vClean.includes(cClean);
+        });
         if (matchCons && matchCons.codigo) {
           codigo = matchCons.codigo;
         }
       }
 
-      // Calcular tempo até vencimento
-      const valDate = new Date(v.validade);
+      // Calcular tempo até vencimento usando o parser de data seguro
+      const parsedValString = parseValidadeDate(v.validade);
+      const valDate = new Date(parsedValString);
       const diffTime = valDate.getTime() - today.getTime();
       const diasParaVencer = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       const mesesParaVencer = Math.max(0, diasParaVencer / 30);
 
-      // Consumo mensal do item cruzando pelo nome ou código
-      const matchedConsRows = consumoData.filter(c => 
-        c.item.toLowerCase() === v.item.toLowerCase() || 
-        (codigo && c.codigo && c.codigo === codigo)
-      );
+      // Consumo mensal do item cruzando de forma difusa ou por código
+      const matchedConsRows = consumoData.filter(c => {
+        const cClean = cleanFuzzy(c.item);
+        const vClean = cleanFuzzy(v.item);
+        return cClean === vClean || 
+               cClean.includes(vClean) || 
+               vClean.includes(cClean) || 
+               (codigo && c.codigo && c.codigo === codigo);
+      });
       const totalConsRaw = matchedConsRows.reduce((sum, c) => sum + Number(c.quantidade_consumida || 0), 0);
       const consumoMensal = totalConsRaw / Math.max(1, consumoMonthsFilter);
 
@@ -1088,7 +1189,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       let sugestaoCompra = 'Estoque atual saudável';
       
       const estoqueTotalItem = estoqueData
-        .filter(e => e.item.toLowerCase() === v.item.toLowerCase() || (codigo && e.codigo && e.codigo === codigo))
+        .filter(e => {
+          const eClean = cleanFuzzy(e.item);
+          const vClean = cleanFuzzy(v.item);
+          return eClean === vClean || 
+                 eClean.includes(vClean) || 
+                 vClean.includes(eClean) || 
+                 (codigo && e.codigo && e.codigo === codigo);
+        })
         .reduce((sum, e) => sum + e.quantidade, 0);
 
       const minStock = matchEstoque ? matchEstoque.min_stock : 40;
@@ -1116,6 +1224,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       return {
         ...v,
         codigo,
+        validade: parsedValString, // garante que o campo validade retornado esteja higienizado
         diasParaVencer,
         mesesParaVencer,
         consumoMensal,
@@ -2700,20 +2809,20 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
                     {/* RENDER PLANILHA VALIDADES */}
                     {activeSubData === 'validade' && (
-                      <div className="overflow-x-auto text-[11px]">
-                        <table className="w-full text-left bg-white rounded-xl">
+                      <div className="overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
+                        <table className="min-w-[1200px] w-full text-left bg-white rounded-xl table-fixed">
                           <thead>
-                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
-                              <th className="pb-2">Código</th>
-                              <th className="pb-2">Descrição</th>
-                              <th className="pb-2">Número do Lote</th>
-                              <th className="pb-2 text-right">Quantidade do Lote</th>
-                              <th className="pb-2 text-center">Validade</th>
-                              <th className="pb-2 text-center">Dias p/ Vencer</th>
-                              <th className="pb-2 text-right">Consumo Médio</th>
-                              <th className="pb-2">Análise de Risco & Cobertura</th>
-                              <th className="pb-2">Sugestão de Reposição</th>
-                              <th className="pb-2 text-center">Excluir</th>
+                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1.5 text-left bg-slate-50/50">
+                              <th className="pb-2 pt-3 px-3 w-[8%]">Código</th>
+                              <th className="pb-2 pt-3 w-[22%]">Descrição</th>
+                              <th className="pb-2 pt-3 w-[11%]">Número do Lote</th>
+                              <th className="pb-2 pt-3 text-right w-[11%] pr-4">Quantidade do Lote</th>
+                              <th className="pb-2 pt-3 text-center w-[10%]">Validade</th>
+                              <th className="pb-2 pt-3 text-center w-[10%]">Dias p/ Vencer</th>
+                              <th className="pb-2 pt-3 text-right w-[10%] pr-4">Consumo Médio</th>
+                              <th className="pb-2 pt-3 w-[15%]">Análise de Risco & Cobertura</th>
+                              <th className="pb-2 pt-3 w-[15%]">Sugestão de Reposição</th>
+                              <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50 text-slate-705 font-sans">
@@ -2734,10 +2843,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
                                 return (
                                   <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-2.5 font-mono font-bold text-indigo-700 bg-indigo-50/20 px-2 rounded-lg border border-indigo-100/30 max-w-[80px] truncate" title={row.codigo}>
-                                      {row.codigo || 'S/Cód.'}
+                                    <td className="py-2.5 px-3" title={row.codigo || 'Sem Código'}>
+                                      <span className="font-mono font-bold text-indigo-700 bg-indigo-50/60 px-2 py-1 rounded-lg border border-indigo-100/40 text-[10px] inline-block truncate max-w-full">
+                                        {row.codigo || 'S/Cód.'}
+                                      </span>
                                     </td>
-                                    <td className="py-2.5 font-bold text-slate-900 pr-2">{row.item}</td>
+                                    <td className="py-2.5 font-bold text-slate-900 pr-2 truncate" title={row.item}>{row.item}</td>
                                     <td className="py-2.5 font-mono text-slate-600 font-bold uppercase">{row.lote}</td>
                                     <td className="py-2.5 text-right font-mono text-slate-800 font-extrabold pr-4">{row.quantidade.toLocaleString('pt-BR')} un</td>
                                     <td className="py-2.5 text-center font-mono font-bold text-slate-700">{formatDateBr(row.validade)}</td>
@@ -2758,40 +2869,40 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                         </span>
                                       )}
                                     </td>
-                                    <td className="py-2.5 text-right font-mono text-slate-500 pr-2">
+                                    <td className="py-2.5 text-right font-mono text-slate-500 pr-4">
                                       {row.consumoMensal > 0 ? `${row.consumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'Sem consumo'}
                                     </td>
-                                    <td className="py-2.5">
+                                    <td className="py-2.5 pr-2">
                                       {row.riscoStatus === 'Vencido' ? (
                                         <div className="flex flex-col">
-                                          <span className="text-red-650 font-black flex items-center gap-1">
+                                          <span className="text-red-650 font-black flex items-center gap-1 text-[10px]">
                                             ⚠️ Perda Confirmada
                                           </span>
                                           <span className="text-[9px] text-slate-400">Prejuízo de R$ {row.perdaFinanceiraProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                         </div>
                                       ) : row.riscoStatus === 'Risco de Perda' ? (
                                         <div className="flex flex-col">
-                                          <span className="text-red-550 font-black flex items-center gap-1">
+                                          <span className="text-red-550 font-black flex items-center gap-1 text-[10px]">
                                             🚨 Sobrarão {row.sobraProjetada.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un
                                           </span>
-                                          <span className="text-[9px] text-red-400 font-semibold">Risco de Perda: R$ {row.perdaFinanceiraProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          <span className="text-[9px] text-red-450 font-semibold">Preda: R$ {row.perdaFinanceiraProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                         </div>
                                       ) : (
                                         <div className="flex flex-col">
-                                          <span className="text-emerald-600 font-extrabold flex items-center gap-1">
-                                            🟢 Sem Risco de Perda
+                                          <span className="text-emerald-600 font-extrabold flex items-center gap-1 text-[10px]">
+                                            🟢 Sem Risco
                                           </span>
-                                          <span className="text-[9px] text-slate-400 font-medium">Lote será 100% consumido</span>
+                                          <span className="text-[9px] text-slate-400 font-medium">100% consumido</span>
                                         </div>
                                       )}
                                     </td>
-                                    <td className="py-2.5">
+                                    <td className="py-2.5 pr-2">
                                       {row.sugestaoCompra.startsWith('🛒') ? (
-                                        <span className="bg-indigo-50 border border-indigo-100 text-indigo-750 px-2 py-0.5 rounded-lg font-extrabold text-[10px] shadow-3xs inline-block animate-pulse">
+                                        <span className="bg-indigo-50 border border-indigo-100 text-indigo-750 px-2 py-0.5 rounded-lg font-extrabold text-[9px] shadow-3xs inline-block animate-pulse truncate max-w-full">
                                           {row.sugestaoCompra}
                                         </span>
                                       ) : (
-                                        <span className="text-slate-400 text-[10px] font-medium italic">
+                                        <span className="text-slate-400 text-[9px] font-medium italic truncate max-w-full block">
                                           {row.sugestaoCompra}
                                         </span>
                                       )}
