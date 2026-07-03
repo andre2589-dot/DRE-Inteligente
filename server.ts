@@ -339,34 +339,63 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
       return `${day}/${month}/${d.getFullYear()}`;
     };
 
-    // Filtros
+    // Obter data atual do sistema de forma dinâmica
+    const dNow = new Date();
+    const dayStr = String(dNow.getDate()).padStart(2, '0');
+    const monthStr = String(dNow.getMonth() + 1).padStart(2, '0');
+    const todayStr = `${dayStr}/${monthStr}/${dNow.getFullYear()}`;
+
+    // Tentar identificar se o usuário pediu um limite específico de dias
+    // ex: "em até 60 dias" -> matches 60
+    const limitDaysMatch = lowerPrompt.match(/(?:em ate|ate|vence\w* em|em|dentro de)\s*(\d+)\s*dia/i) || lowerPrompt.match(/\b(\d+)\s*dia/i);
+    let dayLimit: number | null = null;
+    if (limitDaysMatch) {
+      dayLimit = parseInt(limitDaysMatch[1], 10);
+    }
+
+    // Filtros principais
     const itensVencidos = validadeList.filter((v: any) => v.diasParaVencer <= 0 || v.status === 'Vencido');
     const itensRisco = validadeList.filter((v: any) => v.status === 'Risco de Perda' && v.diasParaVencer > 0);
+
+    // Se o usuário pediu especificamente um limite de dias (ex: até 60 dias)
+    if (dayLimit !== null) {
+      const itensNoIntervalo = validadeList.filter((v: any) => v.diasParaVencer > 0 && v.diasParaVencer <= (dayLimit as number));
+
+      if (itensNoIntervalo.length > 0) {
+        let response = `Sim, identifiquei **${itensNoIntervalo.length} ${itensNoIntervalo.length === 1 ? 'lote' : 'lotes'}** que irão vencer em até **${dayLimit} dias** (contados a partir da data atual de ${todayStr}):\n\n`;
+        itensNoIntervalo.forEach((item: any) => {
+          const formattedVal = formatDateStrBr(item.validade);
+          response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vence em ${formattedVal} (Faltam ${item.diasParaVencer} dias). Sobra estimada de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
+        });
+        return response;
+      } else {
+        return `Não foram encontrados itens a vencer no intervalo de até **${dayLimit} dias** em seu estoque (data de referência: ${todayStr}).`;
+      }
+    }
 
     const asksSpecificallyForVencidos = lowerPrompt.includes("vencido") || lowerPrompt.includes("vencida") || lowerPrompt.includes("venceu");
 
     if (asksSpecificallyForVencidos) {
       if (itensVencidos.length > 0) {
-        let response = `Sim, identifiquei itens vencidos em seu estoque:\n\n`;
+        let response = `Sim, identifiquei itens vencidos em seu estoque (data de hoje: ${todayStr}):\n\n`;
         itensVencidos.forEach((item: any, idx: number) => {
           const formattedVal = formatDateStrBr(item.validade);
-          const diasAtras = Math.abs(item.diasParaVencer);
           const consText = item.consumoMensal > 0 ? `${item.consumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'não registrado';
           response += `${idx + 1}. ⚠️ **${item.item.toUpperCase()}** (Código: ${item.codigo || 'S/C'} | Lote: ${item.lote})\n`;
           response += `  * **Quantidade Vencida:** ${Number(item.quantidade).toLocaleString('pt-BR')} un\n`;
-          response += `  * **Data de Vencimento:** ${formattedVal} (vencido em relação à data atual de 03/07/2026)\n`;
+          response += `  * **Data de Vencimento:** ${formattedVal} (vencido em relação à data atual)\n`;
           response += `  * **Consumo Médio:** ${consText}\n`;
           response += `  * **Status:** Vencido\n\n`;
         });
         return response;
       } else {
-        return "Atualmente, você não possui nenhum item vencido em seu estoque. Todos os lotes analisados apresentam vencimentos futuros e estão dentro do prazo de validade.";
+        return `Atualmente, você não possui nenhum item vencido em seu estoque. Todos os lotes analisados apresentam vencimentos futuros e estão dentro do prazo de validade (referência: ${todayStr}).`;
       }
     }
 
     // Se for uma pergunta geral de validades/risco de perda
     let response = `### 📅 Controle de Validade e Análise de Risco de Estoque\n\n`;
-    response += `Analisando os lotes registrados no sistema em relação à data de hoje (03/07/2026):\n\n`;
+    response += `Analisando os lotes registrados no sistema em relação à data de hoje (${todayStr}):\n\n`;
 
     if (itensVencidos.length > 0) {
       response += `🚨 **Lotes Vencidos (${itensVencidos.length}):**\n`;

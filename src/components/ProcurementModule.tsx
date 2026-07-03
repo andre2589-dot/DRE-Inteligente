@@ -1124,7 +1124,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   // Processamento e Cruzamento Inteligente de Dados de Validade e Consumo por Lote
   const getProcessedValidadeData = () => {
-    const today = new Date('2026-07-03T07:40:47-07:00'); // Ancorado na data real local do metadado
+    const today = new Date(); // Dinâmico de acordo com a data atual da pergunta
 
     // 1. Agrupar e somar a quantidade de lotes iguais (mesmo item e mesmo lote)
     const groupedMap: { [key: string]: ValidadeLoteItem } = {};
