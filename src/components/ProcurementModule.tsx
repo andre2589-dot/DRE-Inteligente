@@ -183,6 +183,91 @@ const parseValidadeDate = (val: any): string => {
   return new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 };
 
+const parseGenericDate = (val: any, defaultDaysOffset: number = 0): string => {
+  if (!val) {
+    return new Date(Date.now() + defaultDaysOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  }
+  const valStr = String(val).trim();
+  if (!valStr) {
+    return new Date(Date.now() + defaultDaysOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  }
+
+  // 1. Verifica se é número serial de data do Excel (ex: 46204)
+  if (/^\d+(\.\d+)?$/.test(valStr)) {
+    const num = Number(valStr);
+    if (num > 20000 && num < 100000) {
+      const excelEpoch = new Date(1899, 11, 30);
+      const targetDate = new Date(excelEpoch.getTime() + num * 24 * 60 * 60 * 1000);
+      if (!isNaN(targetDate.getTime())) {
+        return targetDate.toISOString().split('T')[0];
+      }
+    }
+  }
+
+  // 2. Verifica se está em formato DD/MM/YYYY ou DD-MM-YYYY
+  const dmYRegex = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/;
+  const dmYMatch = valStr.match(dmYRegex);
+  if (dmYMatch) {
+    const day = parseInt(dmYMatch[1], 10);
+    const month = parseInt(dmYMatch[2], 10) - 1; // 0-indexed no JS
+    let year = parseInt(dmYMatch[3], 10);
+    if (year < 100) {
+      year += year < 50 ? 2000 : 1900;
+    }
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+  }
+
+  // 3. Fallback para parser padrão do JS
+  const d = new Date(valStr);
+  if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    if (year > 3000 && year < 100000) {
+      const excelEpoch = new Date(1899, 11, 30);
+      const targetDate = new Date(excelEpoch.getTime() + year * 24 * 60 * 60 * 1000);
+      if (!isNaN(targetDate.getTime())) {
+        return targetDate.toISOString().split('T')[0];
+      }
+    }
+    return d.toISOString().split('T')[0];
+  }
+
+  // Fallback seguro de hoje
+  return new Date(Date.now() + defaultDaysOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+};
+
+const formatIsoDateToPtBr = (isoStr: string | null | undefined): string => {
+  if (!isoStr) return '-';
+  const cleanStr = String(isoStr).split('T')[0].trim();
+  const parts = cleanStr.split('-');
+  if (parts.length === 3) {
+    // Se já estiver formatado como YYYY-MM-DD
+    if (parts[0].length === 4) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+  const partsSlash = cleanStr.split('/');
+  if (partsSlash.length === 3) {
+    // Se estiver como DD/MM/YYYY
+    if (partsSlash[2].length === 4) {
+      return cleanStr;
+    }
+  }
+  try {
+    const d = new Date(cleanStr);
+    if (!isNaN(d.getTime())) {
+      // Usar getUTC para evitar timezone shift
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const year = d.getUTCFullYear();
+      return `${day}/${month}/${year}`;
+    }
+  } catch (e) {}
+  return isoStr;
+};
+
 const cleanFuzzy = (s: string) => {
   let cleaned = String(s || '').toLowerCase()
     .normalize('NFD')
@@ -873,7 +958,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           
           return mappedRows;
         }
-        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
+        const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase()));
         return [...filtered, ...baseMockData];
       });
     } else if (tipo === 'consumo') {
@@ -911,7 +996,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           
           return mappedRows;
         }
-        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase()));
+        const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase()));
         return [...filtered, ...baseMockData];
       });
     } else if (tipo === 'historico_precos') {
@@ -919,7 +1004,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const item = String(row[suggestedMapping.itemCol] || '').trim();
         const fornecedor = String(row[suggestedMapping.fornecedorCol] || 'Fornecedor Desconhecido').trim();
         const preco = Number(row[suggestedMapping.precoUnitarioCol]) || 0;
-        const dataCompra = String(row[suggestedMapping.dataCompraCol] || '').trim() || new Date().toISOString().split('T')[0];
+        const dataCompra = parseGenericDate(row[suggestedMapping.dataCompraCol]);
         const condicao = String(row[suggestedMapping.condicaoPgtoCol] || 'Boleto 30 dias').trim();
         const pedido = String(row[suggestedMapping.codigoPedidoCol] || '').trim() || `PED-${Math.floor(10000 + Math.random() * 90000)}`;
         
@@ -942,7 +1027,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setHistoricoPrecosData(prev => {
         if (mappedRows.length > 0) {
-          return mappedRows;
+          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_compra === p.data_compra && String(m.fornecedor || '').toLowerCase() === String(p.fornecedor || '').toLowerCase()));
+          return [...filteredPrev, ...mappedRows];
         }
         return [...prev, ...baseMockData];
       });
@@ -997,9 +1083,10 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setValidadeLotesData(prev => {
         if (mappedRows.length > 0) {
-          return mappedRows;
+          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(m.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
+          return [...filteredPrev, ...mappedRows];
         }
-        const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
+        const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(n.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
         return [...filtered, ...baseMockData];
       });
     } else if (tipo === 'historico_vendas') {
@@ -1007,7 +1094,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const item = String(row[suggestedMapping.itemCol] || '').trim();
         const codigo = suggestedMapping.codigoCol ? String(row[suggestedMapping.codigoCol] || '').trim() : '';
         const qty = Number(row[suggestedMapping.qtyCol]) || 0;
-        const dataVenda = String(row[suggestedMapping.dataVendaCol] || '').trim() || new Date().toISOString().split('T')[0];
+        const dataVenda = parseGenericDate(row[suggestedMapping.dataVendaCol]);
         const custo = Number(row[suggestedMapping.custoUnitarioCol]) || 0;
         const precoVenda = Number(row[suggestedMapping.precoVendaCol]) || 0;
 
@@ -1030,7 +1117,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setHistoricoVendasData(prev => {
         if (mappedRows.length > 0) {
-          return mappedRows;
+          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_venda === p.data_venda && m.quantidade === p.quantidade));
+          return [...filteredPrev, ...mappedRows];
         }
         return [...prev, ...baseMockData];
       });
@@ -1196,8 +1284,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(i => 
-        i.item.toLowerCase().includes(q) || 
-        (i.codigo && i.codigo.toLowerCase().includes(q))
+        String(i.item || '').toLowerCase().includes(q) || 
+        (i.codigo && String(i.codigo).toLowerCase().includes(q))
       );
     }
 
@@ -1231,11 +1319,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     const filteredRaw = consumoData.filter(c => {
       if (searchQuery.trim() === '') return true;
       const q = searchQuery.toLowerCase().trim();
-      return c.item.toLowerCase().includes(q) || (c.codigo && c.codigo.toLowerCase().includes(q));
+      return String(c.item || '').toLowerCase().includes(q) || (c.codigo && String(c.codigo).toLowerCase().includes(q));
     });
 
     filteredRaw.forEach(c => {
-      const key = c.codigo ? `cod_${c.codigo}` : `item_${c.item.toLowerCase().trim()}`;
+      const key = c.codigo ? `cod_${c.codigo}` : `item_${String(c.item || '').toLowerCase().trim()}`;
       if (!grouped[key]) {
         grouped[key] = {
           codigo: c.codigo || '',
@@ -1440,8 +1528,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       venda_total: number;
     }> = {};
 
-    historicoVendasData.forEach(row => {
-      const key = row.item.trim();
+    (historicoVendasData || []).forEach(row => {
+      if (!row || !row.item) return;
+      const key = String(row.item).trim();
+      if (!key) return;
+
       if (!map[key]) {
         map[key] = {
           codigo: row.codigo || '',
@@ -1457,9 +1548,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         target.codigo = row.codigo;
       }
       target.frequencia += 1;
-      target.consumo += row.quantidade;
-      target.custo_total += (row.custo_unitario || 0) * row.quantidade;
-      target.venda_total += (row.preco_venda || 0) * row.quantidade;
+      target.consumo += Number(row.quantidade) || 0;
+      target.custo_total += (Number(row.custo_unitario) || 0) * (Number(row.quantidade) || 0);
+      target.venda_total += (Number(row.preco_venda) || 0) * (Number(row.quantidade) || 0);
     });
 
     const list = Object.values(map).map(agg => {
@@ -1506,8 +1597,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     const list = getSalesAnalysis();
     
     const filtered = list.filter(item => 
-      item.item.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      (item.codigo && item.codigo.toLowerCase().includes(searchQuery.toLowerCase()))
+      String(item.item || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+      (item.codigo && String(item.codigo).toLowerCase().includes(searchQuery.toLowerCase()))
     );
 
     if (salesSortFilter === 'frequencia') {
@@ -1546,12 +1637,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       historicoPrecosData.forEach(h => {
         content += `"${h.id}";"${h.item}";"${h.fornecedor}";${h.preco_unitario};"${h.data_compra}";"${h.condicao_pagamento}";"${h.codigo_pedido}"\n`;
       });
+    } else if (tipo === 'historico_vendas') {
+      content += '"ID";"Código";"Item/Insumo";"Quantidade Vendida";"Data da Venda";"Custo Unitário";"Preço de Venda";"Lucro Estimado"\n';
+      (historicoVendasData || []).forEach(v => {
+        const lucro = ((v.preco_venda || 0) - (v.custo_unitario || 0)) * (v.quantidade || 0);
+        content += `"${v.id}";"${v.codigo || ''}";"${v.item}";${v.quantidade};"${v.data_venda}";${v.custo_unitario};${v.preco_venda};${lucro}\n`;
+      });
     } else {
       content += '"Codigo";"Descricao";"Numero do Lote";"Quantidade do Lote";"Validade";"Dias para Vencer";"Consumo Medio Mensal";"Status de Risco";"Sobra Projetada";"Perda Financeira Projetada";"Sugestao de Reposicao"\n';
       getProcessedValidadeData().forEach(v => {
-        const valDateBr = v.validade.split('-').length === 3 
-          ? `${v.validade.split('-')[2]}/${v.validade.split('-')[1]}/${v.validade.split('-')[0]}`
-          : new Date(v.validade).toLocaleDateString('pt-BR');
+        const valDateBr = formatIsoDateToPtBr(v.validade);
         content += `"${v.codigo || ''}";"${v.item}";"${v.lote}";${v.quantidade};"${valDateBr}";${v.diasParaVencer};${v.consumoMensal.toFixed(2)};"${v.riscoStatus}";${v.sobraProjetada.toFixed(2)};${v.perdaFinanceiraProjetada.toFixed(2)};"${v.sugestaoCompra}"\n`;
       });
     }
@@ -3211,7 +3306,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           </thead>
                           <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
                             {historicoPrecosData
-                              .filter(h => h.item.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .filter(h => String(h.item || '').toLowerCase().includes(searchQuery.toLowerCase()))
                               .map((row) => (
                                 <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                                   <td className="py-2.5">
@@ -3219,7 +3314,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                     <span className="text-[9px] text-slate-400 block uppercase font-medium">{row.fornecedor}</span>
                                   </td>
                                   <td className="py-2.5 font-mono text-indigo-700 bg-indigo-50/20 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100/50 inline-block mt-1">{row.codigo_pedido}</td>
-                                  <td className="py-2.5 font-mono text-slate-500">{new Date(row.data_compra).toLocaleDateString('pt-BR')}</td>
+                                  <td className="py-2.5 font-mono text-slate-500">{formatIsoDateToPtBr(row.data_compra)}</td>
                                   <td className="py-2.5 text-right font-mono font-black text-indigo-650">R$ {row.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                                   <td className="py-2.5 text-slate-650 font-bold">{row.condicao_pagamento}</td>
                                   <td className="py-2.5 text-center">
@@ -3253,7 +3348,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           </thead>
                           <tbody className="divide-y divide-slate-50 text-slate-705 font-sans">
                             {getProcessedValidadeData()
-                              .filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && v.codigo.toLowerCase().includes(searchQuery.toLowerCase())))
+                              .filter(v => String(v.item || '').toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase())))
                               .map((row) => {
                                 // Formatar data fidedigna do Brasil abreviada (DD/MM/AAAA) sem fuso horário
                                 const formatDateBr = (dateStr: string) => {
@@ -3448,7 +3543,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                               </thead>
                               <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
                                 {historicoVendasData
-                                  .filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && v.codigo.toLowerCase().includes(searchQuery.toLowerCase())))
+                                  .filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase()))))
                                   .map((row) => {
                                     const lucro = (row.preco_venda - row.custo_unitario) * row.quantidade;
                                     return (
@@ -3465,7 +3560,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                           {row.quantidade.toLocaleString('pt-BR')} un
                                         </td>
                                         <td className="py-2.5 text-center font-mono text-slate-500">
-                                          {row.data_venda ? new Date(row.data_venda).toLocaleDateString('pt-BR') : '-'}
+                                          {formatIsoDateToPtBr(row.data_venda)}
                                         </td>
                                         <td className="py-2.5 text-right font-mono text-slate-600 pr-3">
                                           R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -3486,7 +3581,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       </tr>
                                     );
                                   })}
-                                {historicoVendasData.filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && v.codigo.toLowerCase().includes(searchQuery.toLowerCase()))).length === 0 && (
+                                {historicoVendasData.filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase())))).length === 0 && (
                                   <tr>
                                     <td colSpan={8} className="py-8 text-center text-slate-400 font-medium bg-white">
                                       Nenhum registro individual de venda encontrado para a pesquisa.
