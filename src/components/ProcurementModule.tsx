@@ -282,9 +282,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>([]);
   const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>([]);
   const [loadingDb, setLoadingDb] = useState(true);
+  const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
 
   // Carregar dados estruturados do banco de dados (Supabase ou fallback local)
   useEffect(() => {
+    setLoadedCompanyId(null);
     async function loadData() {
       try {
         setLoadingDb(true);
@@ -361,6 +363,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           mappedVal = [];
         }
         setValidadeLotesData(mappedVal);
+        setLoadedCompanyId(companyId);
       } catch (err) {
         console.error("Error loading procurement data from API:", err);
       } finally {
@@ -374,7 +377,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   // Sincronizar alterações de dados com o Banco de Dados (com Debounce para otimização)
   useEffect(() => {
-    if (loadingDb) return;
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/inventory', {
@@ -385,12 +388,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       } catch (e) {
         console.error("Error saving inventory:", e);
       }
-    }, 600);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [estoqueData, companyId, loadingDb]);
+  }, [estoqueData, companyId, loadingDb, loadedCompanyId]);
 
   useEffect(() => {
-    if (loadingDb) return;
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/consumption', {
@@ -401,12 +404,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       } catch (e) {
         console.error("Error saving consumption:", e);
       }
-    }, 600);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [consumoData, companyId, loadingDb]);
+  }, [consumoData, companyId, loadingDb, loadedCompanyId]);
 
   useEffect(() => {
-    if (loadingDb) return;
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/price_history', {
@@ -417,12 +420,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       } catch (e) {
         console.error("Error saving price history:", e);
       }
-    }, 600);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [historicoPrecosData, companyId, loadingDb]);
+  }, [historicoPrecosData, companyId, loadingDb, loadedCompanyId]);
 
   useEffect(() => {
-    if (loadingDb) return;
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/batch_validity', {
@@ -433,9 +436,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       } catch (e) {
         console.error("Error saving batch validity:", e);
       }
-    }, 600);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [validadeLotesData, companyId, loadingDb]);
+  }, [validadeLotesData, companyId, loadingDb, loadedCompanyId]);
 
   // Estados gerais
   const [searchQuery, setSearchQuery] = useState('');

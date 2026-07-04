@@ -318,6 +318,19 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   const lowerPrompt = normalizeStr(prompt);
   const estoque: any[] = procurementContext.estoqueData;
 
+  // Se for uma consulta de compras, preços, fornecedores ou valores históricos, não interceptar como estoque simples
+  const isPurchaseQuery = lowerPrompt.includes("compra") || 
+                          lowerPrompt.includes("preco") || 
+                          lowerPrompt.includes("custo") || 
+                          lowerPrompt.includes("fornecedor") || 
+                          lowerPrompt.includes("pedido") || 
+                          lowerPrompt.includes("fatura") ||
+                          lowerPrompt.includes("paguei") ||
+                          lowerPrompt.includes("pagou");
+  if (isPurchaseQuery) {
+    return null;
+  }
+
   const isValidadeQuery = lowerPrompt.includes("vencid") || 
                           lowerPrompt.includes("vencer") || 
                           lowerPrompt.includes("validade") || 
@@ -362,14 +375,14 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
       const itensNoIntervalo = validadeList.filter((v: any) => v.diasParaVencer > 0 && v.diasParaVencer <= (dayLimit as number));
 
       if (itensNoIntervalo.length > 0) {
-        let response = `Sim, identifiquei **${itensNoIntervalo.length} ${itensNoIntervalo.length === 1 ? 'lote' : 'lotes'}** que irão vencer em até **${dayLimit} dias** (contados a partir da data atual de ${todayStr}):\n\n`;
+        let response = `**Itens que irão vencer em até ${dayLimit} dias (data de referência: ${todayStr}):**\n\n`;
         itensNoIntervalo.forEach((item: any) => {
           const formattedVal = formatDateStrBr(item.validade);
-          response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vence em ${formattedVal} (Faltam ${item.diasParaVencer} dias). Sobra estimada de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
+          response += `• **${item.item.toUpperCase()}** (Lote: ${item.lote}) — Vence em ${formattedVal} (em ${item.diasParaVencer} dias). Sobra estimada de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
         });
-        return response;
+        return response.trim();
       } else {
-        return `Não foram encontrados itens a vencer no intervalo de até **${dayLimit} dias** em seu estoque (data de referência: ${todayStr}).`;
+        return `Nenhum lote vence em até **${dayLimit} dias** (data de referência: ${todayStr}).`;
       }
     }
 
@@ -377,49 +390,42 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
 
     if (asksSpecificallyForVencidos) {
       if (itensVencidos.length > 0) {
-        let response = `Sim, identifiquei itens vencidos em seu estoque (data de hoje: ${todayStr}):\n\n`;
-        itensVencidos.forEach((item: any, idx: number) => {
+        let response = `**Lotes vencidos em estoque (data de hoje: ${todayStr}):**\n\n`;
+        itensVencidos.forEach((item: any) => {
           const formattedVal = formatDateStrBr(item.validade);
-          const consText = item.consumoMensal > 0 ? `${item.consumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'não registrado';
-          response += `${idx + 1}. ⚠️ **${item.item.toUpperCase()}** (Código: ${item.codigo || 'S/C'} | Lote: ${item.lote})\n`;
-          response += `  * **Quantidade Vencida:** ${Number(item.quantidade).toLocaleString('pt-BR')} un\n`;
-          response += `  * **Data de Vencimento:** ${formattedVal} (vencido em relação à data atual)\n`;
-          response += `  * **Consumo Médio:** ${consText}\n`;
-          response += `  * **Status:** Vencido\n\n`;
+          response += `• ⚠️ **${item.item.toUpperCase()}** (Lote: ${item.lote}) — Vencido em ${formattedVal} (${Number(item.quantidade).toLocaleString('pt-BR')} un vencidas).\n`;
         });
-        return response;
+        return response.trim();
       } else {
-        return `Atualmente, você não possui nenhum item vencido em seu estoque. Todos os lotes analisados apresentam vencimentos futuros e estão dentro do prazo de validade (referência: ${todayStr}).`;
+        return `Nenhum lote vencido em estoque (data de referência: ${todayStr}).`;
       }
     }
 
     // Se for uma pergunta geral de validades/risco de perda
-    let response = `### 📅 Controle de Validade e Análise de Risco de Estoque\n\n`;
-    response += `Analisando os lotes registrados no sistema em relação à data de hoje (${todayStr}):\n\n`;
+    let response = `**Resumo de Validades e Análise de Risco (data de referência: ${todayStr}):**\n\n`;
 
     if (itensVencidos.length > 0) {
       response += `🚨 **Lotes Vencidos (${itensVencidos.length}):**\n`;
       itensVencidos.forEach((item: any) => {
         const formattedVal = formatDateStrBr(item.validade);
-        response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vencido em ${formattedVal} (${Number(item.quantidade).toLocaleString('pt-BR')} un vencidas).\n`;
+        response += `• **${item.item.toUpperCase()}** (Lote: ${item.lote}) — Vencido em ${formattedVal} (${Number(item.quantidade).toLocaleString('pt-BR')} un).\n`;
       });
       response += `\n`;
     } else {
-      response += `🟢 **Nenhum lote vencido no estoque atualmente.**\n\n`;
+      response += `🟢 **Nenhum lote vencido no estoque.**\n\n`;
     }
 
     if (itensRisco.length > 0) {
       response += `⚠️ **Lotes com Risco de Perda (${itensRisco.length}):**\n`;
-      response += `Esses lotes vencerão antes de serem totalmente consumidos de acordo com o consumo mensal médio:\n`;
       itensRisco.forEach((item: any) => {
         const formattedVal = formatDateStrBr(item.validade);
-        response += `* **${item.item.toUpperCase()}** (Lote: ${item.lote}) - Vence em ${formattedVal} (Faltam ${item.diasParaVencer} dias). Sobra estimada de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
+        response += `• **${item.item.toUpperCase()}** (Lote: ${item.lote}) — Vence em ${formattedVal} (em ${item.diasParaVencer} dias). Sobra de **${Number(item.sobraProjetada).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un**.\n`;
       });
     } else {
-      response += `🟢 **Todos os lotes dentro da validade têm cobertura de consumo suficiente antes de vencer (sem risco de perda).**\n`;
+      response += `🟢 **Nenhum lote com risco de perda financeira detectado.**\n`;
     }
 
-    return response;
+    return response.trim();
   }
 
   // 1. Tentar encontrar correspondência por código de produto ou por nome de insumo
