@@ -105,6 +105,28 @@ interface ValidadeLoteItem {
   valor_economico: number;
 }
 
+interface VendaHistoricoItem {
+  id: string;
+  codigo?: string;
+  item: string;
+  quantidade: number;
+  data_venda: string;
+  custo_unitario: number;
+  preco_venda: number;
+}
+
+interface SalesAnalysisItem {
+  codigo: string;
+  item: string;
+  frequencia: number;
+  consumo: number;
+  custo_total: number;
+  venda_total: number;
+  lucro_total: number;
+  lucratividade: number;
+  curva_abc: 'A' | 'B' | 'C';
+}
+
 // Funções utilitárias de suporte a parsing de datas do Excel/CSV e cruzamento difuso (fuzzy match)
 const parseValidadeDate = (val: any): string => {
   if (!val) {
@@ -227,12 +249,12 @@ interface ProcurementModuleProps {
 }
 
 export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab = 'indicators' }: ProcurementModuleProps) {
-  // Aba de dados selecionada na Gestão de Compras ('estoque' | 'consumo' | 'historico_precos' | 'validade')
-  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade'>('estoque');
+  // Aba de dados selecionada na Gestão de Compras ('estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas')
+  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas'>('estoque');
 
   // Controle de Mapeador de Colunas Personalizado e Pré-visualização Interativa
   const [pendingUpload, setPendingUpload] = useState<{
-    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade';
+    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas';
     fileName: string;
     fileSize: string;
     detectedHeaders: string[];
@@ -281,10 +303,13 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [consumoData, setConsumoData] = useState<ConsumoItem[]>([]);
   const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>([]);
   const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>([]);
+  const [historicoVendasData, setHistoricoVendasData] = useState<VendaHistoricoItem[]>([]);
+  const [salesSortFilter, setSalesSortFilter] = useState<'frequencia' | 'quantidade' | 'valor_venda'>('frequencia');
+  const [salesViewType, setSalesViewType] = useState<'analise' | 'registros'>('analise');
   const [loadingDb, setLoadingDb] = useState(true);
   const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
 
-  // Carregar dados estruturados do banco de dados (Supabase ou fallback local)
+  // Carregar dados estruturados do banco de dados (Supabase ou fallback local) com suporte a persistência por localStorage
   useEffect(() => {
     setLoadedCompanyId(null);
     async function loadData() {
@@ -303,10 +328,13 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             frequencia_venda: item.quantidade > 50 ? 'Alta' : 'Média'
           }));
         }
-        if (mappedInv.length === 0) {
-          mappedInv = [];
+        if (mappedInv.length > 0) {
+          setEstoqueData(mappedInv);
+        } else {
+          const cached = localStorage.getItem(`gestao_estoque_data_${companyId}`);
+          if (cached) setEstoqueData(JSON.parse(cached));
+          else setEstoqueData([]);
         }
-        setEstoqueData(mappedInv);
         
         // 2. Consumo
         const resCons = await fetch(`/api/procurement/consumption?company_id=${companyId}`);
@@ -318,11 +346,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             custo_total: item.custo_total || (item.quantidade_consumida * 10)
           }));
         }
-        if (mappedCons.length === 0) {
-          mappedCons = [];
+        if (mappedCons.length > 0) {
+          setConsumoData(mappedCons);
+        } else {
+          const cached = localStorage.getItem(`gestao_consumo_data_${companyId}`);
+          if (cached) setConsumoData(JSON.parse(cached));
+          else setConsumoData([]);
         }
-        setConsumoData(mappedCons);
- 
+
         // 3. Preços Históricos
         const resPrices = await fetch(`/api/procurement/price_history?company_id=${companyId}`);
         let mappedPrices = [];
@@ -334,11 +365,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             codigo_pedido: item.codigo_pedido || 'PED-' + Math.floor(Math.random() * 9000 + 1000)
           }));
         }
-        if (mappedPrices.length === 0) {
-          mappedPrices = [];
+        if (mappedPrices.length > 0) {
+          setHistoricoPrecosData(mappedPrices);
+        } else {
+          const cached = localStorage.getItem(`gestao_precos_data_${companyId}`);
+          if (cached) setHistoricoPrecosData(JSON.parse(cached));
+          else setHistoricoPrecosData([]);
         }
-        setHistoricoPrecosData(mappedPrices);
- 
+
         // 4. Controle de Validades
         const resVal = await fetch(`/api/procurement/batch_validity?company_id=${companyId}`);
         let mappedVal = [];
@@ -359,10 +393,34 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             };
           });
         }
-        if (mappedVal.length === 0) {
-          mappedVal = [];
+        if (mappedVal.length > 0) {
+          setValidadeLotesData(mappedVal);
+        } else {
+          const cached = localStorage.getItem(`gestao_validade_data_${companyId}`);
+          if (cached) setValidadeLotesData(JSON.parse(cached));
+          else setValidadeLotesData([]);
         }
-        setValidadeLotesData(mappedVal);
+
+        // 5. Histórico de Vendas
+        const resSales = await fetch(`/api/procurement/sales_history?company_id=${companyId}`);
+        let mappedSales = [];
+        if (resSales.ok) {
+          const data = await resSales.json();
+          mappedSales = data.map((item: any) => ({
+            ...item,
+            custo_unitario: Number(item.custo_unitario) || 0,
+            preco_venda: Number(item.preco_venda) || 0,
+            quantidade: Number(item.quantidade) || 0
+          }));
+        }
+        if (mappedSales.length > 0) {
+          setHistoricoVendasData(mappedSales);
+        } else {
+          const cached = localStorage.getItem(`gestao_sales_data_${companyId}`);
+          if (cached) setHistoricoVendasData(JSON.parse(cached));
+          else setHistoricoVendasData([]);
+        }
+
         setLoadedCompanyId(companyId);
       } catch (err) {
         console.error("Error loading procurement data from API:", err);
@@ -375,9 +433,10 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     }
   }, [companyId]);
 
-  // Sincronizar alterações de dados com o Banco de Dados (com Debounce para otimização)
+  // Sincronizar alterações de dados com o Banco de Dados (com Debounce para otimização) e com o localStorage imediatamente
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    localStorage.setItem(`gestao_estoque_data_${companyId}`, JSON.stringify(estoqueData));
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/inventory', {
@@ -394,6 +453,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    localStorage.setItem(`gestao_consumo_data_${companyId}`, JSON.stringify(consumoData));
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/consumption', {
@@ -410,6 +470,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    localStorage.setItem(`gestao_precos_data_${companyId}`, JSON.stringify(historicoPrecosData));
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/price_history', {
@@ -426,6 +487,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    localStorage.setItem(`gestao_validade_data_${companyId}`, JSON.stringify(validadeLotesData));
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/batch_validity', {
@@ -439,6 +501,23 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     }, 200);
     return () => clearTimeout(timer);
   }, [validadeLotesData, companyId, loadingDb, loadedCompanyId]);
+
+  useEffect(() => {
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    localStorage.setItem(`gestao_sales_data_${companyId}`, JSON.stringify(historicoVendasData));
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/sales_history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, sales_history_items: historicoVendasData })
+        });
+      } catch (e) {
+        console.error("Error saving sales history:", e);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [historicoVendasData, companyId, loadingDb, loadedCompanyId]);
 
   // Estados gerais
   const [searchQuery, setSearchQuery] = useState('');
@@ -462,8 +541,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         setConsumoData([]);
         setHistoricoPrecosData([]);
         setValidadeLotesData([]);
+        setHistoricoVendasData([]);
         setArquivosRegistrados([]);
         localStorage.removeItem('gestao_arquivos_registrados');
+        localStorage.removeItem(`gestao_estoque_data_${companyId}`);
+        localStorage.removeItem(`gestao_consumo_data_${companyId}`);
+        localStorage.removeItem(`gestao_precos_data_${companyId}`);
+        localStorage.removeItem(`gestao_validade_data_${companyId}`);
+        localStorage.removeItem(`gestao_sales_data_${companyId}`);
         setToastMessage("Módulo Compras Inteligentes zerado com sucesso! Pronto para inserção real.");
         setTimeout(() => setToastMessage(null), 4500);
       } else {
@@ -478,7 +563,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   };
 
   // Inicia o processo de mapeamento e pré-visualização ao anexar arquivo
-  const initiateFileUpload = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade', fileOrName: File | string) => {
+  const initiateFileUpload = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas', fileOrName: File | string) => {
     let fileName = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
     let fileSize = typeof fileOrName === 'string' ? '48 KB' : (fileOrName.size / 1024).toFixed(1) + ' KB';
 
@@ -544,6 +629,21 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           loteCol: 'ID Identificador',
           qtyCol: 'Volume de Lote',
           validadeCol: 'Vencimento Final'
+        };
+      } else if (tipo === 'historico_vendas') {
+        detectedHeaders = ['Código', 'Descrição do Item', 'Quantidade Vendida', 'Data da Venda', 'Custo Unitário R$', 'Preço de Venda R$'];
+        previewRows = [
+          { 'Código': '01918', 'Descrição do Item': 'CREATINA MONOHIDRATADA 250G', 'Quantidade Vendida': '120', 'Data da Venda': '2026-06-25', 'Custo Unitário R$': '41.50', 'Preço de Venda R$': '89.90' },
+          { 'Código': '04808', 'Descrição do Item': 'BCAA ULTRA PURE', 'Quantidade Vendida': '45', 'Data da Venda': '2026-06-24', 'Custo Unitário R$': '28.90', 'Preço de Venda R$': '59.90' },
+          { 'Código': '00633', 'Descrição do Item': 'WHEY PROTEIN ISOLADO 1KG', 'Quantidade Vendida': '85', 'Data da Venda': '2026-06-23', 'Custo Unitário R$': '119.00', 'Preço de Venda R$': '249.90' },
+        ];
+        suggestedMapping = {
+          codigoCol: 'Código',
+          itemCol: 'Descrição do Item',
+          qtyCol: 'Quantidade Vendida',
+          dataVendaCol: 'Data da Venda',
+          custoUnitarioCol: 'Custo Unitário R$',
+          precoVendaCol: 'Preço de Venda R$'
         };
       }
 
@@ -677,6 +777,15 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             loteCol: findBestMatch(['lote', 'id lote', 'identificador', 'loteamento']),
             qtyCol: findBestMatch(['quantidade', 'qtd', 'volume', 'saldo']),
             validadeCol: findBestMatch(['validade', 'vencimento', 'vence', 'data validade', 'expira'])
+          };
+        } else if (tipo === 'historico_vendas') {
+          suggestedMapping = {
+            codigoCol: findBestMatch(['código', 'codigo', 'cod', 'id', 'produto']),
+            itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
+            qtyCol: findBestMatch(['quantidade', 'qtd', 'vendido', 'vendas', 'volume', 'saídas']),
+            dataVendaCol: findBestMatch(['data', 'data da venda', 'venda', 'emissão']),
+            custoUnitarioCol: findBestMatch(['custo', 'custo unitário', 'unitario', 'valor custo', 'médio', 'custo medio']),
+            precoVendaCol: findBestMatch(['preço', 'venda', 'preço venda', 'sugerido', 'valor venda', 'preco venda'])
           };
         }
 
@@ -893,6 +1002,38 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const filtered = prev.filter(p => !baseMockData.some(n => n.item.toLowerCase() === p.item.toLowerCase() && n.lote === p.lote));
         return [...filtered, ...baseMockData];
       });
+    } else if (tipo === 'historico_vendas') {
+      const mappedRows: VendaHistoricoItem[] = (allRows || []).map((row, idx) => {
+        const item = String(row[suggestedMapping.itemCol] || '').trim();
+        const codigo = suggestedMapping.codigoCol ? String(row[suggestedMapping.codigoCol] || '').trim() : '';
+        const qty = Number(row[suggestedMapping.qtyCol]) || 0;
+        const dataVenda = String(row[suggestedMapping.dataVendaCol] || '').trim() || new Date().toISOString().split('T')[0];
+        const custo = Number(row[suggestedMapping.custoUnitarioCol]) || 0;
+        const precoVenda = Number(row[suggestedMapping.precoVendaCol]) || 0;
+
+        return {
+          id: 'sales_import_' + Date.now() + '_' + idx,
+          codigo,
+          item,
+          quantidade: qty,
+          data_venda: dataVenda,
+          custo_unitario: custo,
+          preco_venda: precoVenda
+        };
+      }).filter(r => r.item !== '');
+
+      const baseMockData = mappedRows.length > 0 ? mappedRows : [
+        { id: 'sales_up_1', item: 'Creatina Monohidratada 250g', codigo: '01918', quantidade: 120, data_venda: '2026-06-25', custo_unitario: 41.50, preco_venda: 89.90 },
+        { id: 'sales_up_2', item: 'BCAA Ultra Pure', codigo: '04808', quantidade: 45, data_venda: '2026-06-24', custo_unitario: 28.90, preco_venda: 59.90 },
+        { id: 'sales_up_3', item: 'Whey Protein Isolado 1kg', codigo: '00633', quantidade: 85, data_venda: '2026-06-23', custo_unitario: 119.00, preco_venda: 249.90 }
+      ];
+
+      setHistoricoVendasData(prev => {
+        if (mappedRows.length > 0) {
+          return mappedRows;
+        }
+        return [...prev, ...baseMockData];
+      });
     }
 
     const registeredFile: RegistrosArquivos = {
@@ -975,6 +1116,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const handleDeleteValidade = (id: string) => {
     setValidadeLotesData(prev => prev.filter(i => i.id !== id));
     triggerToast('Aviso de lote deletado.');
+  };
+
+  const handleDeleteVenda = (id: string) => {
+    setHistoricoVendasData(prev => prev.filter(i => i.id !== id));
+    triggerToast('Venda removida com sucesso.');
   };
 
   const handleDeleteArquivo = (id: string) => {
@@ -1284,6 +1430,104 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     return filtered;
   };
 
+  const getSalesAnalysis = (): SalesAnalysisItem[] => {
+    const map: Record<string, {
+      codigo: string;
+      item: string;
+      frequencia: number;
+      consumo: number;
+      custo_total: number;
+      venda_total: number;
+    }> = {};
+
+    historicoVendasData.forEach(row => {
+      const key = row.item.trim();
+      if (!map[key]) {
+        map[key] = {
+          codigo: row.codigo || '',
+          item: row.item,
+          frequencia: 0,
+          consumo: 0,
+          custo_total: 0,
+          venda_total: 0
+        };
+      }
+      const target = map[key];
+      if (row.codigo && !target.codigo) {
+        target.codigo = row.codigo;
+      }
+      target.frequencia += 1;
+      target.consumo += row.quantidade;
+      target.custo_total += (row.custo_unitario || 0) * row.quantidade;
+      target.venda_total += (row.preco_venda || 0) * row.quantidade;
+    });
+
+    const list = Object.values(map).map(agg => {
+      const lucro_total = agg.venda_total - agg.custo_total;
+      const lucratividade = agg.venda_total > 0 ? (lucro_total / agg.venda_total) * 100 : 0;
+      return {
+        codigo: agg.codigo,
+        item: agg.item,
+        frequencia: agg.frequencia,
+        consumo: agg.consumo,
+        custo_total: agg.custo_total,
+        venda_total: agg.venda_total,
+        lucro_total,
+        lucratividade,
+        curva_abc: 'C' as 'A' | 'B' | 'C'
+      };
+    });
+
+    // Calculate Curva ABC based on Venda Total
+    const sortedByVenda = [...list].sort((a, b) => b.venda_total - a.venda_total);
+    const grandTotalVenda = sortedByVenda.reduce((acc, x) => acc + x.venda_total, 0);
+
+    let cumulativeVenda = 0;
+    sortedByVenda.forEach(item => {
+      if (grandTotalVenda > 0) {
+        cumulativeVenda += item.venda_total;
+        const pct = (cumulativeVenda / grandTotalVenda) * 100;
+        if (pct <= 80) {
+          item.curva_abc = 'A';
+        } else if (pct <= 95) {
+          item.curva_abc = 'B';
+        } else {
+          item.curva_abc = 'C';
+        }
+      } else {
+        item.curva_abc = 'C';
+      }
+    });
+
+    return list;
+  };
+
+  const getProcessedSalesAnalysis = () => {
+    const list = getSalesAnalysis();
+    
+    const filtered = list.filter(item => 
+      item.item.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      (item.codigo && item.codigo.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+
+    if (salesSortFilter === 'frequencia') {
+      filtered.sort((a, b) => b.frequencia - a.frequencia || b.consumo - a.consumo);
+    } else if (salesSortFilter === 'quantidade') {
+      filtered.sort((a, b) => b.consumo - a.consumo || b.frequencia - a.frequencia);
+    } else if (salesSortFilter === 'valor_venda') {
+      filtered.sort((a, b) => b.venda_total - a.venda_total);
+    }
+
+    return filtered.slice(0, 10);
+  };
+
+  const handleDeleteVendaByItem = (itemName: string) => {
+    if (window.confirm(`Tem certeza de que deseja excluir todos os registros de venda do item "${itemName}"?`)) {
+      setHistoricoVendasData(prev => prev.filter(i => i.item !== itemName));
+      triggerToast(`Histórico de vendas de "${itemName}" removido.`);
+    }
+  };
+
   // Função auxiliar de download de relatório (Gera e exporta CSV fictício fidedigno)
   const handleDownloadRelatorioCSV = (tipo: string) => {
     let content = 'data:text/csv;charset=utf-8,';
@@ -1435,6 +1679,25 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           perdaFinanceiraProjetada: v.perdaFinanceiraProjetada,
           sugestaoCompra: v.sugestaoCompra,
           valor_economico: v.valor_economico
+        })),
+        historicoVendasData: historicoVendasData.map(v => ({
+          codigo: v.codigo || '',
+          item: v.item,
+          quantidade: v.quantidade,
+          data_venda: v.data_venda,
+          custo_unitario: v.custo_unitario,
+          preco_venda: v.preco_venda
+        })),
+        salesAnalysisData: getSalesAnalysis().map(sa => ({
+          codigo: sa.codigo,
+          item: sa.item,
+          frequencia: sa.frequencia,
+          consumo: sa.consumo,
+          custo_total: sa.custo_total,
+          venda_total: sa.venda_total,
+          lucro_total: sa.lucro_total,
+          lucratividade: sa.lucratividade,
+          curva_abc: sa.curva_abc
         }))
       };
 
@@ -2170,6 +2433,95 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     </div>
                   </>
                 )}
+
+                {pendingUpload.tipo === 'historico_vendas' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição / Insumo *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Quantidade Vendida *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtyCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtyCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Data da Venda *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.dataVendaCol}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, dataVendaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Custo Unitário (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.custoUnitarioCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, custoUnitarioCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço de Venda (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.precoVendaCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, precoVendaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -2206,8 +2558,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             {activeSubTab === 'indicators' && (
               <div className="space-y-6">
                 
-                {/* 4 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                {/* 5 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
                   <button
                     onClick={() => setActiveSubData('estoque')}
                     className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
@@ -2279,6 +2631,24 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">4. Controle de Validade</h3>
                     {activeSubData === 'validade' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
                   </button>
+
+                  <button
+                    onClick={() => setActiveSubData('historico_vendas')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'historico_vendas' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'historico_vendas' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <ShoppingCart className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {historicoVendasData.length} vendas
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">5. Histórico de Vendas</h3>
+                    {activeSubData === 'historico_vendas' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
                 </div>
 
                 {/* Sub cockpit: Área de Uploads + Tabelas Dinâmicas de faturamento */}
@@ -2292,8 +2662,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         {activeSubData === 'consumo' && 'Upload: Consumo Médio'}
                         {activeSubData === 'historico_precos' && 'Upload: Compras Realizadas'}
                         {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
+                        {activeSubData === 'historico_vendas' && 'Upload: Histórico de Vendas'}
                       </h4>
-                      <p className="text-[10px] text-slate-400">Arraste seus relatórios do sistema em Excel ou PDF.</p>
+                      <p className="text-[10px] text-slate-400">Arraste seus relatórios do sistema em Excel, CSV ou PDF.</p>
                     </div>
 
                     <div 
@@ -2360,6 +2731,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                           {activeSubData === 'consumo' && 'Base: Histórico de Consumo Mensal'}
                           {activeSubData === 'historico_precos' && 'Base: Histórico de Compras e Fornecedores'}
                           {activeSubData === 'validade' && 'Base: Auditoria de Validades de Shelf-life'}
+                          {activeSubData === 'historico_vendas' && 'Base: Histórico de Vendas Realizadas'}
                         </h4>
                       </div>
 
@@ -2570,6 +2942,33 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                               <option value="atencao">Atenção (31 a 90 dias) ⚠️</option>
                               <option value="saudaveis">Saudáveis (+90 dias) 🟢</option>
                             </select>
+                          </>
+                        )}
+                        {activeSubData === 'historico_vendas' && (
+                          <>
+                            {/* Toggle Visualização */}
+                            <select
+                              value={salesViewType}
+                              onChange={(e) => setSalesViewType(e.target.value as any)}
+                              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-650 rounded-xl text-[9px] font-black uppercase tracking-wider outline-none cursor-pointer shrink-0"
+                              title="Alterar modo de visualização"
+                            >
+                              <option value="analise">Análise Top 10 📊</option>
+                              <option value="registros">Registros Individuais 📄</option>
+                            </select>
+
+                            {salesViewType === 'analise' && (
+                              <select
+                                value={salesSortFilter}
+                                onChange={(e) => setSalesSortFilter(e.target.value as any)}
+                                className="px-2.5 py-1.5 bg-indigo-50 border border-indigo-250 hover:bg-indigo-100 text-indigo-700 rounded-xl text-[9px] font-black uppercase tracking-wider outline-none cursor-pointer shrink-0"
+                                title="Ordenar Top 10 por"
+                              >
+                                <option value="frequencia">Top 10: Frequência 🔥</option>
+                                <option value="quantidade">Top 10: Consumo/Qtd 📦</option>
+                                <option value="valor_venda">Top 10: Receita/Valor 💰</option>
+                              </select>
+                            )}
                           </>
                         )}
                         <div className="relative flex-1 sm:w-44">
@@ -2936,6 +3335,171 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </div>
                     )}
 
+                    {/* RENDER PLANILHA HISTORICO VENDAS */}
+                    {activeSubData === 'historico_vendas' && (
+                      <div className="space-y-4">
+                        {salesViewType === 'analise' ? (
+                          <div className="overflow-x-auto text-[11px] border border-slate-100 rounded-xl bg-slate-50/20 p-1">
+                            <div className="p-3 bg-white rounded-t-xl border-b border-slate-100 flex items-center justify-between">
+                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                                🔥 TOP 10 Analítico por {salesSortFilter === 'frequencia' ? 'Frequência de Vendas' : salesSortFilter === 'quantidade' ? 'Quantidade Consumida' : 'Valor Total de Vendas'}
+                              </span>
+                              <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-bold">
+                                Base: {getSalesAnalysis().length} itens distintos
+                              </span>
+                            </div>
+                            <table className="min-w-[1000px] w-full text-left bg-white rounded-b-xl table-fixed">
+                              <thead>
+                                <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 text-left bg-slate-50/50">
+                                  <th className="pb-2 pt-3 px-3 w-[5%] text-center">Rank</th>
+                                  <th className="pb-2 pt-3 w-[10%]">Código</th>
+                                  <th className="pb-2 pt-3 w-[22%]">Descrição</th>
+                                  <th className="pb-2 pt-3 text-center w-[11%]">Freq. Vendas</th>
+                                  <th className="pb-2 pt-3 text-right w-[11%] pr-3">Consumo Total</th>
+                                  <th className="pb-2 pt-3 text-right w-[11%] pr-3">Preço Custo</th>
+                                  <th className="pb-2 pt-3 text-right w-[11%] pr-3">Preço Venda</th>
+                                  <th className="pb-2 pt-3 text-right w-[11%] pr-3">Lucro Absoluto</th>
+                                  <th className="pb-2 pt-3 text-center w-[8%]">Lucratividade</th>
+                                  <th className="pb-2 pt-3 text-center w-[8%]">Curva ABC</th>
+                                  <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                                {getProcessedSalesAnalysis().map((row, index) => {
+                                  const abcColor = row.curva_abc === 'A' 
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                                    : row.curva_abc === 'B' 
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200' 
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                  return (
+                                    <tr key={row.item} className="hover:bg-indigo-50/10 transition-colors">
+                                      <td className="py-2.5 px-3 text-center font-mono font-black text-slate-400 text-xs">
+                                        #{index + 1}
+                                      </td>
+                                      <td className="py-2.5 truncate" title={row.codigo || 'Sem Código'}>
+                                        <span className="font-mono font-bold text-indigo-700 bg-indigo-50/60 px-2 py-0.5 rounded border border-indigo-100/40 text-[9px] truncate max-w-full inline-block">
+                                          {row.codigo || 'S/Cód.'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 font-bold text-slate-900 truncate" title={row.item}>
+                                        {row.item}
+                                      </td>
+                                      <td className="py-2.5 text-center">
+                                        <span className="font-mono font-black text-slate-800 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded text-[10px]">
+                                          🔥 {row.frequencia}x
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 pr-3">
+                                        {row.consumo.toLocaleString('pt-BR')} un
+                                      </td>
+                                      <td className="py-2.5 text-right font-mono text-slate-500 pr-3">
+                                        R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="py-2.5 text-right font-mono font-bold text-indigo-650 pr-3">
+                                        R$ {row.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="py-2.5 text-right font-mono pr-3">
+                                        <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${row.lucro_total >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                                          R$ {row.lucro_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-center">
+                                        <span className="font-mono font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
+                                          {row.lucratividade.toFixed(1)}%
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-center">
+                                        <span className={`font-black px-2 py-0.5 rounded-full text-[9px] border ${abcColor}`}>
+                                          Classe {row.curva_abc}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-center">
+                                        <button onClick={() => handleDeleteVendaByItem(row.item)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer" title="Remover histórico deste item">
+                                          <Trash className="h-3.5 w-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                                {getProcessedSalesAnalysis().length === 0 && (
+                                  <tr>
+                                    <td colSpan={11} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                      Nenhum registro de venda disponível para análise ou pesquisa.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
+                            <table className="min-w-[1000px] w-full text-left bg-white rounded-xl table-fixed">
+                              <thead>
+                                <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 text-left bg-slate-50/50">
+                                  <th className="pb-2 pt-3 px-3 w-[15%]">Código</th>
+                                  <th className="pb-2 pt-3 w-[35%]">Insumo / Descrição</th>
+                                  <th className="pb-2 pt-3 text-right w-[10%] pr-3">Qtd Vendida</th>
+                                  <th className="pb-2 pt-3 text-center w-[12%]">Data da Venda</th>
+                                  <th className="pb-2 pt-3 text-right w-[10%] pr-3">Custo Unitário</th>
+                                  <th className="pb-2 pt-3 text-right w-[10%] pr-3">Preço de Venda</th>
+                                  <th className="pb-2 pt-3 text-right w-[10%] pr-3">Lucro Estimado</th>
+                                  <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                                {historicoVendasData
+                                  .filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && v.codigo.toLowerCase().includes(searchQuery.toLowerCase())))
+                                  .map((row) => {
+                                    const lucro = (row.preco_venda - row.custo_unitario) * row.quantidade;
+                                    return (
+                                      <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                        <td className="py-2.5 px-3">
+                                          <span className="font-mono font-bold text-indigo-700 bg-indigo-50/60 px-2 py-1 rounded-lg border border-indigo-100/40 text-[10px] inline-block">
+                                            {row.codigo || 'S/Cód.'}
+                                          </span>
+                                        </td>
+                                        <td className="py-2.5 font-bold text-slate-900 truncate" title={row.item}>
+                                          {row.item}
+                                        </td>
+                                        <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 pr-3">
+                                          {row.quantidade.toLocaleString('pt-BR')} un
+                                        </td>
+                                        <td className="py-2.5 text-center font-mono text-slate-500">
+                                          {row.data_venda ? new Date(row.data_venda).toLocaleDateString('pt-BR') : '-'}
+                                        </td>
+                                        <td className="py-2.5 text-right font-mono text-slate-600 pr-3">
+                                          R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-2.5 text-right font-mono font-black text-indigo-650 pr-3">
+                                          R$ {row.preco_venda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-2.5 text-right font-mono pr-3">
+                                          <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${lucro >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                                            R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </span>
+                                        </td>
+                                        <td className="py-2.5 text-center">
+                                          <button onClick={() => handleDeleteVenda(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                            <Trash className="h-3.5 w-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                {historicoVendasData.filter(v => v.item.toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && v.codigo.toLowerCase().includes(searchQuery.toLowerCase()))).length === 0 && (
+                                  <tr>
+                                    <td colSpan={8} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                      Nenhum registro individual de venda encontrado para a pesquisa.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   </div>
 
                 </div>
@@ -2977,6 +3541,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 {file.tipo === 'consumo' && 'Consumo Mensal'}
                                 {file.tipo === 'historico_precos' && 'Valores Fornecedor'}
                                 {file.tipo === 'validade' && 'Validade Lote'}
+                                {file.tipo === 'historico_vendas' && 'Histórico de Vendas'}
                               </span>
                             </td>
                             <td className="py-3 font-mono text-slate-450">{file.enviado_em}</td>

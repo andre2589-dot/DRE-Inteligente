@@ -318,6 +318,122 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   const lowerPrompt = normalizeStr(prompt);
   const estoque: any[] = procurementContext.estoqueData;
 
+  const isSalesQuery = lowerPrompt.includes("venda") || 
+                       lowerPrompt.includes("lucratividade") || 
+                       lowerPrompt.includes("lucro") || 
+                       lowerPrompt.includes("lucrativo") || 
+                       lowerPrompt.includes("margem") || 
+                       lowerPrompt.includes("abc");
+
+  if (isSalesQuery) {
+    const salesList = procurementContext.salesAnalysisData || [];
+    
+    if (salesList.length === 0 && procurementContext.historicoVendasData && Array.isArray(procurementContext.historicoVendasData)) {
+      const map: Record<string, any> = {};
+      procurementContext.historicoVendasData.forEach((row: any) => {
+        const key = String(row.item || "").trim();
+        if (key) {
+          if (!map[key]) {
+            map[key] = { codigo: row.codigo || '', item: row.item, frequencia: 0, consumo: 0, custo_total: 0, venda_total: 0 };
+          }
+          map[key].frequencia += 1;
+          map[key].consumo += Number(row.quantidade || 0);
+          map[key].custo_total += Number(row.custo_unitario || 0) * Number(row.quantidade || 0);
+          map[key].venda_total += Number(row.preco_venda || 0) * Number(row.quantidade || 0);
+        }
+      });
+      const rawList = Object.values(map).map((agg: any) => {
+        const lucro_total = agg.venda_total - agg.custo_total;
+        const lucratividade = agg.venda_total > 0 ? (lucro_total / agg.venda_total) * 100 : 0;
+        return { ...agg, lucro_total, lucratividade, curva_abc: 'C' };
+      });
+      const sortedByVenda = [...rawList].sort((a, b) => b.venda_total - a.venda_total);
+      const grandTotalVenda = sortedByVenda.reduce((acc, x) => acc + x.venda_total, 0);
+      let cumulative = 0;
+      sortedByVenda.forEach(item => {
+        if (grandTotalVenda > 0) {
+          cumulative += item.venda_total;
+          const pct = (cumulative / grandTotalVenda) * 100;
+          if (pct <= 80) item.curva_abc = 'A';
+          else if (pct <= 95) item.curva_abc = 'B';
+          else item.curva_abc = 'C';
+        }
+      });
+      salesList.push(...sortedByVenda);
+    }
+
+    if (salesList.length > 0) {
+      if (lowerPrompt.includes("abc")) {
+        let response = `### 📊 Análise da Curva ABC de Vendas Realizadas\n\nIdentifiquei a classificação dos itens baseando-se no faturamento total acumulado:\n\n`;
+        const classA = salesList.filter((s: any) => s.curva_abc === 'A');
+        const classB = salesList.filter((s: any) => s.curva_abc === 'B');
+        const classC = salesList.filter((s: any) => s.curva_abc === 'C');
+
+        response += `🏆 **Classe A (80% do faturamento acumulado - Mais Críticos):**\n`;
+        if (classA.length > 0) {
+          classA.forEach((s: any) => {
+            response += `• **${s.item.toUpperCase()}**: Venda Total R$ ${s.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Freq: ${s.frequencia}x, Consumo: ${s.consumo} un, Lucratividade: ${s.lucratividade.toFixed(1)}%)\n`;
+          });
+        } else {
+          response += `Nenhum item na Classe A ainda.\n`;
+        }
+
+        response += `\n🥈 **Classe B (Próximos 15% do faturamento acumulado - Moderados):**\n`;
+        if (classB.length > 0) {
+          classB.forEach((s: any) => {
+            response += `• **${s.item.toUpperCase()}**: Venda Total R$ ${s.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Freq: ${s.frequencia}x, Consumo: ${s.consumo} un, Lucratividade: ${s.lucratividade.toFixed(1)}%)\n`;
+          });
+        } else {
+          response += `Nenhum item na Classe B.\n`;
+        }
+
+        response += `\n🥉 **Classe C (Restantes 5% do faturamento acumulado - Menor faturamento):**\n`;
+        if (classC.length > 0) {
+          classC.slice(0, 10).forEach((s: any) => {
+            response += `• **${s.item.toUpperCase()}**: Venda Total R$ ${s.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Freq: ${s.frequencia}x, Consumo: ${s.consumo} un, Lucratividade: ${s.lucratividade.toFixed(1)}%)\n`;
+          });
+          if (classC.length > 10) response += `_... e outros ${classC.length - 10} itens menores._\n`;
+        } else {
+          response += `Nenhum item na Classe C.\n`;
+        }
+
+        return response.trim();
+      }
+
+      if (lowerPrompt.includes("lucratividade") || lowerPrompt.includes("lucro") || lowerPrompt.includes("lucrativo") || lowerPrompt.includes("margem")) {
+        let response = `### 💰 Análise de Margem e Lucratividade dos Itens\n\nCom base no histórico de vendas tratadas, segue a análise de lucratividade dos itens ordenada pelo lucro absoluto acumulado:\n\n`;
+        const sortedByLucro = [...salesList].sort((a: any, b: any) => b.lucro_total - a.lucro_total);
+        
+        sortedByLucro.slice(0, 10).forEach((s: any, idx: number) => {
+          response += `${idx + 1}. **${s.item.toUpperCase()}**:\n`;
+          response += `   * **Preço de Venda Total:** R$ ${s.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+          response += `   * **Preço de Custo Total:** R$ ${s.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+          response += `   * **Lucro Líquido Estimado:** R$ ${s.lucro_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+          response += `   * **Margem de Lucratividade:** **${s.lucratividade.toFixed(1)}%**\n`;
+          response += `   * **Curva ABC:** Classe **${s.curva_abc}**\n\n`;
+        });
+
+        return response.trim();
+      }
+
+      // Se for consulta geral de vendas
+      let response = `### 🛒 Análise Consolidada do Histórico de Vendas (Top 10 Itens por Frequência)\n\nCom base na base de dados tratada, o desempenho geral dos itens ativos é:\n\n`;
+      const sortedByFreq = [...salesList].sort((a: any, b: any) => b.frequencia - a.frequencia || b.consumo - a.consumo);
+
+      sortedByFreq.slice(0, 10).forEach((s: any, idx: number) => {
+        response += `${idx + 1}. **${s.item.toUpperCase()}**${s.codigo ? ` (Código: ${s.codigo})` : ''}:\n`;
+        response += `   * **Frequência (Vendas Realizadas):** ${s.frequencia} vezes\n`;
+        response += `   * **Quantidade Total Consumida:** ${s.consumo.toLocaleString('pt-BR')} unidades\n`;
+        response += `   * **Preço de Custo Total:** R$ ${s.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+        response += `   * **Preço de Venda Total:** R$ ${s.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+        response += `   * **Lucro Total:** R$ ${s.lucro_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+        response += `   * **Curva ABC:** Classe **${s.curva_abc}** (Lucratividade: **${s.lucratividade.toFixed(1)}%**)\n\n`;
+      });
+
+      return response.trim();
+    }
+  }
+
   // Se for uma consulta de compras, preços, fornecedores ou valores históricos, não interceptar como estoque simples
   const isPurchaseQuery = lowerPrompt.includes("compra") || 
                           lowerPrompt.includes("preco") || 
@@ -1052,6 +1168,75 @@ app.post("/api/procurement/batch_validity", async (req, res) => {
   res.json({ success: true, count: cleanItems.length, data: cleanItems });
 });
 
+app.get("/api/procurement/sales_history", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_sales_history')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching sales history from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).sales_history) (db as any).sales_history = [];
+  const list = (db as any).sales_history.filter((item: any) => item.company_id === String(company_id));
+  res.json(list);
+});
+
+app.post("/api/procurement/sales_history", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, sales_history_items } = req.body;
+  if (!company_id || !Array.isArray(sales_history_items)) {
+    res.status(400).json({ error: "company_id ou array de histórico de vendas inválido." });
+    return;
+  }
+
+  const cleanItems = sales_history_items.map((item: any) => ({
+    id: item.id || `ven_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    company_id: String(company_id),
+    codigo: item.codigo || null,
+    item: item.item,
+    quantidade: Number(item.quantidade) || 0,
+    data_venda: item.data_venda || new Date().toISOString().split('T')[0],
+    custo_unitario: Number(item.custo_unitario) || 0,
+    preco_venda: Number(item.preco_venda) || 0,
+    created_at: item.created_at || new Date().toISOString()
+  }));
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_sales_history').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_sales_history').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting sales history to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).sales_history || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).sales_history = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
 app.post("/api/procurement/clear", async (req, res) => {
   await dbReadyPromise;
   const { company_id } = req.body;
@@ -1067,6 +1252,7 @@ app.post("/api/procurement/clear", async (req, res) => {
         supabase.from('procurement_consumption').delete().eq('company_id', String(company_id)),
         supabase.from('procurement_price_history').delete().eq('company_id', String(company_id)),
         supabase.from('procurement_batch_validity').delete().eq('company_id', String(company_id)),
+        supabase.from('procurement_sales_history').delete().eq('company_id', String(company_id)),
         supabase.from('procurement_quotes').delete().eq('company_id', String(company_id))
       ]);
     }
@@ -1086,6 +1272,9 @@ app.post("/api/procurement/clear", async (req, res) => {
   }
   if ((db as any).batch_validity) {
     (db as any).batch_validity = (db as any).batch_validity.filter((item: any) => item.company_id !== String(company_id));
+  }
+  if ((db as any).sales_history) {
+    (db as any).sales_history = (db as any).sales_history.filter((item: any) => item.company_id !== String(company_id));
   }
   if ((db as any).quotes) {
     (db as any).quotes = (db as any).quotes.filter((item: any) => item.company_id !== String(company_id));
