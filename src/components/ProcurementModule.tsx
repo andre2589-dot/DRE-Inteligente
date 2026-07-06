@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Plus, 
@@ -73,6 +73,7 @@ interface EstoqueItem {
   originalItemsCount?: number;
   mergedSituations?: string[];
   lotsList?: { lote: string; quantidade: number; unidade: string; situacao?: string }[];
+  data_entrada?: string; // Data de Entrada / Cadastro
 }
 
 interface ConsumoItem {
@@ -86,12 +87,18 @@ interface ConsumoItem {
 
 interface PrecoHistoricoItem {
   id: string;
-  item: string;
-  fornecedor: string;
-  preco_unitario: number;
-  data_compra: string;
-  condicao_pagamento: string;
-  codigo_pedido: string;
+  codigo_fornecedor?: string; // Código Forn
+  fornecedor: string;         // Fornecedor
+  data_compra: string;        // Entrada (data da compra)
+  codigo_item?: string;       // Código Item
+  item: string;               // Descrição Item
+  quantidade?: number;        // Qtd Comprada
+  unidade?: string;           // Un
+  preco_unitario: number;     // Preço Custo
+  lote?: string;              // Lote
+  validade?: string;          // Validade
+  condicao_pagamento?: string; // Condições
+  codigo_pedido?: string;     // Código Faturamento / Código Pedido
 }
 
 interface ValidadeLoteItem {
@@ -238,6 +245,22 @@ const parseGenericDate = (val: any, defaultDaysOffset: number = 0): string => {
   return new Date(Date.now() + defaultDaysOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 };
 
+const parsePtBrFloat = (val: any): number => {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  let str = String(val).trim();
+  // Remove currency symbol and spaces
+  str = str.replace(/R\$\s*/gi, '');
+  // Clean dots and commas
+  if (str.includes(',') && (str.includes('.') || !isNaN(Number(str.replace(',', '.'))))) {
+    str = str.replace(/\./g, '').replace(/,/g, '.');
+  } else if (str.includes(',')) {
+    str = str.replace(/,/g, '.');
+  }
+  const parsed = parseFloat(str);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
 const formatIsoDateToPtBr = (isoStr: string | null | undefined): string => {
   if (!isoStr) return '-';
   const cleanStr = String(isoStr).split('T')[0].trim();
@@ -368,19 +391,31 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   // Salvar mapeamento
   useEffect(() => {
-    localStorage.setItem('gestao_colunas_mapping', JSON.stringify(columnMapping));
+    try {
+      localStorage.setItem('gestao_colunas_mapping', JSON.stringify(columnMapping));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
   }, [columnMapping]);
 
   // Lista de arquivos registrados para Download do usuário e Auditoria
   const [arquivosRegistrados, setArquivosRegistrados] = useState<RegistrosArquivos[]>(() => {
-    const cached = localStorage.getItem('gestao_arquivos_registrados');
-    if (cached) return JSON.parse(cached);
+    try {
+      const cached = localStorage.getItem('gestao_arquivos_registrados');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {
+      console.warn("Error reading archives list from storage:", e);
+    }
     return [];
   });
 
   // Armazenar os arquivos no localStorage
   useEffect(() => {
-    localStorage.setItem('gestao_arquivos_registrados', JSON.stringify(arquivosRegistrados));
+    try {
+      localStorage.setItem('gestao_arquivos_registrados', JSON.stringify(arquivosRegistrados));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
   }, [arquivosRegistrados]);
 
   // Estados dos bancos estruturados populados com os dados iniciais do relatório real de CONTROLE DE ESTOQUE
@@ -391,8 +426,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [historicoVendasData, setHistoricoVendasData] = useState<VendaHistoricoItem[]>([]);
   const [salesSortFilter, setSalesSortFilter] = useState<'frequencia' | 'quantidade' | 'valor_venda'>('frequencia');
   const [salesViewType, setSalesViewType] = useState<'analise' | 'registros'>('analise');
+  const [curvaAbcFiltro, setCurvaAbcFiltro] = useState<'frequencia' | 'consumo' | 'lucro'>('frequencia');
   const [loadingDb, setLoadingDb] = useState(true);
   const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
+
+  // Filtros de período individuais e separados para cada um dos 5 painéis
+  const [estoquePeriodo, setEstoquePeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [consumoPeriodo, setConsumoPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [precosPeriodo, setPrecosPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [validadePeriodo, setValidadePeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [vendasPeriodo, setVendasPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
   // Carregar dados estruturados do banco de dados (Supabase ou fallback local) com suporte a persistência por localStorage
   useEffect(() => {
@@ -521,7 +564,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   // Sincronizar alterações de dados com o Banco de Dados (com Debounce para otimização) e com o localStorage imediatamente
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
-    localStorage.setItem(`gestao_estoque_data_${companyId}`, JSON.stringify(estoqueData));
+    try {
+      localStorage.setItem(`gestao_estoque_data_${companyId}`, JSON.stringify(estoqueData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/inventory', {
@@ -538,7 +585,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
-    localStorage.setItem(`gestao_consumo_data_${companyId}`, JSON.stringify(consumoData));
+    try {
+      localStorage.setItem(`gestao_consumo_data_${companyId}`, JSON.stringify(consumoData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/consumption', {
@@ -555,7 +606,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
-    localStorage.setItem(`gestao_precos_data_${companyId}`, JSON.stringify(historicoPrecosData));
+    try {
+      localStorage.setItem(`gestao_precos_data_${companyId}`, JSON.stringify(historicoPrecosData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/price_history', {
@@ -572,7 +627,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
-    localStorage.setItem(`gestao_validade_data_${companyId}`, JSON.stringify(validadeLotesData));
+    try {
+      localStorage.setItem(`gestao_validade_data_${companyId}`, JSON.stringify(validadeLotesData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/batch_validity', {
@@ -589,7 +648,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   useEffect(() => {
     if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
-    localStorage.setItem(`gestao_sales_data_${companyId}`, JSON.stringify(historicoVendasData));
+    try {
+      localStorage.setItem(`gestao_sales_data_${companyId}`, JSON.stringify(historicoVendasData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
     const timer = setTimeout(async () => {
       try {
         await fetch('/api/procurement/sales_history', {
@@ -688,19 +751,25 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           custoTotalCol: 'Custo Acumulado R$'
         };
       } else if (tipo === 'historico_precos') {
-        detectedHeaders = ['Descrição Comercial', 'Fornecedor Credenciado', 'Valor Unitário Pago', 'Data Emissão NF', 'Condição de Pgto', 'Nº Faturamento'];
+        detectedHeaders = ['Código Forn', 'Fornecedor', 'Entrada', 'Código Item', 'Descrição Item', 'Qtd Comprada', 'Un', 'Preço Custo', 'Lote', 'Validade', 'Condições Pgto', 'Código Pedido'];
         previewRows = [
-          { 'Descrição Comercial': 'Creatina Monohidratada 250g', 'Fornecedor Credenciado': 'NutriAtacado Brasil', 'Valor Unitário Pago': '39.90', 'Data Emissão NF': '2026-06-19', 'Condição de Pgto': 'Boleto 45 dias', 'Nº Faturamento': 'PED-11582' },
-          { 'Descrição Comercial': 'Whey Protein Isolado 1kg', 'Fornecedor Credenciado': 'SupleMax Distribuidora', 'Valor Unitário Pago': '115.00', 'Data Emissão NF': '2026-06-18', 'Condição de Pgto': 'Boleto 30 dias', 'Nº Faturamento': 'PED-11579' },
-          { 'Descrição Comercial': 'BCAA Ultra Pure', 'Fornecedor Credenciado': 'Globo Suplementos', 'Valor Unitário Pago': '27.50', 'Data Emissão NF': '2026-06-17', 'Condição de Pgto': 'Pix', 'Nº Faturamento': 'PED-11511' }
+          { 'Código Forn': 'F-991', 'Fornecedor': 'NutriAtacado Brasil', 'Entrada': '2026-06-19', 'Código Item': '01918', 'Descrição Item': 'Creatina Monohidratada 250g', 'Qtd Comprada': '100', 'Un': 'potes', 'Preço Custo': '39.90', 'Lote': 'CR-905', 'Validade': '2027-02-14', 'Condições Pgto': 'Boleto 45 dias', 'Código Pedido': 'PED-11582' },
+          { 'Código Forn': 'F-122', 'Fornecedor': 'SupleMax Distribuidora', 'Entrada': '2026-06-18', 'Código Item': '00633', 'Descrição Item': 'Whey Protein Isolado 1kg', 'Qtd Comprada': '150', 'Un': 'potes', 'Preço Custo': '115.00', 'Lote': 'WP-742', 'Validade': '2026-06-25', 'Condições Pgto': 'Boleto 30 dias', 'Código Pedido': 'PED-11579' },
+          { 'Código Forn': 'F-338', 'Fornecedor': 'Globo Suplementos', 'Entrada': '2026-06-17', 'Código Item': '04808', 'Descrição Item': 'BCAA Ultra Pure', 'Qtd Comprada': '120', 'Un': 'potes', 'Preço Custo': '27.50', 'Lote': 'BC-11', 'Validade': '2026-07-28', 'Condições Pgto': 'Pix', 'Código Pedido': 'PED-11511' }
         ];
         suggestedMapping = {
-          itemCol: 'Descrição Comercial',
-          fornecedorCol: 'Fornecedor Credenciado',
-          precoUnitarioCol: 'Valor Unitário Pago',
-          dataCompraCol: 'Data Emissão NF',
-          condicaoPgtoCol: 'Condição de Pgto',
-          codigoPedidoCol: 'Nº Faturamento'
+          codigoFornCol: 'Código Forn',
+          fornecedorCol: 'Fornecedor',
+          dataCompraCol: 'Entrada',
+          codigoItemCol: 'Código Item',
+          itemCol: 'Descrição Item',
+          qtdCompradaCol: 'Qtd Comprada',
+          unidadeCol: 'Un',
+          precoUnitarioCol: 'Preço Custo',
+          loteCol: 'Lote',
+          validadeCol: 'Validade',
+          condicaoPgtoCol: 'Condições Pgto',
+          codigoPedidoCol: 'Código Pedido'
         };
       } else if (tipo === 'validade') {
         detectedHeaders = ['Matéria Prima / Lote', 'ID Identificador', 'Volume de Lote', 'Vencimento Final'];
@@ -849,10 +918,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           };
         } else if (tipo === 'historico_precos') {
           suggestedMapping = {
-            itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
-            fornecedorCol: findBestMatch(['fornecedor', 'nome fornecedor', 'parceiro', 'credenciado', 'distribuidor']),
-            precoUnitarioCol: findBestMatch(['preço', 'unitário', 'valor unitario', 'pago', 'custo', 'unitario']),
-            dataCompraCol: findBestMatch(['data', 'compra', 'emissão', 'nf', 'data compra', 'emissao']),
+            codigoFornCol: findBestMatch(['Código Forn', 'Código Fornecedor', 'Cod Forn', 'cod_forn']),
+            fornecedorCol: findBestMatch(['Fornecedor', 'nome fornecedor', 'parceiro', 'credenciado', 'distribuidor']),
+            dataCompraCol: findBestMatch(['Entrada', 'data', 'compra', 'emissão', 'data compra', 'emissao']),
+            codigoItemCol: findBestMatch(['Código Item', 'Cod Item', 'codigo_item', 'codigo']),
+            itemCol: findBestMatch(['Descrição Item', 'Descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
+            qtdCompradaCol: findBestMatch(['Qtd Comprada', 'quantidade', 'qtd', 'volume', 'comprada']),
+            unidadeCol: findBestMatch(['Un', 'unidade', 'und']),
+            precoUnitarioCol: findBestMatch(['Preço Custo', 'preco custo', 'preço', 'unitário', 'valor unitario', 'custo']),
+            loteCol: findBestMatch(['Lote', 'loteamento']),
+            validadeCol: findBestMatch(['Validade', 'vencimento']),
             condicaoPgtoCol: findBestMatch(['condição', 'pagamento', 'prazo', 'pgto', 'condicao']),
             codigoPedidoCol: findBestMatch(['pedido', 'pedido compra', 'faturamento', 'nf', 'número', 'numero'])
           };
@@ -1003,34 +1078,42 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       const mappedRows: PrecoHistoricoItem[] = (allRows || []).map((row, idx) => {
         const item = String(row[suggestedMapping.itemCol] || '').trim();
         const fornecedor = String(row[suggestedMapping.fornecedorCol] || 'Fornecedor Desconhecido').trim();
-        const preco = Number(row[suggestedMapping.precoUnitarioCol]) || 0;
+        const codigoForn = String(row[suggestedMapping.codigoFornCol] || '').trim();
         const dataCompra = parseGenericDate(row[suggestedMapping.dataCompraCol]);
-        const condicao = String(row[suggestedMapping.condicaoPgtoCol] || 'Boleto 30 dias').trim();
+        const codigoItem = String(row[suggestedMapping.codigoItemCol] || '').trim();
+        const qtdComprada = parsePtBrFloat(row[suggestedMapping.qtdCompradaCol]);
+        const unidade = String(row[suggestedMapping.unidadeCol] || 'UN').trim();
+        const preco = parsePtBrFloat(row[suggestedMapping.precoUnitarioCol]);
+        const lote = String(row[suggestedMapping.loteCol] || '').trim();
+        const validade = parseGenericDate(row[suggestedMapping.validadeCol]);
+        const condicao = String(row[suggestedMapping.condicaoPgtoCol] || '').trim() || 'Boleto';
         const pedido = String(row[suggestedMapping.codigoPedidoCol] || '').trim() || `PED-${Math.floor(10000 + Math.random() * 90000)}`;
         
         return {
           id: 'pre_import_' + Date.now() + '_' + idx,
-          item,
+          codigo_fornecedor: codigoForn,
           fornecedor,
-          preco_unitario: preco,
           data_compra: dataCompra,
+          codigo_item: codigoItem,
+          item,
+          quantidade: qtdComprada,
+          unidade,
+          preco_unitario: preco,
+          lote,
+          validade,
           condicao_pagamento: condicao,
           codigo_pedido: pedido
         };
       }).filter(r => r.item !== '');
 
-      const baseMockData = mappedRows.length > 0 ? mappedRows : [
-        { id: 'pre_up_1', item: 'Creatina Monohidratada 250g', fornecedor: 'NutriAtacado Brasil', preco_unitario: 39.90, data_compra: '2026-06-19', condicao_pagamento: 'Boleto 45 dias', codigo_pedido: 'PED-11582' },
-        { id: 'pre_up_2', item: 'Whey Protein Isolado 1kg', fornecedor: 'SupleMax Distribuidora', preco_unitario: 115.00, data_compra: '2026-06-18', condicao_pagamento: 'Boleto 30 dias', codigo_pedido: 'PED-11579' },
-        { id: 'pre_up_3', item: 'BCAA Ultra Pure', fornecedor: 'Globo Suplementos', preco_unitario: 27.50, data_compra: '2026-06-17', condicao_pagamento: 'Pix', codigo_pedido: 'PED-11511' }
-      ];
+      const baseMockData = mappedRows.length > 0 ? mappedRows : [];
 
       setHistoricoPrecosData(prev => {
         if (mappedRows.length > 0) {
-          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_compra === p.data_compra && String(m.fornecedor || '').toLowerCase() === String(p.fornecedor || '').toLowerCase()));
-          return [...filteredPrev, ...mappedRows];
+          // Substituir a base completa pois agora vamos trabalhar apenas com dados reais da planilha importada!
+          return mappedRows;
         }
-        return [...prev, ...baseMockData];
+        return prev.length > 0 ? prev : baseMockData;
       });
     } else if (tipo === 'validade') {
       const mappedRows: ValidadeLoteItem[] = (allRows || []).map((row, idx) => {
@@ -1280,6 +1363,21 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const getFilteredAndSortedStock = (): EstoqueItem[] => {
     let result = getAggregatedStockData();
 
+    // Filtro por período (com base na data de entrada do item de estoque ou validade do lote se houver)
+    if (estoquePeriodo.start || estoquePeriodo.end) {
+      result = result.filter(item => {
+        let itemDate = item.data_entrada;
+        if (!itemDate) {
+          const firstLot = item.lotsList?.[0]?.lote;
+          const matchVal = firstLot ? validadeLotesData.find(v => v.item.toLowerCase().trim() === item.item.toLowerCase().trim() && v.lote.toLowerCase().trim() === firstLot.toLowerCase().trim()) : null;
+          itemDate = matchVal ? matchVal.validade : '2026-06-25'; // fallback para data padrão
+        }
+        if (estoquePeriodo.start && itemDate < estoquePeriodo.start) return false;
+        if (estoquePeriodo.end && itemDate > estoquePeriodo.end) return false;
+        return true;
+      });
+    }
+
     // Filtro por termo de pesquisa
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase().trim();
@@ -1315,8 +1413,19 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const getConsumoAnaliseData = () => {
     const grouped: { [key: string]: { codigo: string; item: string; totalQty: number; totalCost: number; matches: number } } = {};
     
-    // Filtro por termo de pesquisa
+    // Filtro por termo de pesquisa e por período
     const filteredRaw = consumoData.filter(c => {
+      // Filtro de período separado
+      if (consumoPeriodo.start || consumoPeriodo.end) {
+        if (!c.mes_ano) return true;
+        const parts = c.mes_ano.split('/');
+        if (parts.length === 2) {
+          const dateStr = `${parts[1]}-${parts[0].padStart(2, '0')}-01`;
+          if (consumoPeriodo.start && dateStr < consumoPeriodo.start) return false;
+          if (consumoPeriodo.end && dateStr > consumoPeriodo.end) return false;
+        }
+      }
+
       if (searchQuery.trim() === '') return true;
       const q = searchQuery.toLowerCase().trim();
       return String(c.item || '').toLowerCase().includes(q) || (c.codigo && String(c.codigo).toLowerCase().includes(q));
@@ -1495,6 +1604,13 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     // Filtros de Validade
     let filtered = list;
 
+    if (validadePeriodo.start) {
+      filtered = filtered.filter(v => v.validade >= validadePeriodo.start);
+    }
+    if (validadePeriodo.end) {
+      filtered = filtered.filter(v => v.validade <= validadePeriodo.end);
+    }
+
     if (validadeFiltroVencimento === 'vencendo_mes') {
       const currentMonth = today.getMonth();
       const currentYear = today.getFullYear();
@@ -1528,7 +1644,15 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       venda_total: number;
     }> = {};
 
-    (historicoVendasData || []).forEach(row => {
+    let filteredSales = (historicoVendasData || []);
+    if (vendasPeriodo.start) {
+      filteredSales = filteredSales.filter(v => v.data_venda >= vendasPeriodo.start);
+    }
+    if (vendasPeriodo.end) {
+      filteredSales = filteredSales.filter(v => v.data_venda <= vendasPeriodo.end);
+    }
+
+    filteredSales.forEach(row => {
       if (!row || !row.item) return;
       const key = String(row.item).trim();
       if (!key) return;
@@ -1612,6 +1736,59 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     return filtered.slice(0, 10);
   };
 
+  const getFilteredSalesRegisters = (): VendaHistoricoItem[] => {
+    let list = historicoVendasData || [];
+    if (vendasPeriodo.start) {
+      list = list.filter(v => v.data_venda >= vendasPeriodo.start);
+    }
+    if (vendasPeriodo.end) {
+      list = list.filter(v => v.data_venda <= vendasPeriodo.end);
+    }
+    return list.filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase()))));
+  };
+
+  const getFilteredPrecosData = (): PrecoHistoricoItem[] => {
+    let list = historicoPrecosData || [];
+    if (precosPeriodo.start) {
+      list = list.filter(h => h.data_compra >= precosPeriodo.start);
+    }
+    if (precosPeriodo.end) {
+      list = list.filter(h => h.data_compra <= precosPeriodo.end);
+    }
+    return list.filter(h => String(h.item || '').toLowerCase().includes(searchQuery.toLowerCase()) || String(h.fornecedor || '').toLowerCase().includes(searchQuery.toLowerCase()));
+  };
+
+  const getSupplierTotals = () => {
+    const supplierMap: Record<string, {
+      fornecedor: string;
+      codigo_fornecedor: string;
+      totalItems: number;
+      totalCost: number;
+      transactionsCount: number;
+    }> = {};
+
+    const filteredPrecos = getFilteredPrecosData();
+
+    filteredPrecos.forEach(h => {
+      const name = h.fornecedor || 'Desconhecido';
+      if (!supplierMap[name]) {
+        supplierMap[name] = {
+          fornecedor: name,
+          codigo_fornecedor: h.codigo_fornecedor || '—',
+          totalItems: 0,
+          totalCost: 0,
+          transactionsCount: 0
+        };
+      }
+      const qty = Number(h.quantidade) || 0;
+      supplierMap[name].totalItems += qty;
+      supplierMap[name].totalCost += qty * (Number(h.preco_unitario) || 0);
+      supplierMap[name].transactionsCount += 1;
+    });
+
+    return Object.values(supplierMap).sort((a, b) => b.totalCost - a.totalCost);
+  };
+
   const handleDeleteVendaByItem = (itemName: string) => {
     if (window.confirm(`Tem certeza de que deseja excluir todos os registros de venda do item "${itemName}"?`)) {
       setHistoricoVendasData(prev => prev.filter(i => i.item !== itemName));
@@ -1633,9 +1810,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         content += `"${c.id}";"${c.item}";${c.quantidade_consumida};"${c.mes_ano}";${c.custo_total}\n`;
       });
     } else if (tipo === 'historico_precos') {
-      content += '"ID";"Item";"Fornecedor";"Preço Unitário";"Data de Compra";"Condição de Pagamento";"Código do Pedido"\n';
+      content += '"Código Forn";"Fornecedor";"Entrada";"Código Item";"Descrição Item";"Qtd Comprada";"Un";"Preço Custo";"Lote";"Validade"\n';
       historicoPrecosData.forEach(h => {
-        content += `"${h.id}";"${h.item}";"${h.fornecedor}";${h.preco_unitario};"${h.data_compra}";"${h.condicao_pagamento}";"${h.codigo_pedido}"\n`;
+        content += `"${h.codigo_fornecedor || ''}";"${h.fornecedor}";"${h.data_compra}";"${h.codigo_item || ''}";"${h.item}";${h.quantidade || 0};"${h.unidade || ''}";${h.preco_unitario};"${h.lote || ''}";"${h.validade || ''}"\n`;
       });
     } else if (tipo === 'historico_vendas') {
       content += '"ID";"Código";"Item/Insumo";"Quantidade Vendida";"Data da Venda";"Custo Unitário";"Preço de Venda";"Lucro Estimado"\n';
@@ -1660,17 +1837,70 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     document.body.removeChild(link);
     triggerToast(`Exportação concluída. Download iniciado para "base_registrada_${tipo}.csv"!`);
   };
-
-  // ==========================================
-  // CALCULOS DOS EXCELENTES METRICAS DE ESTOQUE
-  // ==========================================
   const valorEstoqueTotal = estoqueData.reduce((acc, current) => acc + (current.quantidade * current.custo_unitario), 0);
-  
-  // RUPTURA: Itens que têm histórico de consumo mas estão com saldo ZERADO (ou zerando)
-  const itensRuptura = estoqueData.filter(e => {
-    const hasConsumo = consumoData.some(c => c.item.toLowerCase() === e.item.toLowerCase() && c.quantidade_consumida > 0);
-    return hasConsumo && e.quantidade === 0;
-  });
+
+  // Cruzando o histórico de vendas/consumo com saldo de estoque e buscando os dados de última venda, última compra e fornecedor
+  const itensRuptura = useMemo(() => {
+    // Obter lista única de itens com atividade
+    const allItemsWithActivity = Array.from(new Set([
+      ...consumoData.map(c => c.item.trim()),
+      ...historicoVendasData.map(v => v.item.trim())
+    ])).filter(Boolean);
+
+    return allItemsWithActivity.map(itemName => {
+      const stockItem = estoqueData.find(e => e.item.toLowerCase().trim() === itemName.toLowerCase().trim());
+      const qtdEstoque = stockItem ? stockItem.quantidade : 0;
+      
+      // Apenas itens com saldo zerado ou ausente no estoque ativo
+      if (qtdEstoque > 0) return null;
+
+      // 1. MÉDIA DE CONSUMO MÊS
+      const matchingConsumo = consumoData.filter(c => c.item.toLowerCase().trim() === itemName.toLowerCase().trim());
+      let mediaConsumo = 0;
+      if (matchingConsumo.length > 0) {
+        const totalCons = matchingConsumo.reduce((acc, cur) => acc + (Number(cur.quantidade_consumida) || 0), 0);
+        const uniqueMonths = Array.from(new Set(matchingConsumo.map(c => c.mes_ano))).length || 1;
+        mediaConsumo = totalCons / uniqueMonths;
+      } else {
+        const matchingSales = historicoVendasData.filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim());
+        if (matchingSales.length > 0) {
+          const totalSales = matchingSales.reduce((acc, cur) => acc + (Number(cur.quantidade) || 0), 0);
+          const uniqueMonths = Array.from(new Set(matchingSales.map(v => v.data_venda.substring(0, 7)))).length || 1;
+          mediaConsumo = totalSales / uniqueMonths;
+        }
+      }
+
+      // Se não há consumo real, não é uma ruptura crítica
+      if (mediaConsumo === 0) return null;
+
+      // 2. ULTIMA VENDA
+      const matchingSalesForLast = historicoVendasData
+        .filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim())
+        .sort((a, b) => b.data_venda.localeCompare(a.data_venda));
+      const ultimaVenda = matchingSalesForLast.length > 0 ? matchingSalesForLast[0].data_venda : '—';
+
+      // 3. ULTIMA COMPRA
+      const matchingPurchases = (historicoPrecosData || [])
+        .filter(p => p.item.toLowerCase().trim() === itemName.toLowerCase().trim())
+        .sort((a, b) => b.data_compra.localeCompare(a.data_compra));
+      const ultimaCompra = matchingPurchases.length > 0 ? matchingPurchases[0].data_compra : '—';
+
+      // 4. ULTIMO FORNECEDOR
+      const ultimoFornecedor = matchingPurchases.length > 0 ? (matchingPurchases[0].fornecedor || '—') : '—';
+
+      return {
+        id: stockItem?.id || `ruptura-${itemName}`,
+        item: itemName,
+        mediaConsumo,
+        ultimaVenda,
+        ultimaCompra,
+        ultimoFornecedor,
+        unidade: stockItem?.unidade || 'un',
+        quantidade: 0,
+        custo_unitario: stockItem?.custo_unitario || (matchingPurchases.length > 0 ? matchingPurchases[0].preco_unitario : 0)
+      };
+    }).filter(Boolean) as any[];
+  }, [estoqueData, consumoData, historicoVendasData, historicoPrecosData]);
 
   // GIRO DE ESTOQUE: Consumo Anualizado / Estoque Médio
   // Estoque Médio = ValorTotalEstoque (Para simulação ou real)
@@ -1678,28 +1908,79 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const custoConsumoMensalTotal = consumoData.reduce((acc, cur) => acc + cur.custo_total, 0);
   const giroEstoque = valorEstoqueTotal > 0 ? (custoConsumoMensalTotal * 12) / valorEstoqueTotal : 0;
 
-  // CURVA ABC: Classificação
-  // Calculado multiplicando QtdEstoque * CustoUnitario (ou consumo mensual totalizado, que representa a rotatividade financeira real)
-  const totalFinancialFlow = estoqueData.reduce((acc, item) => acc + (item.quantidade * item.custo_unitario || 10), 0) || 1;
-  const estoqueOrdenadoParaABC = [...estoqueData].sort((a,b) => (b.quantidade * b.custo_unitario) - (a.quantidade * a.custo_unitario));
-  
-  let acumulado = 0;
-  const itemsABCClassification = estoqueOrdenadoParaABC.map(item => {
-    const itemValue = item.quantidade * item.custo_unitario;
-    acumulado += itemValue;
-    const pct = (acumulado / totalFinancialFlow) * 100;
-    
-    let classe: 'A' | 'B' | 'C' = 'C';
-    if (pct <= 80) classe = 'A';
-    else if (pct <= 95) classe = 'B';
+  // CURVA ABC: Classificação Dinâmica baseada nos filtros de Frequência, Consumo e Lucratividade
+  const itemsABCClassification = useMemo(() => {
+    // 1. Obter lista de itens únicos de todas as fontes
+    const allItemNames = Array.from(new Set([
+      ...estoqueData.map(e => e.item.trim()),
+      ...consumoData.map(c => c.item.trim()),
+      ...historicoVendasData.map(v => v.item.trim())
+    ])).filter(Boolean);
 
-    return {
-      ...item,
-      value: itemValue,
-      pctOfTotal: (itemValue / totalFinancialFlow) * 100,
-      classification: classe
-    };
-  });
+    // 2. Calcular valor da métrica para cada item
+    const itemsWithMetrics = allItemNames.map(itemName => {
+      let metricValue = 0;
+
+      if (curvaAbcFiltro === 'frequencia') {
+        // CURVA A 70% DA FREQUENCIA, B 20%, C 10%
+        metricValue = historicoVendasData.filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim()).length;
+        if (metricValue === 0) {
+          const estItem = estoqueData.find(e => e.item.toLowerCase().trim() === itemName.toLowerCase().trim());
+          if (estItem?.frequencia_venda === 'Alta') metricValue = 3;
+          else if (estItem?.frequencia_venda === 'Média') metricValue = 2;
+          else if (estItem?.frequencia_venda === 'Baixa') metricValue = 1;
+        }
+      } else if (curvaAbcFiltro === 'consumo') {
+        // CURVA A 70% DO CONSUMO, B 20%, C 10%
+        const consSum = consumoData
+          .filter(c => c.item.toLowerCase().trim() === itemName.toLowerCase().trim())
+          .reduce((acc, cur) => acc + (Number(cur.quantidade_consumida) || 0), 0);
+        const salesSum = historicoVendasData
+          .filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim())
+          .reduce((acc, cur) => acc + (Number(cur.quantidade) || 0), 0);
+        metricValue = consSum > 0 ? consSum : salesSum;
+      } else if (curvaAbcFiltro === 'lucro') {
+        // CURVA A 70% DO LUCRO, B 20%, C 10%
+        const salesProfit = historicoVendasData
+          .filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim())
+          .reduce((acc, cur) => acc + (((Number(cur.preco_venda) || 0) - (Number(cur.custo_unitario) || 0)) * (Number(cur.quantidade) || 0)), 0);
+        const stockItem = estoqueData.find(e => e.item.toLowerCase().trim() === itemName.toLowerCase().trim());
+        const projectedProfit = stockItem ? ((stockItem.preco_venda || (stockItem.custo_unitario * 1.5)) - stockItem.custo_unitario) * stockItem.quantidade : 0;
+        metricValue = salesProfit > 0 ? salesProfit : (projectedProfit > 0 ? projectedProfit : 0);
+      }
+
+      return {
+        item: itemName,
+        value: metricValue
+      };
+    });
+
+    // 3. Ordenar em ordem decrescente
+    const sorted = [...itemsWithMetrics].sort((a, b) => b.value - a.value);
+    const grandTotal = sorted.reduce((acc, x) => acc + x.value, 0) || 1;
+
+    // 4. Classificar com base no acumulado de 70% (A), 20% (B) e 10% (C)
+    let cumulative = 0;
+    return sorted.map(item => {
+      cumulative += item.value;
+      const pct = (cumulative / grandTotal) * 100;
+
+      let classification: 'A' | 'B' | 'C' = 'C';
+      if (pct <= 70) {
+        classification = 'A';
+      } else if (pct <= 90) {
+        classification = 'B';
+      } else {
+        classification = 'C';
+      }
+
+      return {
+        ...item,
+        pctOfTotal: (item.value / grandTotal) * 100,
+        classification
+      };
+    });
+  }, [estoqueData, consumoData, historicoVendasData, curvaAbcFiltro]);
 
   const countA = itemsABCClassification.filter(i => i.classification === 'A').length;
   const valueA = itemsABCClassification.filter(i => i.classification === 'A').reduce((acc, cur) => acc + cur.value, 0);
@@ -1707,6 +1988,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const valueB = itemsABCClassification.filter(i => i.classification === 'B').reduce((acc, cur) => acc + cur.value, 0);
   const countC = itemsABCClassification.filter(i => i.classification === 'C').length;
   const valueC = itemsABCClassification.filter(i => i.classification === 'C').reduce((acc, cur) => acc + cur.value, 0);
+
+  const formatAbcValue = (val: number) => {
+    if (curvaAbcFiltro === 'frequencia') {
+      return `${val} ${val === 1 ? 'venda' : 'vendas'}`;
+    }
+    if (curvaAbcFiltro === 'consumo') {
+      return `${val.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un`;
+    }
+    return `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   // ROTINA DO ASSISTENTE IA (Livre acesso para cruzamento de dados, cumprindo o critério fidedigno)
   const handleSendChatMessage = async (alternativeQuery?: string) => {
@@ -1754,12 +2045,18 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           mes_ano: c.mes_ano
         })),
         historicoPrecosData: historicoPrecosData.map(h => ({
-          item: h.item,
+          codigo_fornecedor: h.codigo_fornecedor || '',
           fornecedor: h.fornecedor,
-          preco_unitario: h.preco_unitario,
           data_compra: h.data_compra,
-          condicao_pagamento: h.condicao_pagamento,
-          codigo_pedido: h.codigo_pedido
+          codigo_item: h.codigo_item || '',
+          item: h.item,
+          quantidade: h.quantidade || 0,
+          unidade: h.unidade || '',
+          preco_unitario: h.preco_unitario,
+          lote: h.lote || '',
+          validade: h.validade || '',
+          condicao_pagamento: h.condicao_pagamento || '',
+          codigo_pedido: h.codigo_pedido || ''
         })),
         validadeLotesData: getProcessedValidadeData().map(v => ({
           codigo: v.codigo || '',
@@ -2368,12 +2665,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                 {pendingUpload.tipo === 'historico_precos' && (
                   <>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição Comercial (Item) *</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código Forn (Opcional)</label>
                       <select
-                        value={pendingUpload.suggestedMapping.itemCol}
+                        value={pendingUpload.suggestedMapping.codigoFornCol || ''}
                         onChange={(e) => setPendingUpload({
                           ...pendingUpload,
-                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoFornCol: e.target.value }
                         })}
                         className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                       >
@@ -2382,9 +2679,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Fornecedor Credenciado *</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Fornecedor *</label>
                       <select
-                        value={pendingUpload.suggestedMapping.fornecedorCol}
+                        value={pendingUpload.suggestedMapping.fornecedorCol || ''}
                         onChange={(e) => setPendingUpload({
                           ...pendingUpload,
                           suggestedMapping: { ...pendingUpload.suggestedMapping, fornecedorCol: e.target.value }
@@ -2396,23 +2693,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço Unitário Pago *</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Entrada (Data de Entrada) *</label>
                       <select
-                        value={pendingUpload.suggestedMapping.precoUnitarioCol}
-                        onChange={(e) => setPendingUpload({
-                          ...pendingUpload,
-                          suggestedMapping: { ...pendingUpload.suggestedMapping, precoUnitarioCol: e.target.value }
-                        })}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      >
-                        <option value="">-- Ignorar / Não Anexar --</option>
-                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Data de Emissão (Compra)</label>
-                      <select
-                        value={pendingUpload.suggestedMapping.dataCompraCol}
+                        value={pendingUpload.suggestedMapping.dataCompraCol || ''}
                         onChange={(e) => setPendingUpload({
                           ...pendingUpload,
                           suggestedMapping: { ...pendingUpload.suggestedMapping, dataCompraCol: e.target.value }
@@ -2424,9 +2707,107 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Condição de Pagamento</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código Item (Opcional)</label>
                       <select
-                        value={pendingUpload.suggestedMapping.condicaoPgtoCol}
+                        value={pendingUpload.suggestedMapping.codigoItemCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoItemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição Item *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.itemCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, itemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Qtd Comprada (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtdCompradaCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtdCompradaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Un (Unidade) (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.unidadeCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, unidadeCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Preço Custo *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.precoUnitarioCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, precoUnitarioCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Lote (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.loteCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, loteCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Validade (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.validadeCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, validadeCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Condições Pgto (Opcional)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.condicaoPgtoCol || ''}
                         onChange={(e) => setPendingUpload({
                           ...pendingUpload,
                           suggestedMapping: { ...pendingUpload.suggestedMapping, condicaoPgtoCol: e.target.value }
@@ -2438,9 +2819,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Nº do Faturamento / Pedido</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código Pedido/Faturamento (Opcional)</label>
                       <select
-                        value={pendingUpload.suggestedMapping.codigoPedidoCol}
+                        value={pendingUpload.suggestedMapping.codigoPedidoCol || ''}
                         onChange={(e) => setPendingUpload({
                           ...pendingUpload,
                           suggestedMapping: { ...pendingUpload.suggestedMapping, codigoPedidoCol: e.target.value }
@@ -2833,6 +3214,35 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       <div className="flex items-center gap-1.5 w-full sm:w-auto relative">
                         {activeSubData === 'estoque' && (
                           <>
+                            {/* Filtro de Período para Estoque */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 shrink-0">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mr-1">Período:</span>
+                              <input
+                                type="date"
+                                value={estoquePeriodo.start}
+                                onChange={(e) => setEstoquePeriodo({ ...estoquePeriodo, start: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de início"
+                              />
+                              <span className="text-[10px] text-slate-400">à</span>
+                              <input
+                                type="date"
+                                value={estoquePeriodo.end}
+                                onChange={(e) => setEstoquePeriodo({ ...estoquePeriodo, end: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de fim"
+                              />
+                              {(estoquePeriodo.start || estoquePeriodo.end) && (
+                                <button
+                                  onClick={() => setEstoquePeriodo({ start: '', end: '' })}
+                                  className="text-slate-450 hover:text-red-550 text-[9px] font-bold ml-1 cursor-pointer"
+                                  title="Limpar filtro de período"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+
                             {/* Seletor de Colunas Visíveis */}
                             <div className="relative inline-block text-left">
                               <button
@@ -2934,6 +3344,35 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         )}
                         {activeSubData === 'consumo' && (
                           <>
+                            {/* Filtro de Período para Consumo */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 shrink-0">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mr-1">Período:</span>
+                              <input
+                                type="date"
+                                value={consumoPeriodo.start}
+                                onChange={(e) => setConsumoPeriodo({ ...consumoPeriodo, start: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de início"
+                              />
+                              <span className="text-[10px] text-slate-400">à</span>
+                              <input
+                                type="date"
+                                value={consumoPeriodo.end}
+                                onChange={(e) => setConsumoPeriodo({ ...consumoPeriodo, end: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de fim"
+                              />
+                              {(consumoPeriodo.start || consumoPeriodo.end) && (
+                                <button
+                                  onClick={() => setConsumoPeriodo({ start: '', end: '' })}
+                                  className="text-slate-450 hover:text-red-550 text-[9px] font-bold ml-1 cursor-pointer"
+                                  title="Limpar filtro de período"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+
                             <div className="relative inline-block text-left">
                               <button
                                 onClick={() => setIsConsumoColumnDropdownOpen(!isConsumoColumnDropdownOpen)}
@@ -3021,8 +3460,69 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                             </select>
                           </>
                         )}
+                        {activeSubData === 'historico_precos' && (
+                          <>
+                            {/* Filtro de Período para Compras */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 shrink-0">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mr-1">Período:</span>
+                              <input
+                                type="date"
+                                value={precosPeriodo.start}
+                                onChange={(e) => setPrecosPeriodo({ ...precosPeriodo, start: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de início"
+                              />
+                              <span className="text-[10px] text-slate-400">à</span>
+                              <input
+                                type="date"
+                                value={precosPeriodo.end}
+                                onChange={(e) => setPrecosPeriodo({ ...precosPeriodo, end: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de fim"
+                              />
+                              {(precosPeriodo.start || precosPeriodo.end) && (
+                                <button
+                                  onClick={() => setPrecosPeriodo({ start: '', end: '' })}
+                                  className="text-slate-450 hover:text-red-550 text-[9px] font-bold ml-1 cursor-pointer"
+                                  title="Limpar filtro de período"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                         {activeSubData === 'validade' && (
                           <>
+                            {/* Filtro de Período para Shelf-Life */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 shrink-0">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mr-1">Período:</span>
+                              <input
+                                type="date"
+                                value={validadePeriodo.start}
+                                onChange={(e) => setValidadePeriodo({ ...validadePeriodo, start: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de início"
+                              />
+                              <span className="text-[10px] text-slate-400">à</span>
+                              <input
+                                type="date"
+                                value={validadePeriodo.end}
+                                onChange={(e) => setValidadePeriodo({ ...validadePeriodo, end: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de fim"
+                              />
+                              {(validadePeriodo.start || validadePeriodo.end) && (
+                                <button
+                                  onClick={() => setValidadePeriodo({ start: '', end: '' })}
+                                  className="text-slate-450 hover:text-red-550 text-[9px] font-bold ml-1 cursor-pointer"
+                                  title="Limpar filtro de período"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+
                             {/* Filtro de Shelf-Life */}
                             <select
                               value={validadeFiltroVencimento}
@@ -3041,6 +3541,35 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         )}
                         {activeSubData === 'historico_vendas' && (
                           <>
+                            {/* Filtro de Período para Vendas */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 shrink-0">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mr-1">Período:</span>
+                              <input
+                                type="date"
+                                value={vendasPeriodo.start}
+                                onChange={(e) => setVendasPeriodo({ ...vendasPeriodo, start: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de início"
+                              />
+                              <span className="text-[10px] text-slate-400">à</span>
+                              <input
+                                type="date"
+                                value={vendasPeriodo.end}
+                                onChange={(e) => setVendasPeriodo({ ...vendasPeriodo, end: e.target.value })}
+                                className="bg-transparent border-none text-[10px] text-slate-600 focus:outline-none cursor-pointer w-24 p-0"
+                                title="Data de fim"
+                              />
+                              {(vendasPeriodo.start || vendasPeriodo.end) && (
+                                <button
+                                  onClick={() => setVendasPeriodo({ start: '', end: '' })}
+                                  className="text-slate-450 hover:text-red-550 text-[9px] font-bold ml-1 cursor-pointer"
+                                  title="Limpar filtro de período"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+
                             {/* Toggle Visualização */}
                             <select
                               value={salesViewType}
@@ -3168,7 +3697,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                                   </span>
                                                 </div>
                                                 <div className="text-[8.5px] text-slate-500 font-mono">
-                                                  Qtd: {l.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
+                                                  Qtd: {(Number(l.quantidade) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
                                                 </div>
                                                 {l.vencendo && (
                                                   <span className="text-[8px] font-black text-red-600 bg-red-50 px-1 py-0.5 rounded border border-red-100 inline-block w-fit mt-0.5 animate-pulse">
@@ -3186,7 +3715,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                             <span className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
                                               totalQuantidadeSegura <= row.safety_stock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'
                                             }`}>
-                                              {totalQuantidadeSegura.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
+                                              {(Number(totalQuantidadeSegura) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4 })}
                                             </span>
                                             {temLoteVencendo && (
                                               <span className="text-[8.5px] text-red-500 font-bold mt-1 bg-red-50 px-1 py-0.5 rounded border border-red-100 block" title="Lotes vencendo nos próximos 2 meses foram excluídos deste saldo">
@@ -3270,12 +3799,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 )}
                                 {selectedConsumoColumns.includes('quantidade_consumida') && (
                                   <td className="py-2.5 text-right font-mono font-extrabold text-slate-800">
-                                    {row.quantidade_consumida.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {(Number(row.quantidade_consumida) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                   </td>
                                 )}
                                 {selectedConsumoColumns.includes('custo_total') && (
                                   <td className="py-2.5 text-right font-mono font-extrabold text-emerald-650">
-                                    R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    R$ {(Number(row.custo_total) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </td>
                                 )}
                                 <td className="py-2.5 text-center">
@@ -3292,40 +3821,105 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
                     {/* RENDER PLANILHA HISTORICO PRECOS */}
                     {activeSubData === 'historico_precos' && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-[11px] bg-white rounded-xl">
-                          <thead>
-                            <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
-                              <th className="pb-2">Fornecedor / Insumo</th>
-                              <th className="pb-2">Código Faturamento</th>
-                              <th className="pb-2">Data Venda</th>
-                              <th className="pb-2 text-right">Preço Pago</th>
-                              <th className="pb-2">Condições</th>
-                              <th className="pb-2 text-center">Excluir</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
-                            {historicoPrecosData
-                              .filter(h => String(h.item || '').toLowerCase().includes(searchQuery.toLowerCase()))
-                              .map((row) => (
-                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                  <td className="py-2.5">
-                                    <span className="font-bold text-slate-900 block">{row.item}</span>
-                                    <span className="text-[9px] text-slate-400 block uppercase font-medium">{row.fornecedor}</span>
-                                  </td>
-                                  <td className="py-2.5 font-mono text-indigo-700 bg-indigo-50/20 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100/50 inline-block mt-1">{row.codigo_pedido}</td>
-                                  <td className="py-2.5 font-mono text-slate-500">{formatIsoDateToPtBr(row.data_compra)}</td>
-                                  <td className="py-2.5 text-right font-mono font-black text-indigo-650">R$ {row.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                  <td className="py-2.5 text-slate-650 font-bold">{row.condicao_pagamento}</td>
-                                  <td className="py-2.5 text-center">
-                                    <button onClick={() => handleDeletePreco(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
-                                      <Trash className="h-3.5 w-3.5" />
-                                    </button>
+                      <div className="space-y-4">
+                        {/* Painel de Consolidação por Fornecedor (Requisitado) */}
+                        <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp className="h-4.5 w-4.5 text-emerald-600" />
+                            <h5 className="text-[11px] font-black text-slate-800 uppercase tracking-wider">Consolidado por Fornecedor</h5>
+                          </div>
+                          {getSupplierTotals().length === 0 ? (
+                            <p className="text-[10px] text-slate-400 italic">Nenhum dado para o período selecionado.</p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                              {getSupplierTotals().slice(0, 6).map((sup) => (
+                                <div key={sup.fornecedor} className="bg-white border border-slate-150 rounded-xl p-3 shadow-xs hover:border-emerald-250 transition-all">
+                                  <div className="flex justify-between items-start mb-1.5">
+                                    <span className="font-bold text-slate-800 text-[11px] truncate max-w-[70%]" title={sup.fornecedor}>
+                                      {sup.fornecedor}
+                                    </span>
+                                    <span className="font-mono text-[9px] text-indigo-650 bg-indigo-50 px-1.5 py-0.5 rounded font-bold">
+                                      {sup.transactionsCount} compras
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-50">
+                                    <div>
+                                      <span className="text-[8px] font-black text-slate-400 uppercase block">Qtd Comprada</span>
+                                      <span className="font-mono font-black text-slate-700 text-xs">{sup.totalItems.toLocaleString('pt-BR')} un</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-[8px] font-black text-slate-400 uppercase block">Valor de Custo</span>
+                                      <span className="font-mono font-black text-emerald-650 text-xs">
+                                        R$ {sup.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              {getSupplierTotals().length > 6 && (
+                                <div className="col-span-full text-right">
+                                  <span className="text-[9px] font-bold text-slate-400">
+                                    e mais {getSupplierTotals().length - 6} fornecedores...
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Tabela de Lançamentos */}
+                        <div className="overflow-x-auto border border-slate-100 rounded-xl">
+                          <table className="w-full text-left text-[11px] bg-white whitespace-nowrap">
+                            <thead>
+                              <tr className="border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider bg-slate-50/75">
+                                <th className="py-2.5 px-3">Código Forn</th>
+                                <th className="py-2.5 px-2">Fornecedor</th>
+                                <th className="py-2.5 px-2">Entrada</th>
+                                <th className="py-2.5 px-2">Código Item</th>
+                                <th className="py-2.5 px-2">Descrição Item</th>
+                                <th className="py-2.5 px-2 text-right">Qtd Comprada</th>
+                                <th className="py-2.5 px-2 text-center">Un</th>
+                                <th className="py-2.5 px-2 text-right">Preço Custo</th>
+                                <th className="py-2.5 px-2">Lote</th>
+                                <th className="py-2.5 px-2">Validade</th>
+                                <th className="py-2.5 px-3 text-center">Excluir</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
+                              {getFilteredPrecosData().length === 0 ? (
+                                <tr>
+                                  <td colSpan={11} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                    Base limpa ou sem dados para o período e pesquisa selecionados. Faça o upload da planilha para carregar os dados reais.
                                   </td>
                                 </tr>
-                              ))}
-                          </tbody>
-                        </table>
+                              ) : (
+                                getFilteredPrecosData().map((row) => (
+                                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="py-2.5 px-3 font-mono text-slate-500 text-[10px]">{row.codigo_fornecedor || '—'}</td>
+                                    <td className="py-2.5 px-2 font-bold text-slate-800">{row.fornecedor}</td>
+                                    <td className="py-2.5 px-2 font-mono text-slate-600">{formatIsoDateToPtBr(row.data_compra)}</td>
+                                    <td className="py-2.5 px-2 font-mono text-indigo-700 font-semibold">{row.codigo_item || '—'}</td>
+                                    <td className="py-2.5 px-2 font-black text-slate-900">{row.item}</td>
+                                    <td className="py-2.5 px-2 text-right font-mono font-extrabold text-slate-800">
+                                      {(Number(row.quantidade) || 0).toLocaleString('pt-BR')}
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center font-bold text-slate-500 uppercase">{row.unidade || 'UN'}</td>
+                                    <td className="py-2.5 px-2 text-right font-mono font-black text-indigo-650">
+                                      R$ {(Number(row.preco_unitario) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-2.5 px-2 font-mono text-slate-600 font-bold">{row.lote || '—'}</td>
+                                    <td className="py-2.5 px-2 font-mono text-slate-600">{formatIsoDateToPtBr(row.validade)}</td>
+                                    <td className="py-2.5 px-3 text-center">
+                                      <button onClick={() => handleDeletePreco(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer" title="Excluir lançamento">
+                                        <Trash className="h-3.5 w-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
 
@@ -3371,7 +3965,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                     </td>
                                     <td className="py-2.5 font-bold text-slate-900 pr-2 truncate" title={row.item}>{row.item}</td>
                                     <td className="py-2.5 font-mono text-slate-600 font-bold uppercase">{row.lote}</td>
-                                    <td className="py-2.5 text-right font-mono text-slate-800 font-extrabold pr-4">{row.quantidade.toLocaleString('pt-BR')} un</td>
+                                    <td className="py-2.5 text-right font-mono text-slate-800 font-extrabold pr-4">{(Number(row.quantidade) || 0).toLocaleString('pt-BR')} un</td>
                                     <td className="py-2.5 text-center font-mono font-bold text-slate-700">{formatDateBr(row.validade)}</td>
                                     <td className="py-2.5 text-center font-mono font-bold">
                                       {row.diasParaVencer <= 0 ? (
@@ -3391,20 +3985,20 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       )}
                                     </td>
                                     <td className="py-2.5 text-right font-mono text-slate-500 pr-4">
-                                      {row.consumoMensal > 0 ? `${row.consumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'Sem consumo'}
+                                      {Number(row.consumoMensal) > 0 ? `${(Number(row.consumoMensal) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês` : 'Sem consumo'}
                                     </td>
                                     <td className="py-2.5 pr-2">
                                       {row.riscoStatus === 'Vencido' ? (
                                         <div className="flex flex-col">
                                           <span className="text-red-650 font-black flex items-center gap-1 text-[10px]">
-                                            ⚠️ Perda: {row.quantidade.toLocaleString('pt-BR')} un
+                                            ⚠️ Perda: {(Number(row.quantidade) || 0).toLocaleString('pt-BR')} un
                                           </span>
                                           <span className="text-[9px] text-red-500 font-semibold font-mono uppercase">Vencido</span>
                                         </div>
                                       ) : row.riscoStatus === 'Risco de Perda' ? (
                                         <div className="flex flex-col">
                                           <span className="text-red-550 font-black flex items-center gap-1 text-[10px]">
-                                            🚨 Sobrarão {row.sobraProjetada.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un
+                                            🚨 Sobrarão {(Number(row.sobraProjetada) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} un
                                           </span>
                                           <span className="text-[9px] text-amber-600 font-semibold font-mono uppercase">Previsão de Sobra</span>
                                         </div>
@@ -3485,22 +4079,22 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                         </span>
                                       </td>
                                       <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 pr-3">
-                                        {row.consumo.toLocaleString('pt-BR')} un
+                                        {(Number(row.consumo) || 0).toLocaleString('pt-BR')} un
                                       </td>
                                       <td className="py-2.5 text-right font-mono text-slate-500 pr-3">
-                                        R$ {row.custo_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        R$ {(Number(row.custo_total) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </td>
                                       <td className="py-2.5 text-right font-mono font-bold text-indigo-650 pr-3">
-                                        R$ {row.venda_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        R$ {(Number(row.venda_total) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </td>
                                       <td className="py-2.5 text-right font-mono pr-3">
-                                        <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${row.lucro_total >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
-                                          R$ {row.lucro_total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${(Number(row.lucro_total) || 0) >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                                          R$ {(Number(row.lucro_total) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                       </td>
                                       <td className="py-2.5 text-center">
                                         <span className="font-mono font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
-                                          {row.lucratividade.toFixed(1)}%
+                                          {(Number(row.lucratividade) || 0).toFixed(1)}%
                                         </span>
                                       </td>
                                       <td className="py-2.5 text-center">
@@ -3542,10 +4136,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
-                                {historicoVendasData
-                                  .filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase()))))
+                                {getFilteredSalesRegisters()
                                   .map((row) => {
-                                    const lucro = (row.preco_venda - row.custo_unitario) * row.quantidade;
+                                    const lucro = ((Number(row.preco_venda) || 0) - (Number(row.custo_unitario) || 0)) * (Number(row.quantidade) || 0);
                                     return (
                                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="py-2.5 px-3">
@@ -3557,20 +4150,20 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                           {row.item}
                                         </td>
                                         <td className="py-2.5 text-right font-mono font-extrabold text-slate-800 pr-3">
-                                          {row.quantidade.toLocaleString('pt-BR')} un
+                                          {(Number(row.quantidade) || 0).toLocaleString('pt-BR')} un
                                         </td>
                                         <td className="py-2.5 text-center font-mono text-slate-500">
                                           {formatIsoDateToPtBr(row.data_venda)}
                                         </td>
                                         <td className="py-2.5 text-right font-mono text-slate-600 pr-3">
-                                          R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          R$ {(Number(row.custo_unitario) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="py-2.5 text-right font-mono font-black text-indigo-650 pr-3">
-                                          R$ {row.preco_venda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          R$ {(Number(row.preco_venda) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="py-2.5 text-right font-mono pr-3">
                                           <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${lucro >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
-                                            R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {(Number(lucro) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
                                         </td>
                                         <td className="py-2.5 text-center">
@@ -3581,7 +4174,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                       </tr>
                                     );
                                   })}
-                                {historicoVendasData.filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase())))).length === 0 && (
+                                {getFilteredSalesRegisters().length === 0 && (
                                   <tr>
                                     <td colSpan={8} className="py-8 text-center text-slate-400 font-medium bg-white">
                                       Nenhum registro individual de venda encontrado para a pesquisa.
@@ -3728,175 +4321,158 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                 {/* 2. Visualizadores de Alerta de Ruptura & ABC em Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                   
-                  {/* ESQUERDA: LISTA DE ITENS QUE TEM CONSUMO E ESTÃO COM HISTORICO ZERADO */}
-                  <div className="lg:col-span-6 bg-white border border-slate-200 rounded-3xl p-5 space-y-3.5">
+                  {/* ESQUERDA / TOPO: PAINEL RUPTURA (SALDO ZERADO) */}
+                  <div className="lg:col-span-12 bg-white border border-slate-200 rounded-3xl p-6 shadow-2xs space-y-4">
                     <div>
                       <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
                         <AlertTriangle className="h-4.5 w-4.5 text-rose-500 shrink-0" />
-                        Insumos com Consumo Ativo mas Estoque Zerado
+                        Ruptura (Saldo Zerado)
                       </h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Ruptura total detectada. Itens com movimentação mensal alta, mas com saldo físico 0.</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Cruzamento de histórico de vendas e consumo com saldo de estoque ativo. Identifica insumos zerados que contêm consumo registrado.
+                      </p>
                     </div>
 
-                    <div className="space-y-2">
-                      {itensRuptura.length > 0 ? (
-                        itensRuptura.map(item => {
-                          const cons = consumoData.find(c => c.item.toLowerCase() === item.item.toLowerCase());
-                          return (
-                            <div key={item.id} className="bg-rose-50/50 border border-rose-100 rounded-2xl p-3 flex justify-between items-center text-xs">
-                              <div>
-                                <span className="font-extrabold text-slate-900 block">{item.item}</span>
-                                <span className="text-[9px] text-rose-700 font-bold block uppercase tracking-wide mt-1">Gasto Histórico Mensal: {cons ? cons.quantidade_consumida : 0} {item.unidade}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="bg-rose-100 text-rose-800 text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wide font-mono block">Ruptura Física</span>
-                                <span className="text-[10px] text-slate-500 font-semibold block mt-1">Custo: R$ {item.custo_unitario.toFixed(2)}/un</span>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-center py-6 border border-dashed rounded-2xl text-slate-400 text-xs text-medium">
-                          Nenhuma ruptura total detectada sobre insumos com faturamento de consumo ativo!
-                        </div>
-                      )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left bg-white font-sans text-[11px] min-w-[700px]">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-2">
+                            <th className="pb-2">ITEM</th>
+                            <th className="pb-2 text-center">MÉDIA DE CONSUMO MÊS</th>
+                            <th className="pb-2 text-center">ÚLTIMA VENDA</th>
+                            <th className="pb-2 text-center">ÚLTIMA COMPRA</th>
+                            <th className="pb-2">ÚLTIMO FORNECEDOR</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 text-slate-700">
+                          {itensRuptura.length > 0 ? (
+                            itensRuptura.map(row => {
+                              return (
+                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-3 font-bold text-slate-900">{row.item}</td>
+                                  <td className="py-3 text-center font-mono font-semibold text-rose-600 bg-rose-50/40 px-2.5 rounded-lg inline-block my-1">
+                                    {row.mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}/mês
+                                  </td>
+                                  <td className="py-3 text-center font-mono text-slate-500">
+                                    {row.ultimaVenda !== '—' ? formatIsoDateToPtBr(row.ultimaVenda) : '—'}
+                                  </td>
+                                  <td className="py-3 text-center font-mono text-slate-500">
+                                    {row.ultimaCompra !== '—' ? formatIsoDateToPtBr(row.ultimaCompra) : '—'}
+                                  </td>
+                                  <td className="py-3 font-medium text-slate-800">{row.ultimoFornecedor}</td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                Nenhuma ruptura (itens com saldo zerado e consumo ativo) detectada no sistema!
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
 
-                  {/* DIREITA: CLASSIFICADOS PELA CURVA ABC */}
-                  <div className="lg:col-span-6 bg-white border border-slate-200 rounded-3xl p-5 space-y-3">
-                    <div>
-                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
-                        <Layers className="h-4.5 w-4.5 text-indigo-650" />
-                        Classificação de Capital: Curva ABC
-                      </h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Separa os ativos pela sua expressividade monetária em estoque.</p>
+                  {/* DIREITA / INFERIOR: CLASSIFICADOS PELA CURVA ABC */}
+                  <div className="lg:col-span-12 bg-white border border-slate-200 rounded-3xl p-6 shadow-2xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
+                          <Layers className="h-4.5 w-4.5 text-indigo-650" />
+                          Gráfico da Curva ABC
+                        </h4>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Metodologia ABC (Classificação: Curva A 70%, Curva B 20%, Curva C 10%). Analise de relevância dos insumos.
+                        </p>
+                      </div>
+                      
+                      <div className="flex bg-slate-100 p-0.5 rounded-xl self-start sm:self-center border border-slate-200">
+                        <button
+                          onClick={() => setCurvaAbcFiltro('frequencia')}
+                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
+                            curvaAbcFiltro === 'frequencia' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Frequência
+                        </button>
+                        <button
+                          onClick={() => setCurvaAbcFiltro('consumo')}
+                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
+                            curvaAbcFiltro === 'consumo' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Consumo
+                        </button>
+                        <button
+                          onClick={() => setCurvaAbcFiltro('lucro')}
+                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
+                            curvaAbcFiltro === 'lucro' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Lucratividade
+                        </button>
+                      </div>
                     </div>
 
                     {/* bento de Curvas ABC */}
-                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="bg-rose-50 border border-rose-100 p-2.5 rounded-xl space-y-1">
-                        <strong className="text-rose-800 block text-[10px] font-black">CURVA A</strong>
-                        <span className="font-mono font-extrabold text-rose-700 block text-xs">{countA} itens</span>
-                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueA.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center text-xs pt-2">
+                      <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl space-y-1.5">
+                        <strong className="text-rose-800 block text-[10px] font-black uppercase tracking-widest">CURVA A (70%)</strong>
+                        <span className="font-mono font-black text-rose-700 block text-lg">{countA} {countA === 1 ? 'item' : 'itens'}</span>
+                        <span className="text-[10px] text-slate-500 font-bold block bg-rose-100/55 px-2 py-0.5 rounded-lg inline-block">
+                          Total: {formatAbcValue(valueA)}
+                        </span>
                       </div>
-                      <div className="bg-amber-50 border border-amber-100 p-2.5 rounded-xl space-y-1">
-                        <strong className="text-amber-800 block text-[10px] font-black">CURVA B</strong>
-                        <span className="font-mono font-extrabold text-amber-700 block text-xs">{countB} itens</span>
-                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueB.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                      
+                      <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl space-y-1.5">
+                        <strong className="text-amber-800 block text-[10px] font-black uppercase tracking-widest">CURVA B (20%)</strong>
+                        <span className="font-mono font-black text-amber-700 block text-lg">{countB} {countB === 1 ? 'item' : 'itens'}</span>
+                        <span className="text-[10px] text-slate-500 font-bold block bg-amber-100/55 px-2 py-0.5 rounded-lg inline-block">
+                          Total: {formatAbcValue(valueB)}
+                        </span>
                       </div>
-                      <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-xl space-y-1">
-                        <strong className="text-blue-800 block text-[10px] font-black">CURVA C</strong>
-                        <span className="font-mono font-extrabold text-blue-700 block text-xs">{countC} itens</span>
-                        <span className="text-[8px] text-slate-500 font-bold block">R$ {valueC.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                      
+                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl space-y-1.5">
+                        <strong className="text-blue-800 block text-[10px] font-black uppercase tracking-widest">CURVA C (10%)</strong>
+                        <span className="font-mono font-black text-blue-700 block text-lg">{countC} {countC === 1 ? 'item' : 'itens'}</span>
+                        <span className="text-[10px] text-slate-500 font-bold block bg-blue-100/55 px-2 py-0.5 rounded-lg inline-block">
+                          Total: {formatAbcValue(valueC)}
+                        </span>
                       </div>
                     </div>
 
                     {/* Recharts Pie Chart da Curva ABC */}
-                    <div className="h-32 flex justify-center mt-2">
+                    <div className="h-56 flex justify-center items-center mt-4">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
                             data={[
-                              { name: 'Curva A', value: valueA || 10, color: '#f43f5e' },
-                              { name: 'Curva B', value: valueB || 2, color: '#f59e0b' },
-                              { name: 'Curva C', value: valueC || 1, color: '#3b82f6' }
+                              { name: 'Curva A', value: valueA || 1, color: '#f43f5e' },
+                              { name: 'Curva B', value: valueB || 0.1, color: '#f59e0b' },
+                              { name: 'Curva C', value: valueC || 0.1, color: '#3b82f6' }
                             ]}
                             cx="50%"
                             cy="50%"
-                            innerRadius={22}
-                            outerRadius={45}
-                            paddingAngle={3}
+                            innerRadius={30}
+                            outerRadius={65}
+                            paddingAngle={4}
                             dataKey="value"
                           >
                             <Cell fill="#f43f5e" />
                             <Cell fill="#f59e0b" />
                             <Cell fill="#3b82f6" />
                           </Pie>
-                          <Tooltip formatter={(value) => `R$ ${Number(value).toLocaleString('pt-BR')}`} />
+                          <Tooltip 
+                            formatter={(val) => [formatAbcValue(Number(val)), 'Total']}
+                            contentStyle={{ fontSize: '11px', borderRadius: '12px' }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
 
-                </div>
-
-                {/* 3. Tabela Completa de: FREQUÊNCIA DE VENDA, VALOR DE VENDA, LUCRATIVIDADE & MARKUP POR ITEM */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
-                  <div>
-                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                      <TrendingUp className="h-4.5 w-4.5 text-indigo-700" />
-                      Margens, Frequência de Vendas e Rentabilidade Projetada por Item
-                    </h3>
-                    <p className="text-[10px] text-slate-400">Insira ou modifique os valores de venda direto nas caixas de texto para recalcular instantaneamente as lucratividades operacionais e markups.</p>
-                  </div>
-
-                  <div className="overflow-x-auto text-[11px]">
-                    <table className="w-full text-left bg-white font-sans">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-1 text-left">
-                          <th className="pb-2">Insumo em Estoque</th>
-                          <th className="pb-2 text-center">Frequência de Venda</th>
-                          <th className="pb-2 text-right">Preço de Custo (C)</th>
-                          <th className="pb-2 text-right">Preço de Venda (V)</th>
-                          <th className="pb-2 text-right">Margem de Lucro (%)</th>
-                          <th className="pb-2 text-right">Markup (%)</th>
-                          <th className="pb-2 text-right">Margem Bruta Unitária</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50 text-slate-705">
-                        {estoqueData.map(row => {
-                          const venda = row.preco_venda || (row.custo_unitario * 1.5);
-                          const custo = row.custo_unitario;
-                          
-                          // Lucratividade = (Venda - Custo) / Venda * 100
-                          const margem = venda > 0 ? ((venda - custo) / venda) * 100 : 0;
-                          
-                          // Markup = (Venda - Custo) / Custo * 100
-                          const markup = custo > 0 ? ((venda - custo) / custo) * 100 : 0;
-                          const margemUnitariaVal = venda - custo;
-
-                          return (
-                            <tr key={row.id} className="hover:bg-slate-50/50">
-                              <td className="py-2.5 font-bold text-slate-900">{row.item}</td>
-                              <td className="py-2.5 text-center">
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                  row.frequencia_venda === 'Alta' ? 'bg-emerald-50 text-emerald-800' :
-                                  row.frequencia_venda === 'Média' ? 'bg-indigo-50 text-indigo-805' :
-                                  'bg-slate-100 text-slate-650'
-                                }`}>
-                                  {row.frequencia_venda || 'Média'}
-                                </span>
-                              </td>
-                              <td className="py-2.5 text-right font-mono text-slate-500">R$ {custo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                              <td className="py-2.5 text-right font-mono font-semibold">
-                                <div className="inline-flex items-center gap-1.5 bg-slate-50 border rounded-lg px-1.5 py-0.5">
-                                  <span className="text-[9px] text-slate-400">R$</span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={venda === 0 ? '' : venda}
-                                    onChange={e => {
-                                      const newVal = parseFloat(e.target.value) || 0;
-                                      setEstoqueData(prev => prev.map(item => item.id === row.id ? { ...item, preco_venda: newVal } : item));
-                                    }}
-                                    className="w-14 bg-transparent border-0 focus:outline-none focus:ring-0 text-[11px] p-0 font-bold text-right"
-                                  />
-                                </div>
-                              </td>
-                              <td className="py-2.5 text-right font-mono font-black text-slate-800">
-                                <span className={margem >= 30 ? 'text-emerald-705' : 'text-slate-700'}>
-                                  {margem.toFixed(1)}%
-                                </span>
-                              </td>
-                              <td className="py-2.5 text-right font-mono text-indigo-650 font-bold">{markup.toFixed(1)}%</td>
-                              <td className="py-2.5 text-right font-mono text-emerald-650 font-semibold">R$ {margemUnitariaVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
 
               </div>

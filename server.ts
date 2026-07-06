@@ -1078,6 +1078,14 @@ app.post("/api/procurement/price_history", async (req, res) => {
     fornecedor: item.fornecedor || 'Fornecedor Avulso',
     preco_unitario: Number(item.preco_unitario) || 0,
     data_compra: item.data_compra || new Date().toISOString().split('T')[0],
+    codigo_fornecedor: item.codigo_fornecedor || '',
+    codigo_item: item.codigo_item || '',
+    quantidade: Number(item.quantidade) || 0,
+    unidade: item.unidade || '',
+    lote: item.lote || '',
+    validade: item.validade || '',
+    condicao_pagamento: item.condicao_pagamento || '',
+    codigo_pedido: item.codigo_pedido || '',
     created_at: item.created_at || new Date().toISOString()
   }));
 
