@@ -552,15 +552,18 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   if (digitMatch) {
     const code = digitMatch[1];
     matchedItem = estoque.find(e => normalizeStr(e.codigo).includes(code));
+    if (!matchedItem) {
+      matchedItem = estoque.find(e => normalizeStr(e.item).includes(code));
+    }
   }
 
-  // Se não achou por código, tentar por correspondência de nome do insumo completo
+  // Se não achou por código, tentar por correspondência de nome do insumo completo ou parcial
   if (!matchedItem) {
     // Ordenamos os itens por comprimento do nome decrescente para bater termos maiores antes de menores
     const sortedEstoque = [...estoque].sort((a, b) => normalizeStr(b.item).length - normalizeStr(a.item).length);
     for (const item of sortedEstoque) {
       const itemName = normalizeStr(item.item);
-      if (itemName && itemName.length > 2 && lowerPrompt.includes(itemName)) {
+      if (itemName && itemName.length > 2 && (lowerPrompt.includes(itemName) || itemName.includes(lowerPrompt))) {
         matchedItem = item;
         break;
       }
@@ -590,6 +593,53 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
 
     const isAboveMin = qty >= minStr;
     const isAboveSafety = qty >= safetyStr;
+
+    // Verificar se o usuário está perguntando sobre consumo específico deste item
+    const isConsumoQuery = lowerPrompt.includes("consumo") || 
+                           lowerPrompt.includes("consumir") || 
+                           lowerPrompt.includes("consumido") || 
+                           lowerPrompt.includes("gasto") || 
+                           lowerPrompt.includes("media") ||
+                           lowerPrompt.includes("média") ||
+                           lowerPrompt.includes("saida") ||
+                           lowerPrompt.includes("saída");
+
+    if (isConsumoQuery) {
+      const monthsFilter = Number(procurementContext.consumoMonthsFilter || 1);
+      const consumoList = procurementContext.consumoData || [];
+      const matchedConsumoRows = consumoList.filter((c: any) => 
+        (c.codigo && matchedItem.codigo && normalizeStr(c.codigo) === normalizeStr(matchedItem.codigo)) || 
+        normalizeStr(c.item).includes(normalizeStr(matchedItem.item)) ||
+        normalizeStr(matchedItem.item).includes(normalizeStr(c.item))
+      );
+
+      if (matchedConsumoRows.length > 0) {
+        const totalConsRaw = matchedConsumoRows.reduce((sum: number, c: any) => sum + Number(c.quantidade_consumida || 0), 0);
+        const totalCostRaw = matchedConsumoRows.reduce((sum: number, c: any) => sum + Number(c.custo_total || 0), 0);
+        const consQty = totalConsRaw / monthsFilter;
+        const consCost = totalCostRaw / monthsFilter;
+        const consQtyDaily = consQty / 30;
+        const consCostDaily = consCost / 30;
+
+        let responseText = `### 📈 Histórico de Consumo de **${matchedItem.item.toUpperCase()}**\n\n`;
+        responseText += `Encontrei os registros fidedignos de consumo mensal para este item:\n\n`;
+        responseText += `* 📊 **Consumo Total Registrado:** **${totalConsRaw.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unit}** (Total acumulado)\n`;
+        responseText += `* 📉 **Média Mensal de Consumo:** **${consQty.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}** (Divisor: ${monthsFilter} ${monthsFilter === 1 ? 'mês' : 'meses'})\n`;
+        responseText += `* 💰 **Custo Médio Mensal:** R$ **${consCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**\n`;
+        responseText += `* 📅 **Consumo Médio Diário:** **${consQtyDaily.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}** (Custo diário: R$ ${consCostDaily.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+        
+        if (qty > 0) {
+          const durationMonths = qty / consQty;
+          const durationDays = Math.round(durationMonths * 30);
+          responseText += `👉 **Cobertura do Estoque Físico Atual (${qty.toLocaleString('pt-BR')} ${unit}):**\n`;
+          responseText += `Seu estoque físico atual de **${qty.toLocaleString('pt-BR')} ${unit}** garante o consumo por aproximadamente **${durationMonths.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} meses** (cerca de **${durationDays} dias**).\n`;
+        } else {
+          responseText += `⚠️ **Atenção:** Seu saldo de estoque atual deste item é **ZERADO** (Ruptura Detectada). É altamente recomendado realizar compras corretivas para restabelecer o consumo operacional!\n`;
+        }
+
+        return responseText;
+      }
+    }
 
     // Verificar se o usuário está perguntando quanto tempo o estoque vai durar ou quando vai acabar
     const isDurationQuery = lowerPrompt.includes("acabar") || 

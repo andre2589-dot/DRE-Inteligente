@@ -2153,14 +2153,17 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       if (anyDigitMatch) {
         const code = anyDigitMatch[1];
         matchedLocalItem = estoqueData.find(e => normalizeStr(e.codigo).includes(code));
+        if (!matchedLocalItem) {
+          matchedLocalItem = estoqueData.find(e => normalizeStr(e.item).includes(code));
+        }
       }
 
-      // Se não achou por código, tentar por correspondência do nome do insumo completo
+      // Se não achou por código, tentar por correspondência do nome do insumo completo ou parcial
       if (!matchedLocalItem) {
         const sortedEstoque = [...estoqueData].sort((a, b) => normalizeStr(b.item).length - normalizeStr(a.item).length);
         for (const item of sortedEstoque) {
           const itemName = normalizeStr(item.item);
-          if (itemName && itemName.length > 2 && queryNormalized.includes(itemName)) {
+          if (itemName && itemName.length > 2 && (queryNormalized.includes(itemName) || itemName.includes(queryNormalized))) {
             matchedLocalItem = item;
             break;
           }
@@ -2201,7 +2204,51 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 queryLower.includes("dias") || 
                                 queryLower.includes("meses");
 
-        if (isDurationQuery) {
+        // Verificar se o usuário está perguntando sobre consumo específico deste item
+        const isConsumoQuery = queryLower.includes("consumo") || 
+                               queryLower.includes("consumir") || 
+                               queryLower.includes("consumido") || 
+                               queryLower.includes("gasto") || 
+                               queryLower.includes("media") ||
+                               queryLower.includes("média") ||
+                               queryLower.includes("saida") ||
+                               queryLower.includes("saída");
+
+        if (isConsumoQuery) {
+          const divisor = Math.max(1, consumoMonthsFilter);
+          const matchedConsumoRows = consumoData.filter((c: any) => 
+            (c.codigo && matchedLocalItem.codigo && normalizeStr(c.codigo) === normalizeStr(matchedLocalItem.codigo)) || 
+            normalizeStr(c.item).includes(normalizeStr(matchedLocalItem.item)) ||
+            normalizeStr(matchedLocalItem.item).includes(normalizeStr(c.item))
+          );
+
+          if (matchedConsumoRows.length > 0) {
+            const totalConsRaw = matchedConsumoRows.reduce((sum, c) => sum + Number(c.quantidade_consumida || 0), 0);
+            const totalCostRaw = matchedConsumoRows.reduce((sum, c) => sum + Number(c.custo_total || 0), 0);
+            const consQty = totalConsRaw / divisor;
+            const consCost = totalCostRaw / divisor;
+            const consQtyDaily = consQty / 30;
+            const consCostDaily = consCost / 30;
+
+            responseText = `### 📈 Histórico de Consumo de **${matchedLocalItem.item.toUpperCase()}**\n\n` +
+                           `Encontrei os registros fidedignos de consumo mensal para este item:\n\n` +
+                           `* 📊 **Consumo Total Registrado:** **${totalConsRaw.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unit}** (Total acumulado)\n` +
+                           `* 📉 **Média Mensal de Consumo:** **${consQty.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}** (Divisor: ${divisor} ${divisor === 1 ? 'mês' : 'meses'})\n` +
+                           `* 💰 **Custo Médio Mensal:** R$ **${consCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**\n` +
+                           `* 📅 **Consumo Médio Diário:** **${consQtyDaily.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} ${unit}** (Custo diário: R$ ${consCostDaily.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+
+            if (qty > 0) {
+              const durationMonths = qty / consQty;
+              const durationDays = Math.round(durationMonths * 30);
+              responseText += `👉 **Cobertura do Estoque Físico Atual (${qty.toLocaleString('pt-BR')} ${unit}):**\n` +
+                              `Seu estoque físico atual de **${qty.toLocaleString('pt-BR')} ${unit}** garante o consumo por aproximadamente **${durationMonths.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} meses** (cerca de **${durationDays} dias**).\n`;
+            } else {
+              responseText += `⚠️ **Atenção:** Seu saldo de estoque atual deste item é **ZERADO** (Ruptura Detectada). É altamente recomendado realizar compras corretivas para restabelecer o consumo operacional!\n`;
+            }
+          } else {
+            responseText = `O estoque atual de **${matchedLocalItem.item.toUpperCase()}** é de **${qty.toLocaleString('pt-BR')} ${unit}**.\n\nNão encontrei registros específicos de consumo mensal ativo para este item na sua base de dados de consumo. Se você importou a planilha de consumo médio, verifique se a coluna do código ou descrição bate exatamente!`;
+          }
+        } else if (isDurationQuery) {
           const matchedConsumoRows = consumoData.filter((c: any) => 
             (c.codigo && matchedLocalItem.codigo && normalizeStr(c.codigo) === normalizeStr(matchedLocalItem.codigo)) || 
             normalizeStr(c.item).includes(normalizeStr(matchedLocalItem.item)) ||
