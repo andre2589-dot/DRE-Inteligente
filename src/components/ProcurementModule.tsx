@@ -371,6 +371,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     allRows?: Record<string, any>[];
   } | null>(null);
 
+  // Controle de sobrescrever banco ativo ao importar novas planilhas
+  const [overwriteOnImport, setOverwriteOnImport] = useState<boolean>(true);
+
   // Ordenação e limite de exibição para o painel de estoque
   const [estoqueSort, setEstoqueSort] = useState<string>('quantidade_desc');
   const [estoqueLimit, setEstoqueLimit] = useState<number>(0); // 0 significa Mostrar Todos
@@ -891,6 +894,48 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           return;
         }
 
+        // Check if the uploaded headers match a different type better than the current type
+        const checkMatchCountForType = (testType: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas') => {
+          let keys: string[] = [];
+          if (testType === 'estoque') keys = ['saldo', 'estoque', 'físico', 'mínimo', 'segurança'];
+          else if (testType === 'consumo') keys = ['consumido', 'saídas', 'mes_ano', 'mês', 'custo acumulado'];
+          else if (testType === 'historico_precos') keys = ['fornecedor', 'entrada', 'qtd comprada', 'preço custo', 'pedido compra', 'condições pgto'];
+          else if (testType === 'validade') keys = ['vencimento', 'validade', 'vence', 'dias para vencer'];
+          else if (testType === 'historico_vendas') keys = ['quantidade vendida', 'data da venda', 'venda', 'preço de venda', 'custo unitário'];
+          
+          let count = 0;
+          for (const key of keys) {
+            const hasMatch = detectedHeaders.some(h => String(h || '').toLowerCase().includes(key.toLowerCase()));
+            if (hasMatch) count++;
+          }
+          return count;
+        };
+
+        const matchCounts = {
+          estoque: checkMatchCountForType('estoque'),
+          consumo: checkMatchCountForType('consumo'),
+          historico_precos: checkMatchCountForType('historico_precos'),
+          validade: checkMatchCountForType('validade'),
+          historico_vendas: checkMatchCountForType('historico_vendas')
+        };
+        
+        let bestType = tipo;
+        let maxCount = matchCounts[tipo];
+        
+        for (const [t, count] of Object.entries(matchCounts)) {
+          if (count > maxCount) {
+            bestType = t as any;
+            maxCount = count;
+          }
+        }
+
+        let finalTipo = tipo;
+        if (bestType !== tipo && maxCount >= 2) {
+          finalTipo = bestType;
+          setActiveSubData(bestType);
+          triggerToast(`Identificamos que este arquivo parece ser de "${bestType === 'estoque' ? 'Saldo de Estoque' : bestType === 'consumo' ? 'Consumo Mensal' : bestType === 'historico_precos' ? 'Compras Realizadas' : bestType === 'validade' ? 'Controle de Validade' : 'Histórico de Vendas'}". Mudamos automaticamente para a aba correspondente!`);
+        }
+
         // Mapear automaticamente com base em semelhança de nomes de colunas
         const findBestMatch = (aliases: string[]): string => {
           for (const alias of aliases) {
@@ -901,7 +946,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         };
 
         let suggestedMapping: Record<string, string> = {};
-        if (tipo === 'estoque') {
+        if (finalTipo === 'estoque') {
           suggestedMapping = {
             itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome', 'materia', 'matéria']),
             qtyCol: findBestMatch(['quantidade', 'qtd', 'saldo', 'estoque', 'fisico', 'físico', 'volume']),
@@ -911,7 +956,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             codigoCol: findBestMatch(['código', 'codigo', 'cod', 'id', 'produto']),
             unidadeCol: findBestMatch(['unidade', 'und', 'un', 'unid'])
           };
-        } else if (tipo === 'consumo') {
+        } else if (finalTipo === 'consumo') {
           suggestedMapping = {
             itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
             qtyCol: findBestMatch(['quantidade', 'qtd', 'consumido', 'saídas', 'vendas', 'volume']),
@@ -919,7 +964,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             custoTotalCol: findBestMatch(['custo', 'total', 'custo total', 'valor', 'custo acumulado']),
             codigoCol: findBestMatch(['código', 'codigo', 'cod', 'id', 'produto'])
           };
-        } else if (tipo === 'historico_precos') {
+        } else if (finalTipo === 'historico_precos') {
           suggestedMapping = {
             codigoFornCol: findBestMatch(['Código Forn', 'Código Fornecedor', 'Cod Forn', 'cod_forn']),
             fornecedorCol: findBestMatch(['Fornecedor', 'nome fornecedor', 'parceiro', 'credenciado', 'distribuidor']),
@@ -934,14 +979,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             condicaoPgtoCol: findBestMatch(['condição', 'pagamento', 'prazo', 'pgto', 'condicao']),
             codigoPedidoCol: findBestMatch(['pedido', 'pedido compra', 'faturamento', 'nf', 'número', 'numero'])
           };
-        } else if (tipo === 'validade') {
+        } else if (finalTipo === 'validade') {
           suggestedMapping = {
             itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
             loteCol: findBestMatch(['lote', 'id lote', 'identificador', 'loteamento']),
             qtyCol: findBestMatch(['quantidade', 'qtd', 'volume', 'saldo']),
             validadeCol: findBestMatch(['validade', 'vencimento', 'vence', 'data validade', 'expira'])
           };
-        } else if (tipo === 'historico_vendas') {
+        } else if (finalTipo === 'historico_vendas') {
           suggestedMapping = {
             codigoCol: findBestMatch(['código', 'codigo', 'cod', 'id', 'produto']),
             itemCol: findBestMatch(['descrição', 'descricao', 'item', 'insumo', 'produto', 'nome']),
@@ -953,7 +998,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         }
 
         // Se algum campo essencial não foi mapeado automaticamente, tenta usar o primeiro cabeçalho ou vazio
-        if (tipo === 'estoque') {
+        if (finalTipo === 'estoque') {
           if (!suggestedMapping.itemCol) suggestedMapping.itemCol = detectedHeaders.find(h => h.toLowerCase().includes('item') || h.toLowerCase().includes('desc')) || detectedHeaders[0] || '';
           if (!suggestedMapping.qtyCol) suggestedMapping.qtyCol = detectedHeaders.find(h => h.toLowerCase().includes('qtd') || h.toLowerCase().includes('quant') || h.toLowerCase().includes('saldo')) || detectedHeaders[1] || '';
         }
@@ -962,7 +1007,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const previewRows = rows.slice(0, 5);
 
         setPendingUpload({
-          tipo,
+          tipo: finalTipo,
           fileName,
           fileSize: (fileOrName.size / 1024).toFixed(1) + ' KB',
           detectedHeaders,
@@ -1034,7 +1079,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           if (suggestedMapping.precoVendaCol) colsToDisplay.push('venda');
           setSelectedEstoqueColumns(colsToDisplay);
           
-          return mappedRows;
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(m.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
+            return [...filteredPrev, ...mappedRows];
+          }
         }
         const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase()));
         return [...filtered, ...baseMockData];
@@ -1072,7 +1122,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           if (suggestedMapping.custoTotalCol) colsToDisplay.push('custo_total');
           setSelectedConsumoColumns(colsToDisplay);
           
-          return mappedRows;
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.mes_ano === p.mes_ano));
+            return [...filteredPrev, ...mappedRows];
+          }
         }
         const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase()));
         return [...filtered, ...baseMockData];
@@ -1113,8 +1168,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setHistoricoPrecosData(prev => {
         if (mappedRows.length > 0) {
-          // Substituir a base completa pois agora vamos trabalhar apenas com dados reais da planilha importada!
-          return mappedRows;
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_compra === p.data_compra && m.preco_unitario === p.preco_unitario && m.quantidade === p.quantidade));
+            return [...filteredPrev, ...mappedRows];
+          }
         }
         return prev.length > 0 ? prev : baseMockData;
       });
@@ -1169,8 +1228,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setValidadeLotesData(prev => {
         if (mappedRows.length > 0) {
-          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(m.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
-          return [...filteredPrev, ...mappedRows];
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(m.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
+            return [...filteredPrev, ...mappedRows];
+          }
         }
         const filtered = prev.filter(p => !baseMockData.some(n => String(n.item || '').toLowerCase() === String(p.item || '').toLowerCase() && String(n.lote || '').toLowerCase() === String(p.lote || '').toLowerCase()));
         return [...filtered, ...baseMockData];
@@ -1203,8 +1266,12 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
       setHistoricoVendasData(prev => {
         if (mappedRows.length > 0) {
-          const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_venda === p.data_venda && m.quantidade === p.quantidade));
-          return [...filteredPrev, ...mappedRows];
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.item || '').toLowerCase() === String(p.item || '').toLowerCase() && m.data_venda === p.data_venda && m.quantidade === p.quantidade));
+            return [...filteredPrev, ...mappedRows];
+          }
         }
         return [...prev, ...baseMockData];
       });
@@ -3201,6 +3268,25 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     </div>
                   </>
                 )}
+              </div>
+            </div>
+
+            {/* Opção de Sobrescrever vs Mesclar */}
+            <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 my-3.5 flex items-start gap-3">
+              <input
+                id="overwriteOnImportCheckbox"
+                type="checkbox"
+                checked={overwriteOnImport}
+                onChange={(e) => setOverwriteOnImport(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <div className="space-y-1">
+                <label htmlFor="overwriteOnImportCheckbox" className="text-xs font-bold text-slate-800 cursor-pointer select-none">
+                  Sobrescrever base de dados existente com esta nova planilha
+                </label>
+                <p className="text-[10px] text-slate-500 leading-normal">
+                  Selecione para substituir completamente a base de dados ativa no sistema pelos registros desta planilha (Altamente Recomendado para que os painéis e tabelas mostrem exatamente os novos dados do arquivo). Desmarque para mesclar e acumular os novos dados com os já existentes.
+                </p>
               </div>
             </div>
 

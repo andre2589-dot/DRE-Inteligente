@@ -767,6 +767,87 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   return null;
 }
 
+function findRealSupplierAnswer(prompt: string, procurementContext: any): string | null {
+  if (!procurementContext || !procurementContext.historicoPrecosData || !Array.isArray(procurementContext.historicoPrecosData)) {
+    return null;
+  }
+
+  const normalizeStr = (str: string) => {
+    return String(str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  };
+
+  const lowerPrompt = normalizeStr(prompt);
+
+  const isSupplierQuery = (lowerPrompt.includes("fornecedor") && (
+                            lowerPrompt.includes("mais compro") || 
+                            lowerPrompt.includes("maior") || 
+                            lowerPrompt.includes("quem") || 
+                            lowerPrompt.includes("qual") || 
+                            lowerPrompt.includes("ranking") || 
+                            lowerPrompt.includes("compras") ||
+                            lowerPrompt.includes("lista") ||
+                            lowerPrompt.includes("reacao") ||
+                            lowerPrompt.includes("compro mais") ||
+                            lowerPrompt.includes("maior fornecedor")
+                          )) || lowerPrompt.includes("ranking de fornecedores") ||
+                          lowerPrompt.includes("ranking dos fornecedores");
+
+  if (isSupplierQuery) {
+    const precos = procurementContext.historicoPrecosData;
+    if (precos.length === 0) {
+      return "Atualmente não há registros de compras cadastrados na aba de Compras Realizadas para calcular qual é o maior fornecedor. Faça o upload de uma planilha de histórico de compras para carregar esses dados.";
+    }
+
+    // Aggregate totals by supplier
+    const map: Record<string, { name: string; totalValue: number; totalItems: number; count: number }> = {};
+    precos.forEach((row: any) => {
+      const key = String(row.fornecedor || "Desconhecido").trim();
+      if (key) {
+        if (!map[key]) {
+          map[key] = { name: key, totalValue: 0, totalItems: 0, count: 0 };
+        }
+        const qty = Number(row.quantidade) || 0;
+        const price = Number(row.preco_unitario) || 0;
+        map[key].totalValue += qty * price;
+        map[key].totalItems += qty;
+        map[key].count += 1;
+      }
+    });
+
+    const list = Object.values(map).sort((a, b) => b.totalValue - a.totalValue);
+
+    if (list.length === 0) {
+      return "Não consegui consolidar as compras por fornecedor pois os dados estão sem nomes de fornecedores válidos.";
+    }
+
+    const topSupplier = list[0];
+    
+    let answer = `### 🤝 Análise Consolidada de Fornecedores\n\n`;
+    answer += `Analisando todo o seu histórico de compras cadastradas (**${precos.length} lançamentos de itens**), o fornecedor no qual você **mais compra** em termos de valor financeiro acumulado é o **${topSupplier.name}**:\n\n`;
+    answer += `* 💰 **Valor Comprado Acumulado:** R$ **${topSupplier.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**\n`;
+    answer += `* 📦 **Total de Itens Adquiridos:** **${topSupplier.totalItems.toLocaleString('pt-BR')} un**\n`;
+    answer += `* 📅 **Frequência de Entregas (Lançamentos):** **${topSupplier.count} vezes**\n\n`;
+
+    if (list.length > 1) {
+      answer += `#### 📊 Ranking Geral de Fornecedores (por Volume Financeiro):\n\n`;
+      list.forEach((sup, idx) => {
+        answer += `${idx + 1}. **${sup.name}**\n`;
+        answer += `   * **Valor Comprado:** R$ **${sup.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**\n`;
+        answer += `   * **Itens Comprados:** **${sup.totalItems.toLocaleString('pt-BR')} un**\n`;
+        answer += `   * **Lançamentos:** **${sup.count}**\n\n`;
+      });
+    }
+
+    return answer;
+  }
+
+  return null;
+}
+
 // Helper functions for Intelligent Global Database Queries
 function identifyNeededModules(prompt: string): string[] {
   const norm = String(prompt || '').toLowerCase()
@@ -1240,6 +1321,11 @@ app.post("/api/gemini/chat", async (req, res) => {
     const realStockResponse = findRealStockAnswer(prompt, procurementContext);
     if (realStockResponse) {
       res.json({ text: realStockResponse });
+      return;
+    }
+    const realSupplierResponse = findRealSupplierAnswer(prompt, procurementContext);
+    if (realSupplierResponse) {
+      res.json({ text: realSupplierResponse });
       return;
     }
   }
