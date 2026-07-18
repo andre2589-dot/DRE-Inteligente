@@ -154,6 +154,7 @@ export default function AiAssistant({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
+          company_id: companyId,
           dreContext: dreContext,
           history: messages.slice(-6),
           attachedContext: attachedContext

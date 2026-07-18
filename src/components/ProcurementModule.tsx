@@ -437,6 +437,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [validadePeriodo, setValidadePeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [vendasPeriodo, setVendasPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
+  // Controle de grupos expandidos na tabela de Compras Realizadas
+  const [expandedPrecosGroups, setExpandedPrecosGroups] = useState<Record<string, boolean>>({});
+
   // Carregar dados estruturados do banco de dados (Supabase ou fallback local) com suporte a persistência por localStorage
   useEffect(() => {
     setLoadedCompanyId(null);
@@ -2011,9 +2014,79 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     setIsAiTyping(true);
 
     try {
-      // Prepare full context containing live, real-time datasets
+      // Optimize and filter context datasets to avoid hitting Gemini 250k token rate limits
+      const queryLower = query.toLowerCase();
+      const queryWords = queryLower
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .split(/[^a-z0-9]+/);
+      
+      const importantWords = queryWords.filter(w => w.length > 2 && w !== "por" && w !== "com" && w !== "dos" && w !== "para" && w !== "uma" && w !== "que");
+
+      let filteredEstoque = estoqueData;
+      let filteredConsumo = consumoData;
+      let filteredConsumoAnalise = getConsumoAnaliseData();
+      let filteredPrecos = historicoPrecosData;
+      let filteredValidades = getProcessedValidadeData();
+      let filteredVendas = historicoVendasData;
+      let filteredSalesAnalysis = getSalesAnalysis();
+
+      const isSpecificQuery = importantWords.length > 0 && 
+                              !(queryLower.includes("todos") || 
+                                queryLower.includes("geral") || 
+                                queryLower.includes("relatorio") || 
+                                queryLower.includes("relatório") || 
+                                queryLower.includes("abc") || 
+                                queryLower.includes("criticos") || 
+                                queryLower.includes("críticos") || 
+                                queryLower.includes("lista") || 
+                                queryLower.includes("listar") || 
+                                queryLower.includes("lucratividade") ||
+                                queryLower.includes("lucratividades") ||
+                                queryLower.includes("lucro") ||
+                                queryLower.includes("vendas") ||
+                                queryLower.includes("faturamento"));
+
+      if (isSpecificQuery) {
+        const matchItem = (itemStr: string, codeStr: string) => {
+          const itemNorm = (itemStr || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const codNorm = (codeStr || '').toLowerCase();
+          return importantWords.some(w => itemNorm.includes(w) || codNorm.includes(w));
+        };
+
+        filteredEstoque = estoqueData.filter(e => matchItem(e.item, e.codigo));
+        if (filteredEstoque.length === 0) filteredEstoque = estoqueData;
+
+        filteredConsumo = consumoData.filter(c => matchItem(c.item, c.codigo));
+        filteredConsumoAnalise = filteredConsumoAnalise.filter(c => matchItem(c.item, c.codigo));
+        filteredPrecos = historicoPrecosData.filter(h => matchItem(h.item, h.codigo_item));
+        filteredValidades = filteredValidades.filter(v => matchItem(v.item, v.codigo));
+        filteredVendas = historicoVendasData.filter(v => matchItem(v.item, v.codigo));
+        filteredSalesAnalysis = filteredSalesAnalysis.filter(sa => matchItem(sa.item, sa.codigo));
+      }
+
+      const limitList = (list: any[], max: number) => list.slice(0, max);
+
+      const parseDateStr = (dStr: string) => {
+        if (!dStr) return 0;
+        const pts = dStr.split('-');
+        if (pts.length === 3) return new Date(Number(pts[0]), Number(pts[1]) - 1, Number(pts[2])).getTime();
+        return new Date(dStr).getTime() || 0;
+      };
+
+      const sortedPrecos = [...filteredPrecos].sort((a, b) => parseDateStr(b.data_compra) - parseDateStr(a.data_compra));
+      const sortedVendas = [...filteredVendas].sort((a, b) => parseDateStr(b.data_venda) - parseDateStr(a.data_venda));
+
+      const finalEstoque = limitList(filteredEstoque, isSpecificQuery ? 100 : 80);
+      const finalConsumo = limitList(filteredConsumo, isSpecificQuery ? 100 : 30);
+      const finalConsumoAnalise = limitList(filteredConsumoAnalise, isSpecificQuery ? 100 : 30);
+      const finalPrecos = limitList(sortedPrecos, isSpecificQuery ? 50 : 20);
+      const finalValidades = limitList(filteredValidades, isSpecificQuery ? 100 : 30);
+      const finalVendas = limitList(sortedVendas, isSpecificQuery ? 50 : 20);
+      const finalSalesAnalysis = limitList(filteredSalesAnalysis, isSpecificQuery ? 100 : 40);
+
+      // Prepare optimized context containing live, real-time datasets
       const procurementContext = {
-        estoqueData: estoqueData.map(e => ({
+        estoqueData: finalEstoque.map(e => ({
           codigo: e.codigo,
           item: e.item,
           lote: e.lote,
@@ -2027,7 +2100,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           safety_stock: e.safety_stock,
           frequencia_venda: e.frequencia_venda
         })),
-        consumoData: consumoData.map(c => ({
+        consumoData: finalConsumo.map(c => ({
           codigo: c.codigo,
           item: c.item,
           quantidade_consumida: c.quantidade_consumida,
@@ -2037,14 +2110,14 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         })),
         consumoMonthsFilter: consumoMonthsFilter,
         consumoViewMode: consumoViewMode,
-        consumoAnaliseData: getConsumoAnaliseData().map(c => ({
+        consumoAnaliseData: finalConsumoAnalise.map(c => ({
           codigo: c.codigo,
           item: c.item,
           quantidade_consumida: c.quantidade_consumida,
           custo_total: c.custo_total,
           mes_ano: c.mes_ano
         })),
-        historicoPrecosData: historicoPrecosData.map(h => ({
+        historicoPrecosData: finalPrecos.map(h => ({
           codigo_fornecedor: h.codigo_fornecedor || '',
           fornecedor: h.fornecedor,
           data_compra: h.data_compra,
@@ -2058,7 +2131,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           condicao_pagamento: h.condicao_pagamento || '',
           codigo_pedido: h.codigo_pedido || ''
         })),
-        validadeLotesData: getProcessedValidadeData().map(v => ({
+        validadeLotesData: finalValidades.map(v => ({
           codigo: v.codigo || '',
           item: v.item,
           lote: v.lote,
@@ -2072,7 +2145,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           sugestaoCompra: v.sugestaoCompra,
           valor_economico: v.valor_economico
         })),
-        historicoVendasData: historicoVendasData.map(v => ({
+        historicoVendasData: finalVendas.map(v => ({
           codigo: v.codigo || '',
           item: v.item,
           quantidade: v.quantidade,
@@ -2080,7 +2153,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           custo_unitario: v.custo_unitario,
           preco_venda: v.preco_venda
         })),
-        salesAnalysisData: getSalesAnalysis().map(sa => ({
+        salesAnalysisData: finalSalesAnalysis.map(sa => ({
           codigo: sa.codigo,
           item: sa.item,
           frequencia: sa.frequencia,
@@ -2098,6 +2171,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: query,
+          company_id: companyId,
           assistantType: 'procurement',
           procurementContext: procurementContext,
           dreContext: dreContext,
@@ -2194,25 +2268,27 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const isAboveMin = qty >= minStr;
         const isAboveSafety = qty >= safetyStr;
 
-        const isDurationQuery = queryLower.includes("acabar") || 
-                                queryLower.includes("esgotar") || 
-                                queryLower.includes("tempo") || 
-                                queryLower.includes("dura") || 
-                                queryLower.includes("fim") || 
-                                queryLower.includes("terminar") || 
-                                queryLower.includes("esgotamento") || 
-                                queryLower.includes("dias") || 
-                                queryLower.includes("meses");
+        const isDurationQuery = queryNormalized.includes("acabar") || 
+                                queryNormalized.includes("esgotar") || 
+                                queryNormalized.includes("tempo") || 
+                                queryNormalized.includes("dura") || 
+                                queryNormalized.includes("fim") || 
+                                queryNormalized.includes("terminar") || 
+                                queryNormalized.includes("esgotamento") || 
+                                queryNormalized.includes("dia") || 
+                                queryNormalized.includes("mes");
 
         // Verificar se o usuário está perguntando sobre consumo específico deste item
-        const isConsumoQuery = queryLower.includes("consumo") || 
-                               queryLower.includes("consumir") || 
-                               queryLower.includes("consumido") || 
-                               queryLower.includes("gasto") || 
-                               queryLower.includes("media") ||
-                               queryLower.includes("média") ||
-                               queryLower.includes("saida") ||
-                               queryLower.includes("saída");
+        const isConsumoQuery = queryNormalized.includes("consum") || 
+                               queryNormalized.includes("conusm") || 
+                               queryNormalized.includes("comsum") || 
+                               queryNormalized.includes("cosum") || 
+                               queryNormalized.includes("conssum") || 
+                               queryNormalized.includes("gasto") || 
+                               queryNormalized.includes("gasta") || 
+                               queryNormalized.includes("saida") || 
+                               queryNormalized.includes("media") ||
+                               queryNormalized.includes("demanda");
 
         if (isConsumoQuery) {
           const divisor = Math.max(1, consumoMonthsFilter);
@@ -2278,15 +2354,30 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             responseText = `O estoque atual de **${matchedLocalItem.item.toUpperCase()}** é de **${qty.toLocaleString('pt-BR')} ${unit}**.\n\nNão encontrei registros de consumo mensal ativo para este item na sua base de dados, por isso não é possível prever em quanto tempo irá acabar.`;
           }
         } else {
-          responseText = `O saldo de estoque atual de ${matchedLocalItem.item.toUpperCase()}${codeStr} é de ${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}.\n\n`;
-          responseText += `Esse saldo está com lote ${status.toLowerCase()} e armazenado no ${loc}, estando `;
+          const asksForMinOrSafety = queryNormalized.includes("min") || 
+                                     queryNormalized.includes("seguran") || 
+                                     queryNormalized.includes("crit") || 
+                                     queryNormalized.includes("alerta") ||
+                                     queryNormalized.includes("situa") ||
+                                     queryNormalized.includes("status") ||
+                                     queryNormalized.includes("limiar") ||
+                                     queryNormalized.includes("completo") ||
+                                     queryNormalized.includes("param");
+
+          responseText = `O saldo de estoque atual de **${matchedLocalItem.item.toUpperCase()}**${codeStr} é de **${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}**.\n\n`;
+          responseText += `Esse saldo está com lote **${status.toLowerCase()}** e armazenado no **${loc}**`;
           
-          if (isAboveMin) {
-            responseText += `acima do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
-          } else if (isAboveSafety) {
-            responseText += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit}, mas acima do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+          if (asksForMinOrSafety) {
+            responseText += `, estando `;
+            if (isAboveMin) {
+              responseText += `acima do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}** e do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**.`;
+            } else if (isAboveSafety) {
+              responseText += `abaixo do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}**, mas acima do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**.`;
+            } else {
+              responseText += `abaixo do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}** e abaixo do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**, estando em nível crítico de reabastecimento.`;
+            }
           } else {
-            responseText += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e abaixo do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}, estando em nível crítico de reabastecimento.`;
+            responseText += `.`;
           }
         }
       }
@@ -2329,6 +2420,46 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                               `  * _Soma por lotes:_ ${detailsString} = **${total.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${units}**`;
                      }).join('\n\n') +
                      `\n\n_Dica:_ O botão **"Consolidar por Código (Soma)"** no cabeçalho da planilha permite alternar visualmente entre a visualização de lotes individualizados (prazos ou lotes LIBERADO, BLOQUEADO, CERTIFICACAO) e a soma consolidada de cada insumo!`;
+        }
+      }
+      else if (queryLower.includes('fornecedor') || queryLower.includes('fornecedores')) {
+        if (historicoPrecosData && historicoPrecosData.length > 0) {
+          const supplierTotals: Record<string, { totalValue: number; totalItems: number; count: number }> = {};
+          
+          historicoPrecosData.forEach((h: any) => {
+            const name = h.fornecedor || 'Desconhecido';
+            if (!supplierTotals[name]) {
+              supplierTotals[name] = { totalValue: 0, totalItems: 0, count: 0 };
+            }
+            const qty = Number(h.quantidade || 0);
+            const price = Number(h.preco_unitario || 0);
+            supplierTotals[name].totalValue += qty * price;
+            supplierTotals[name].totalItems += qty;
+            supplierTotals[name].count += 1;
+          });
+
+          const sortedSuppliers = Object.entries(supplierTotals)
+            .map(([name, stats]) => ({ name, ...stats }))
+            .sort((a, b) => b.totalValue - a.totalValue);
+
+          const topSupplier = sortedSuppliers[0];
+
+          responseText = `### 🏢 Análise Consolidada de Compras por Fornecedor\n\n` +
+                         `Com base nos dados registrados em **Compras Realizadas**, o fornecedor que você **mais compra (em valor financeiro acumulado)** é:\n\n` +
+                         `🏆 **${topSupplier.name.toUpperCase()}**\n` +
+                         `• **Valor Comprado Total:** **R$ ${topSupplier.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**\n` +
+                         `• **Itens Comprados (Quantidade Total):** **${topSupplier.totalItems.toLocaleString('pt-BR')} un**\n` +
+                         `• **Lançamentos Registrados:** **${topSupplier.count} entregas**\n\n` +
+                         `#### 📊 Ranking Geral de Fornecedores:\n\n` +
+                         sortedSuppliers.map((sup, idx) => {
+                           return `${idx + 1}. **${sup.name}**:\n` +
+                                  `   • Valor Comprado: R$ ${sup.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
+                                  `   • Itens Comprados: ${sup.totalItems.toLocaleString('pt-BR')} un\n` +
+                                  `   • Lançamentos: ${sup.count}`;
+                         }).join('\n\n') + `\n\n` +
+                         `Você pode conferir esses dados detalhados no painel **"CONSOLIDADO POR FORNECEDOR"** ou na tabela de **"COMPRAS REALIZADAS"** agrupada por data de entrada e fornecedor!`;
+        } else {
+          responseText = `Ainda não existem faturas ou registros de compras cadastrados na base ativa.\n\nPor favor, faça o upload de uma planilha de compras ou notas fiscais de entrada para que eu possa identificar qual é o seu parceiro comercial mais ativo e consolidar esses dados de faturamento.`;
         }
       }
       else if (queryLower.includes('creatina') && (queryLower.includes('preco') || queryLower.includes('preço') || queryLower.includes('compra') || queryLower.includes('fornecedor'))) {
@@ -2417,6 +2548,31 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                    `* 🟦 **Classe C (Baixa Relevância - 5% do Valor):** **${countC} itens** totalizando **R$ ${valueC.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}**.\n\n` +
                    `### 💡 Insight de Gestão:\n` +
                    `Os itens de Classe A contêm seu maior capital parado e necessitam de processos de aquisições de Just-in-Time sob boletos enxutos, enquanto os itens de Classe C podem ser comprados em maior volume sob parcelas dilatadas.`;
+      }
+      else if (queryNormalized.includes("consum") || queryNormalized.includes("conusm") || queryNormalized.includes("comsum") || queryNormalized.includes("cosum") || queryNormalized.includes("conssum") || queryNormalized.includes("gasto") || queryNormalized.includes("saida") || queryNormalized.includes("media") || queryNormalized.includes("demanda")) {
+        const filterMonths = Math.max(1, consumoMonthsFilter);
+        const rawList = getConsumoAnaliseData();
+        const useConsumoList = rawList && rawList.length > 0 
+          ? rawList 
+          : (consumoData || []).map((c: any) => ({
+              codigo: c.codigo,
+              item: c.item,
+              quantidade_consumida: Number(c.quantidade_consumida || 0) / filterMonths
+            }));
+
+        if (useConsumoList && useConsumoList.length > 0) {
+          responseText = `### 📈 Análise de Consumo Médio de Insumos\n\nIdentifiquei as seguintes médias calculadas de consumo (período de divisão configurado em **${filterMonths} ${filterMonths === 1 ? 'mês' : 'meses'}**):\n\n`;
+          useConsumoList.slice(0, 15).forEach((item: any, idx: number) => {
+            const qtyCons = Number(item.quantidade_consumida || 0);
+            responseText += `${idx + 1}. **${item.item.toUpperCase()}** ${item.codigo ? `(${item.codigo})` : ''}: Consumo médio de **${qtyCons.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} potes/mês**.\n`;
+          });
+          if (useConsumoList.length > 15) {
+            responseText += `\n_E mais ${useConsumoList.length - 15} itens registrados no painel de consumo._\n`;
+          }
+          responseText += `\n_Dica: Você pode alterar o número de meses do filtro do cabeçalho da tabela de Consumo para recalcular instantaneamente as médias e estimativas do estoque!_`;
+        } else {
+          responseText = `Não encontrei registros estruturados de consumo ou saídas na base de dados ativa. Certifique-se de que a planilha de consumo foi importada com sucesso no sistema.`;
+        }
       }
       else {
         responseText = `### 🧠 Diagnóstico Comercial Inteligente\n\nRealizei uma busca ampla nas suas bases integradas de suprimentos:\n` +
@@ -3891,11 +4047,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                   </div>
                                   <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-50">
                                     <div>
-                                      <span className="text-[8px] font-black text-slate-400 uppercase block">Qtd Comprada</span>
+                                      <span className="text-[8px] font-black text-slate-400 uppercase block">ITENS COMPRADOS</span>
                                       <span className="font-mono font-black text-slate-700 text-xs">{sup.totalItems.toLocaleString('pt-BR')} un</span>
                                     </div>
                                     <div className="text-right">
-                                      <span className="text-[8px] font-black text-slate-400 uppercase block">Valor de Custo</span>
+                                      <span className="text-[8px] font-black text-slate-400 uppercase block">VALOR COMPRADO</span>
                                       <span className="font-mono font-black text-emerald-650 text-xs">
                                         R$ {sup.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </span>
@@ -3915,55 +4071,181 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         </div>
 
                         {/* Tabela de Lançamentos */}
-                        <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                          <table className="w-full text-left text-[11px] bg-white whitespace-nowrap">
+                        <div className="overflow-x-auto border border-slate-100 rounded-xl max-h-[500px] overflow-y-auto">
+                          <table className="w-full text-left text-[11px] bg-white whitespace-nowrap relative border-collapse">
                             <thead>
-                              <tr className="border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider bg-slate-50/75">
+                              <tr className="sticky top-0 bg-slate-50/95 backdrop-blur-xs border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider z-10 shadow-xs">
+                                <th className="py-2.5 px-3 w-12 text-center"></th>
                                 <th className="py-2.5 px-3">Código Forn</th>
                                 <th className="py-2.5 px-2">Fornecedor</th>
                                 <th className="py-2.5 px-2">Entrada</th>
-                                <th className="py-2.5 px-2">Código Item</th>
-                                <th className="py-2.5 px-2">Descrição Item</th>
-                                <th className="py-2.5 px-2 text-right">Qtd Comprada</th>
-                                <th className="py-2.5 px-2 text-center">Un</th>
-                                <th className="py-2.5 px-2 text-right">Preço Custo</th>
-                                <th className="py-2.5 px-2">Lote</th>
-                                <th className="py-2.5 px-2">Validade</th>
-                                <th className="py-2.5 px-3 text-center">Excluir</th>
+                                <th className="py-2.5 px-2 text-center">Contagem de Itens</th>
+                                <th className="py-2.5 px-2 text-right">Soma do Valor</th>
+                                <th className="py-2.5 px-3 text-center">Ações</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
-                              {getFilteredPrecosData().length === 0 ? (
-                                <tr>
-                                  <td colSpan={11} className="py-8 text-center text-slate-400 font-medium bg-white">
-                                    Base limpa ou sem dados para o período e pesquisa selecionados. Faça o upload da planilha para carregar os dados reais.
-                                  </td>
-                                </tr>
-                              ) : (
-                                getFilteredPrecosData().map((row) => (
-                                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-2.5 px-3 font-mono text-slate-500 text-[10px]">{row.codigo_fornecedor || '—'}</td>
-                                    <td className="py-2.5 px-2 font-bold text-slate-800">{row.fornecedor}</td>
-                                    <td className="py-2.5 px-2 font-mono text-slate-600">{formatIsoDateToPtBr(row.data_compra)}</td>
-                                    <td className="py-2.5 px-2 font-mono text-indigo-700 font-semibold">{row.codigo_item || '—'}</td>
-                                    <td className="py-2.5 px-2 font-black text-slate-900">{row.item}</td>
-                                    <td className="py-2.5 px-2 text-right font-mono font-extrabold text-slate-800">
-                                      {(Number(row.quantidade) || 0).toLocaleString('pt-BR')}
-                                    </td>
-                                    <td className="py-2.5 px-2 text-center font-bold text-slate-500 uppercase">{row.unidade || 'UN'}</td>
-                                    <td className="py-2.5 px-2 text-right font-mono font-black text-indigo-650">
-                                      R$ {(Number(row.preco_unitario) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                    <td className="py-2.5 px-2 font-mono text-slate-600 font-bold">{row.lote || '—'}</td>
-                                    <td className="py-2.5 px-2 font-mono text-slate-600">{formatIsoDateToPtBr(row.validade)}</td>
-                                    <td className="py-2.5 px-3 text-center">
-                                      <button onClick={() => handleDeletePreco(row.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer" title="Excluir lançamento">
-                                        <Trash className="h-3.5 w-3.5" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
+                              {(() => {
+                                const filteredPrecos = getFilteredPrecosData();
+                                if (filteredPrecos.length === 0) {
+                                  return (
+                                    <tr>
+                                      <td colSpan={7} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                        Base limpa ou sem dados para o período e pesquisa selecionados. Faça o upload da planilha para carregar os dados reais.
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+
+                                // Agrupar por fornecedor e data de compra
+                                const groupsMap: Record<string, {
+                                  id: string;
+                                  codigo_fornecedor: string;
+                                  fornecedor: string;
+                                  data_compra: string;
+                                  itemCount: number;
+                                  totalValue: number;
+                                  items: PrecoHistoricoItem[];
+                                }> = {};
+
+                                filteredPrecos.forEach((row) => {
+                                  const key = `${row.fornecedor || 'Desconhecido'}_${row.data_compra || ''}`;
+                                  if (!groupsMap[key]) {
+                                    groupsMap[key] = {
+                                      id: key,
+                                      codigo_fornecedor: row.codigo_fornecedor || '—',
+                                      fornecedor: row.fornecedor || 'Desconhecido',
+                                      data_compra: row.data_compra || '',
+                                      itemCount: 0,
+                                      totalValue: 0,
+                                      items: []
+                                    };
+                                  }
+                                  const group = groupsMap[key];
+                                  group.itemCount += 1;
+                                  group.totalValue += (Number(row.quantidade) || 0) * (Number(row.preco_unitario) || 0);
+                                  group.items.push(row);
+                                });
+
+                                const sortedGroups = Object.values(groupsMap).sort(
+                                  (a, b) => b.data_compra.localeCompare(a.data_compra) || a.fornecedor.localeCompare(b.fornecedor)
+                                );
+
+                                return sortedGroups.map((group) => {
+                                  const isExpanded = !!expandedPrecosGroups[group.id];
+                                  return (
+                                    <React.Fragment key={group.id}>
+                                      <tr className="hover:bg-slate-50/50 transition-colors group cursor-pointer" onClick={() => {
+                                        setExpandedPrecosGroups(prev => ({
+                                          ...prev,
+                                          [group.id]: !prev[group.id]
+                                        }));
+                                      }}>
+                                        <td className="py-3 px-3 text-center">
+                                          <span className="inline-block transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                                            <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-emerald-550" />
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3 font-mono text-slate-500 text-[10px]" onClick={(e) => e.stopPropagation()}>
+                                          {group.codigo_fornecedor}
+                                        </td>
+                                        <td className="py-3 px-2 font-bold text-slate-800">
+                                          {group.fornecedor}
+                                        </td>
+                                        <td className="py-3 px-2 font-mono text-slate-600">
+                                          {formatIsoDateToPtBr(group.data_compra)}
+                                        </td>
+                                        <td className="py-3 px-2 text-center">
+                                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-750 border border-indigo-100">
+                                            {group.itemCount} {group.itemCount === 1 ? 'item' : 'itens'}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-2 text-right font-mono font-black text-emerald-650">
+                                          R$ {group.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                          <button
+                                            onClick={() => {
+                                              if (window.confirm(`Tem certeza que deseja excluir todos os ${group.itemCount} itens desta entrega do fornecedor "${group.fornecedor}"?`)) {
+                                                const itemIds = group.items.map(i => i.id);
+                                                setHistoricoPrecosData(prev => prev.filter(i => !itemIds.includes(i.id)));
+                                                triggerToast(`Entrega de ${group.fornecedor} excluída com sucesso.`);
+                                              }
+                                            }}
+                                            className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer"
+                                            title="Excluir entrega inteira"
+                                          >
+                                            <Trash className="h-3.5 w-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                      {isExpanded && (
+                                        <tr>
+                                          <td colSpan={7} className="p-0 bg-slate-50/50">
+                                            <div className="px-6 py-3 border-l-4 border-emerald-500 space-y-2 bg-slate-50/25">
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                  Itens da Nota / Entrega:
+                                                </span>
+                                              </div>
+                                              <div className="overflow-x-auto rounded-lg border border-slate-150 shadow-xs">
+                                                <table className="w-full text-left text-[10px] bg-white whitespace-nowrap">
+                                                  <thead className="bg-slate-100 text-slate-500 font-black text-[8px] uppercase tracking-wider border-b border-slate-150">
+                                                    <tr>
+                                                      <th className="py-1.5 px-3">Código Item</th>
+                                                      <th className="py-1.5 px-2">Descrição Item</th>
+                                                      <th className="py-1.5 px-2 text-right">Qtd Comprada</th>
+                                                      <th className="py-1.5 px-2 text-center">Un</th>
+                                                      <th className="py-1.5 px-2 text-right">Preço Unitário</th>
+                                                      <th className="py-1.5 px-2 text-right">Preço Total</th>
+                                                      <th className="py-1.5 px-2">Lote</th>
+                                                      <th className="py-1.5 px-2">Validade</th>
+                                                      <th className="py-1.5 px-3 text-center">Excluir</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                                                    {group.items.map((item) => (
+                                                      <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                                                        <td className="py-1.5 px-3 font-mono text-indigo-700 font-semibold">{item.codigo_item || '—'}</td>
+                                                        <td className="py-1.5 px-2 font-black text-slate-900">{item.item}</td>
+                                                        <td className="py-1.5 px-2 text-right font-mono font-bold text-slate-800">
+                                                          {(Number(item.quantidade) || 0).toLocaleString('pt-BR')}
+                                                        </td>
+                                                        <td className="py-1.5 px-2 text-center font-bold text-slate-500 uppercase">{item.unidade || 'UN'}</td>
+                                                        <td className="py-1.5 px-2 text-right font-mono text-indigo-650">
+                                                          R$ {(Number(item.preco_unitario) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="py-1.5 px-2 text-right font-mono font-extrabold text-emerald-650">
+                                                          R$ {((Number(item.quantidade) || 0) * (Number(item.preco_unitario) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="py-1.5 px-2 font-mono text-slate-600 font-bold">{item.lote || '—'}</td>
+                                                        <td className="py-1.5 px-2 font-mono text-slate-600">{formatIsoDateToPtBr(item.validade)}</td>
+                                                        <td className="py-1.5 px-3 text-center">
+                                                          <button
+                                                            onClick={() => {
+                                                              if (window.confirm(`Tem certeza que deseja excluir o item "${item.item}" desta entrega?`)) {
+                                                                handleDeletePreco(item.id);
+                                                              }
+                                                            }}
+                                                            className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer"
+                                                            title="Excluir item da nota"
+                                                          >
+                                                            <Trash className="h-3 w-3" />
+                                                          </button>
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                });
+                              })()}
                             </tbody>
                           </table>
                         </div>

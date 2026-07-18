@@ -517,6 +517,32 @@ export default function App() {
 
     const totalEbitda = totalNetRevenue - totalOpex;
 
+    // Aggregate by month and category to provide high-level context without bloat
+    const aggregates: { [key: string]: number } = {};
+    enrichedTransactions.forEach(t => {
+      const parts = t.date.split('-');
+      const monthStr = `${parts[0]}-${parts[1]}`;
+      const key = `${monthStr}_${t.classification}`;
+      aggregates[key] = (aggregates[key] || 0) + t.value;
+    });
+
+    const resumoMensalCategoria = Object.entries(aggregates).map(([key, val]) => {
+      const [month, category] = key.split('_');
+      return { mes: month, categoria: category, total: val };
+    });
+
+    // Take only the 100 most recent transactions for granular lookup to avoid token limit issues
+    const recentTransactions = [...enrichedTransactions]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 100)
+      .map(x => ({
+        data: x.date,
+        conta: x.conta,
+        descricao: x.description,
+        valor: x.value,
+        categoria: x.classification
+      }));
+
     return {
       companyName: activeCompany.name,
       sector: activeCompany.sector,
@@ -542,13 +568,8 @@ export default function App() {
         nome: c.name,
         formula: c.formulaRef
       })),
-      breakdown: enrichedTransactions.map(x => ({
-        data: x.date,
-        conta: x.conta,
-        descricao: x.description,
-        valor: x.value,
-        categoria: x.classification
-      }))
+      resumoMensalCategoria,
+      breakdown: recentTransactions
     };
   };
 

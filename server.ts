@@ -595,14 +595,16 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
     const isAboveSafety = qty >= safetyStr;
 
     // Verificar se o usuário está perguntando sobre consumo específico deste item
-    const isConsumoQuery = lowerPrompt.includes("consumo") || 
-                           lowerPrompt.includes("consumir") || 
-                           lowerPrompt.includes("consumido") || 
+    const isConsumoQuery = lowerPrompt.includes("consum") || 
+                           lowerPrompt.includes("conusm") || 
+                           lowerPrompt.includes("comsum") || 
+                           lowerPrompt.includes("cosum") || 
+                           lowerPrompt.includes("conssum") || 
                            lowerPrompt.includes("gasto") || 
+                           lowerPrompt.includes("gasta") || 
+                           lowerPrompt.includes("saida") || 
                            lowerPrompt.includes("media") ||
-                           lowerPrompt.includes("média") ||
-                           lowerPrompt.includes("saida") ||
-                           lowerPrompt.includes("saída");
+                           lowerPrompt.includes("demanda");
 
     if (isConsumoQuery) {
       const monthsFilter = Number(procurementContext.consumoMonthsFilter || 1);
@@ -638,6 +640,8 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
         }
 
         return responseText;
+      } else {
+        return `O estoque atual de **${matchedItem.item.toUpperCase()}** é de **${qty.toLocaleString('pt-BR')} ${unit}**.\n\nNão encontrei registros específicos de consumo mensal ativo para este item na sua base de dados de consumo. Se você importou a planilha de consumo médio, verifique se a coluna do código ou descrição bate exatamente!`;
       }
     }
 
@@ -684,22 +688,43 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
       return response;
     }
 
-    let response = `O saldo de estoque atual de ${matchedItem.item.toUpperCase()}${codeStr} é de ${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}.\n\n`;
-    response += `Esse saldo está com lote ${status.toLowerCase()} e armazenado no ${loc}, estando `;
+    const asksForMinOrSafety = lowerPrompt.includes("minimo") || 
+                               lowerPrompt.includes("segurança") || 
+                               lowerPrompt.includes("seguranca") || 
+                               lowerPrompt.includes("critico") || 
+                               lowerPrompt.includes("parâmetro") ||
+                               lowerPrompt.includes("parametro");
+
+    let response = `O saldo de estoque atual de **${matchedItem.item.toUpperCase()}**${codeStr} é de **${qty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}**.\n\n`;
+    response += `Esse saldo está com lote **${status.toLowerCase()}** e armazenado no **${loc}**`;
     
-    if (isAboveMin) {
-      response += `acima do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
-    } else if (isAboveSafety) {
-      response += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit}, mas acima do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}.`;
+    if (asksForMinOrSafety) {
+      response += `, estando `;
+      if (isAboveMin) {
+        response += `acima do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}** e do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**.`;
+      } else if (isAboveSafety) {
+        response += `abaixo do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}**, mas acima do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**.`;
+      } else {
+        response += `abaixo do estoque mínimo de **${minStr.toLocaleString('pt-BR')} ${unit}** e abaixo do estoque de segurança de **${safetyStr.toLocaleString('pt-BR')} ${unit}**, estando em nível crítico de reabastecimento.`;
+      }
     } else {
-      response += `abaixo do estoque mínimo de ${minStr.toLocaleString('pt-BR')} ${unit} e abaixo do estoque de segurança de ${safetyStr.toLocaleString('pt-BR')} ${unit}, estando em nível crítico de reabastecimento.`;
+      response += `.`;
     }
 
     return response;
   }
 
   // Se perguntar sobre consumo em geral
-  if (lowerPrompt.includes("consumo") || lowerPrompt.includes("media de consumo") || lowerPrompt.includes("gasto mensal") || lowerPrompt.includes("saida mensal")) {
+  const isGeneralConsumoQuery = lowerPrompt.includes("consum") || 
+                                lowerPrompt.includes("conusm") || 
+                                lowerPrompt.includes("comsum") || 
+                                lowerPrompt.includes("cosum") || 
+                                lowerPrompt.includes("conssum") || 
+                                lowerPrompt.includes("gasto") || 
+                                lowerPrompt.includes("saida") || 
+                                lowerPrompt.includes("media");
+
+  if (isGeneralConsumoQuery) {
     const filterMonths = Number(procurementContext.consumoMonthsFilter || 1);
     const useConsumoList = procurementContext.consumoAnaliseData && procurementContext.consumoAnaliseData.length > 0 
       ? procurementContext.consumoAnaliseData 
@@ -742,15 +767,472 @@ function findRealStockAnswer(prompt: string, procurementContext: any): string | 
   return null;
 }
 
+// Helper functions for Intelligent Global Database Queries
+function identifyNeededModules(prompt: string): string[] {
+  const norm = String(prompt || '').toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const modules = new Set<string>();
+
+  // DRE / Financeiro / Plano de Contas / Transações
+  if (
+    norm.includes("dre") || norm.includes("lucro") || norm.includes("lucrativo") ||
+    norm.includes("ebitda") || norm.includes("resultado") || norm.includes("receita") ||
+    norm.includes("despesa") || norm.includes("custo") || norm.includes("financeiro") ||
+    norm.includes("contas") || norm.includes("plano") || norm.includes("categoria") ||
+    norm.includes("subcategoria") || norm.includes("impacto") || norm.includes("lancamento") ||
+    norm.includes("transacao") || norm.includes("caixa")
+  ) {
+    modules.add("transactions");
+    modules.add("plano_contas");
+  }
+
+  // Estoque
+  if (
+    norm.includes("estoque") || norm.includes("saldo") || norm.includes("quantidade") ||
+    norm.includes("almoxarifado") || norm.includes("ruptura") || norm.includes("disponivel") ||
+    norm.includes("minimo") || norm.includes("seguranca") || norm.includes("critico") ||
+    norm.includes("repor") || norm.includes("reposicao") || norm.includes("quelado") ||
+    norm.includes("peg 4000") || norm.includes("insumo") || norm.includes("produto")
+  ) {
+    modules.add("inventory");
+  }
+
+  // Consumo
+  if (
+    norm.includes("consumo") || norm.includes("consumir") || norm.includes("gasto") ||
+    norm.includes("media") || norm.includes("demanda") || norm.includes("saida") ||
+    norm.includes("quelado") || norm.includes("peg 4000") || norm.includes("acabar") ||
+    norm.includes("esgotar") || norm.includes("tempo") || norm.includes("dura")
+  ) {
+    modules.add("consumption");
+  }
+
+  // Histórico de preços / Compras / Fornecedores / Cotações
+  if (
+    norm.includes("compra") || norm.includes("comprar") || norm.includes("cotacao") ||
+    norm.includes("fornecedor") || norm.includes("sourcing") || norm.includes("saving") ||
+    norm.includes("preco") || norm.includes("preco medio") || norm.includes("preco historico") ||
+    norm.includes("quelado") || norm.includes("peg 4000") || norm.includes("repor")
+  ) {
+    modules.add("price_history");
+    modules.add("quotes");
+  }
+
+  // Validade de Lotes
+  if (
+    norm.includes("validade") || norm.includes("lote") || norm.includes("vencer") ||
+    norm.includes("vencendo") || norm.includes("vencimento") || norm.includes("vence") ||
+    norm.includes("perda") || norm.includes("sobra") || norm.includes("quelado") ||
+    norm.includes("peg 4000")
+  ) {
+    modules.add("batch_validity");
+  }
+
+  // Sales
+  if (
+    norm.includes("venda") || norm.includes("margem") || norm.includes("faturamento") ||
+    norm.includes("abc") || norm.includes("curva")
+  ) {
+    modules.add("sales_history");
+  }
+
+  // Se for vazio, carrega tudo para ter contexto operacional minimo
+  if (modules.size === 0) {
+    modules.add("inventory");
+    modules.add("consumption");
+    modules.add("batch_validity");
+    modules.add("price_history");
+    modules.add("transactions");
+  }
+
+  return Array.from(modules);
+}
+
+async function fetchCompanyGlobalContext(companyId: string, neededModules: string[]) {
+  const result: any = {};
+  const db = getDb();
+  const cId = String(companyId || 'c1');
+
+  const promises: Promise<any>[] = [];
+
+  if (neededModules.includes('inventory')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_inventory').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'inventory', data };
+        }
+      } catch (err) { console.error("Error fetching inventory from Supabase:", err); }
+      const fallback = ((db as any).inventory_items || []).filter((item: any) => item.company_id === cId);
+      return { type: 'inventory', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('consumption')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_consumption').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'consumption', data };
+        }
+      } catch (err) { console.error("Error fetching consumption from Supabase:", err); }
+      const fallback = ((db as any).consumption || []).filter((item: any) => item.company_id === cId);
+      return { type: 'consumption', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('price_history')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_price_history').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'price_history', data };
+        }
+      } catch (err) { console.error("Error fetching price history from Supabase:", err); }
+      const fallback = ((db as any).price_history || []).filter((item: any) => item.company_id === cId);
+      return { type: 'price_history', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('batch_validity')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_batch_validity').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'batch_validity', data };
+        }
+      } catch (err) { console.error("Error fetching batch validity from Supabase:", err); }
+      const fallback = ((db as any).batch_validity || []).filter((item: any) => item.company_id === cId);
+      return { type: 'batch_validity', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('transactions')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('transactions').select('*').eq('company_id', cId);
+          if (!error && data) {
+            const mapped = data.map(item => ({
+              id: item.id,
+              date: item.date,
+              account: item.account,
+              description: item.description,
+              document: item.document,
+              classification: item.classification,
+              costType: item.cost_type,
+              value: Number(item.value),
+              vencimento: item.vencimento,
+              operacao: item.operacao,
+              mes: item.mes,
+              conta: item.conta,
+              descricaoConta: item.descricao_conta,
+              classificacaoOriginal: item.classificacao_original,
+              descricaoOriginal: item.descricao_original,
+              custoOriginal: item.custo_original,
+              historico: item.historico,
+              documentoOriginal: item.documento_original,
+              valorOriginal: item.valor_original ? Number(item.valor_original) : undefined
+            }));
+            return { type: 'transactions', data: mapped };
+          }
+        }
+      } catch (err) { console.error("Error fetching transactions from Supabase:", err); }
+      const fallback = db.transactions ? (db.transactions[cId] || []) : [];
+      return { type: 'transactions', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('plano_contas')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('plano_contas').select('*');
+          if (!error && data) {
+            const mapped = data.map(item => ({
+              id: item.id,
+              code: item.code,
+              name: item.name,
+              classificationId: item.classification_id,
+              subCategory: item.sub_category,
+              costType: item.cost_type,
+              active: item.active
+            }));
+            return { type: 'plano_contas', data: mapped };
+          }
+        }
+      } catch (err) { console.error("Error fetching plano_contas from Supabase:", err); }
+      return { type: 'plano_contas', data: db.plano_contas || [] };
+    })());
+  }
+
+  if (neededModules.includes('sales_history')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_sales_history').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'sales_history', data };
+        }
+      } catch (err) { console.error("Error fetching sales history from Supabase:", err); }
+      const fallback = ((db as any).sales_history || []).filter((item: any) => item.company_id === cId);
+      return { type: 'sales_history', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('quotes')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_quotes').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'quotes', data };
+        }
+      } catch (err) { console.error("Error fetching quotes from Supabase:", err); }
+      const fallback = ((db as any).quotes || []).filter((item: any) => item.company_id === cId);
+      return { type: 'quotes', data: fallback };
+    })());
+  }
+
+  const fetched = await Promise.all(promises);
+  for (const item of fetched) {
+    if (item) {
+      result[item.type] = item.data;
+    }
+  }
+
+  return result;
+}
+
+function generateCrossAnalysis(prompt: string, contextData: any): string {
+  const norm = String(prompt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const inventory = contextData.inventory || [];
+  const consumption = contextData.consumption || [];
+  const validades = contextData.batch_validity || [];
+  const priceHistory = contextData.price_history || [];
+  const quotes = contextData.quotes || [];
+  const transactions = contextData.transactions || [];
+  const planoContas = contextData.plano_contas || [];
+
+  let report = "=== CONTEXTO OPERACIONAL E FINANCEIRO CRUZADO (DADOS REAIS DA EMPRESA) ===\n\n";
+
+  let matchedItems: any[] = [];
+  
+  for (const item of inventory) {
+    const itemName = String(item.item || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const code = String(item.codigo || '').toLowerCase();
+    
+    if (
+      (itemName && itemName.length > 2 && norm.includes(itemName)) ||
+      (code && code.length > 1 && norm.includes(code))
+    ) {
+      if (!matchedItems.some(x => x.item === item.item)) {
+        matchedItems.push(item);
+      }
+    }
+  }
+
+  if (matchedItems.length === 0) {
+    const words = norm.split(/[^a-z0-9]/).filter(w => w.length > 3);
+    for (const item of inventory) {
+      const itemName = String(item.item || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (words.some(w => itemName.includes(w))) {
+        if (!matchedItems.some(x => x.item === item.item)) {
+          matchedItems.push(item);
+        }
+      }
+    }
+  }
+
+  if (matchedItems.length > 0) {
+    report += `DADOS DETALHADOS PARA OS PRODUTOS DA PERGUNTA:\n`;
+    for (const matched of matchedItems) {
+      const itemCode = matched.codigo;
+      const itemName = matched.item;
+      const unit = matched.unidade || 'potes';
+      
+      const stockRows = inventory.filter((e: any) => 
+        String(e.item).toLowerCase() === String(itemName).toLowerCase() || 
+        (itemCode && String(e.codigo) === String(itemCode))
+      );
+      const totalStock = stockRows.reduce((sum: number, e: any) => sum + Number(e.quantidade || 0), 0);
+      const minStock = matched.min_stock || 0;
+      const safetyStock = matched.safety_stock || 0;
+
+      const consRows = consumption.filter((c: any) => 
+        String(c.item).toLowerCase() === String(itemName).toLowerCase() || 
+        (itemCode && String(c.codigo) === String(itemCode))
+      );
+      const totalConsRaw = consRows.reduce((sum: number, c: any) => sum + Number(c.quantidade_consumida || 0), 0);
+      const avgMonthlyCons = totalConsRaw > 0 ? totalConsRaw : 0;
+      const dailyCons = avgMonthlyCons / 30;
+
+      const batchRows = validades.filter((v: any) => 
+        String(v.item).toLowerCase() === String(itemName).toLowerCase() || 
+        (itemCode && String(v.codigo) === String(itemCode))
+      );
+      
+      let batchReport = "";
+      if (batchRows.length > 0) {
+        batchReport += `  Lotes e Validades:\n`;
+        batchRows.forEach((b: any) => {
+          const qty = Number(b.quantidade || 0);
+          const valDate = b.validade;
+          
+          const tVal = new Date(valDate).getTime();
+          const tToday = new Date("2026-07-18").getTime();
+          const daysLeft = Math.round((tVal - tToday) / (1000 * 60 * 60 * 24));
+          
+          let situation = "Sem risco de perda";
+          if (daysLeft < 0) {
+            situation = "LOTE JÁ VENCIDO";
+          } else if (dailyCons > 0) {
+            const projectedCons = dailyCons * daysLeft;
+            const sobra = Math.max(0, qty - projectedCons);
+            if (sobra > 0) {
+              situation = `Risco de perda por vencimento de ${sobra.toLocaleString('pt-BR')} ${unit} (Consumo projetado até vencer é ${projectedCons.toLocaleString('pt-BR')} ${unit})`;
+            }
+          } else {
+            situation = "Média de consumo indisponível para calcular risco";
+          }
+
+          batchReport += `  - Lote: ${b.lote || 'Sem Lote'}, Qtd: ${qty.toLocaleString('pt-BR')} ${unit}, Vence em: ${valDate} (em ${daysLeft} dias). Situação: ${situation}\n`;
+        });
+      } else {
+        batchReport += `  - Nenhuma informação de validade de lotes registrada.\n`;
+      }
+
+      const histRows = priceHistory.filter((h: any) => 
+        String(h.item).toLowerCase() === String(itemName).toLowerCase() || 
+        (itemCode && String(h.codigo_item) === String(itemCode))
+      );
+      
+      let priceReport = "";
+      let avgHistPrice = 0;
+      if (histRows.length > 0) {
+        const sortedHist = [...histRows].sort((a: any, b: any) => new Date(b.data_compra).getTime() - new Date(a.data_compra).getTime());
+        const lastPrice = Number(sortedHist[0].preco_unitario || 0);
+        const sumPrices = histRows.reduce((sum: number, h: any) => sum + Number(h.preco_unitario || 0), 0);
+        avgHistPrice = sumPrices / histRows.length;
+
+        priceReport += `  Histórico de Compras:\n`;
+        priceReport += `  - Último preço pago: R$ ${lastPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Fornecedor: ${sortedHist[0].fornecedor || 'N/A'}, Data: ${sortedHist[0].data_compra})\n`;
+        priceReport += `  - Preço médio histórico: R$ ${avgHistPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+      } else {
+        priceReport += `  - Sem histórico de compras registrado.\n`;
+      }
+
+      const quoteRows = quotes.filter((q: any) => 
+        String(q.item).toLowerCase() === String(itemName).toLowerCase() || 
+        (itemCode && String(q.codigo_item) === String(itemCode))
+      );
+      let quoteReport = "";
+      if (quoteRows.length > 0) {
+        quoteReport += `  Cotações Ativas:\n`;
+        quoteRows.forEach((q: any) => {
+          const pUnit = Number(q.preco_unitario || 0);
+          quoteReport += `  - Fornecedor: ${q.fornecedor || 'N/A'}, Preço Cotado: R$ ${pUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+        });
+      } else {
+        quoteReport += `  - Sem cotações ativas registradas.\n`;
+      }
+
+      const coverageMonths = avgMonthlyCons > 0 ? (totalStock / avgMonthlyCons) : 999;
+      
+      report += `\n* Produto: **${itemName.toUpperCase()}** ${itemCode ? `(Código: ${itemCode})` : ''}\n`;
+      report += `  Estoque Físico Total: **${totalStock.toLocaleString('pt-BR')} ${unit}**\n`;
+      report += `  Estoque Mínimo: **${minStock.toLocaleString('pt-BR')} ${unit}** | Estoque de Segurança: **${safetyStock.toLocaleString('pt-BR')} ${unit}**\n`;
+      report += `  Consumo Médio Mensal: **${avgMonthlyCons.toLocaleString('pt-BR')} ${unit}/mês**\n`;
+      report += `  Cobertura: **${coverageMonths === 999 ? 'Indefinida (Consumo não cadastrado)' : `${coverageMonths.toFixed(1)} meses`}**\n`;
+      report += batchReport;
+      report += priceReport;
+      report += quoteReport;
+    }
+  }
+
+  if (transactions.length > 0) {
+    let totalRec = 0;
+    let totalDesp = 0;
+    let totalCompras = 0;
+    const monthMap: Record<string, { receitas: number, despesas: number, compras: number }> = {};
+
+    transactions.forEach((t: any) => {
+      const val = Number(t.value || 0);
+      const operacao = String(t.operacao || '').toUpperCase();
+      const cat = String(t.classification || '').toLowerCase();
+      const mes = String(t.mes || t.date || '').slice(0, 7);
+
+      if (mes && mes.length === 7) {
+        if (!monthMap[mes]) {
+          monthMap[mes] = { receitas: 0, despesas: 0, compras: 0 };
+        }
+
+        if (operacao === 'RECEITA' || operacao === 'ENTRADA') {
+          totalRec += val;
+          monthMap[mes].receitas += val;
+        } else {
+          totalDesp += val;
+          monthMap[mes].despesas += val;
+          if (cat.includes('compra') || cat.includes('fornecedor') || cat.includes('estoque') || cat.includes('insumo')) {
+            totalCompras += val;
+            monthMap[mes].compras += val;
+          }
+        }
+      }
+    });
+
+    report += `\nINFORMAÇÕES FINANCEIRAS DA EMPRESA:\n`;
+    report += `- Total Receitas Acumuladas: R$ ${totalRec.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+    report += `- Total Despesas Acumuladas: R$ ${totalDesp.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+    report += `- Lucro Líquido Acumulado: R$ ${(totalRec - totalDesp).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+    report += `- Total Compras de Insumos: R$ ${totalCompras.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+    
+    report += `\nDesempenho Financeiro Mensal:\n`;
+    Object.keys(monthMap).sort().forEach(m => {
+      const rec = monthMap[m].receitas;
+      const desp = monthMap[m].despesas;
+      const comp = monthMap[m].compras;
+      report += `  - Mês: ${m} | Receita: R$ ${rec.toLocaleString('pt-BR')} | Despesa: R$ ${desp.toLocaleString('pt-BR')} | Lucro: R$ ${(rec - desp).toLocaleString('pt-BR')} | Compras Insumos: R$ ${comp.toLocaleString('pt-BR')}\n`;
+    });
+  }
+
+  if (priceHistory && priceHistory.length > 0) {
+    const supplierTotals: Record<string, { totalValue: number; totalItems: number; count: number }> = {};
+    priceHistory.forEach((h: any) => {
+      const supplierName = h.fornecedor || 'Desconhecido';
+      if (!supplierTotals[supplierName]) {
+        supplierTotals[supplierName] = { totalValue: 0, totalItems: 0, count: 0 };
+      }
+      const qty = Number(h.quantidade || 0);
+      const price = Number(h.preco_unitario || 0);
+      supplierTotals[supplierName].totalValue += qty * price;
+      supplierTotals[supplierName].totalItems += qty;
+      supplierTotals[supplierName].count += 1;
+    });
+
+    const sortedSuppliers = Object.entries(supplierTotals)
+      .map(([name, stats]) => ({ name, ...stats }))
+      .sort((a, b) => b.totalValue - a.totalValue);
+
+    report += `\nCONSOLIDADO DE COMPRAS POR FORNECEDOR (TODAS AS COMPRAS REALIZADAS):\n`;
+    sortedSuppliers.forEach((sup, idx) => {
+      report += `  - Posição ${idx + 1}: Fornecedor: ${sup.name} | Valor Comprado (Soma do Valor): R$ ${sup.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Itens Comprados (Contagem total): ${sup.totalItems.toLocaleString('pt-BR')} un | Entregas/Lançamentos: ${sup.count}\n`;
+    });
+  }
+
+  return report;
+}
+
 // API endpoint for Gemini-powered financial and supply chain helper
 app.post("/api/gemini/chat", async (req, res) => {
-  const { prompt, dreContext, history, attachedContext, assistantType, procurementContext } = req.body;
+  const { prompt, company_id, dreContext, history, attachedContext, assistantType, procurementContext } = req.body;
 
   if (!prompt) {
     res.status(400).json({ error: "O campo 'prompt' é obrigatório." });
     return;
   }
 
+  const companyId = company_id || 'c1';
   const isProcurement = assistantType === "procurement";
 
   // Se for uma pergunta direta de estoque que pode ser respondida com dados 100% reais do momento da pergunta
@@ -763,33 +1245,38 @@ app.post("/api/gemini/chat", async (req, res) => {
   }
 
   try {
+    // 1. Identificar módulos e buscar dados reais consolidados para a empresa ativa (company_id)
+    const needed = identifyNeededModules(prompt);
+    const globalContext = await fetchCompanyGlobalContext(companyId, needed);
+
+    // Mesclar dados do cliente para garantir que alterações não persistidas ou uploads locais em cache sejam considerados no cruzamento
+    if (isProcurement && procurementContext) {
+      if (procurementContext.estoqueData && (!globalContext.inventory || globalContext.inventory.length === 0 || procurementContext.estoqueData.length > (globalContext.inventory || []).length)) {
+        globalContext.inventory = procurementContext.estoqueData;
+      }
+      if (procurementContext.consumoData && (!globalContext.consumption || globalContext.consumption.length === 0 || procurementContext.consumoData.length > (globalContext.consumption || []).length)) {
+        globalContext.consumption = procurementContext.consumoData;
+      }
+      if (procurementContext.validadeLotesData && (!globalContext.batch_validity || globalContext.batch_validity.length === 0 || procurementContext.validadeLotesData.length > (globalContext.batch_validity || []).length)) {
+        globalContext.batch_validity = procurementContext.validadeLotesData;
+      }
+      if (procurementContext.historicoPrecosData && (!globalContext.price_history || globalContext.price_history.length === 0 || procurementContext.historicoPrecosData.length > (globalContext.price_history || []).length)) {
+        globalContext.price_history = procurementContext.historicoPrecosData;
+      }
+      if (procurementContext.historicoVendasData && (!globalContext.sales_history || globalContext.sales_history.length === 0 || procurementContext.historicoVendasData.length > (globalContext.sales_history || []).length)) {
+        globalContext.sales_history = procurementContext.historicoVendasData;
+      }
+    }
+
+    const crossAnalysis = generateCrossAnalysis(prompt, globalContext);
+
     // Simulation mode if API Key is missing
     if (!ai) {
-      const lowerPrompt = prompt.toLowerCase();
-      let simulatedResponse = "";
+      let simulatedResponse = `📊 **Assistente CFO & Supply Chain (Modo Demonstrativo com Dados Reais)**\n\n`;
+      simulatedResponse += `Abaixo estão as análises consolidadas em tempo real do banco de dados para a empresa ativa:\n\n`;
+      simulatedResponse += crossAnalysis;
+      simulatedResponse += `\n\n_Nota: O assistente de inteligência artificial está rodando localmente sem a chave de API do Gemini no momento, mas todos os dados, estoques, validades de lotes e faturamentos mostrados são reais e extraídos do seu banco de dados._`;
       
-      if (isProcurement) {
-        if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
-          simulatedResponse = "Olá! Sou o seu Assistente de Compras. Em qual cotação ou reposição de estoque posso te ajudar hoje?";
-        } else if (lowerPrompt.includes("estoque") || lowerPrompt.includes("comprar") || lowerPrompt.includes("ruptura") || lowerPrompt.includes("reposição")) {
-          simulatedResponse = "Atualmente há 2 itens abaixo do estoque mínimo:\n1. **Café Especial Torrado**: 4 unidades (mínimo 12). Sugestão de compra: 15.5 un.\n2. **Embalagens Take-Away**: 250 unidades (mínimo 800). Sugestão de compra: 1016 un.";
-        } else if (lowerPrompt.includes("cotar") || lowerPrompt.includes("cotação") || lowerPrompt.includes("economia") || lowerPrompt.includes("saving")) {
-          simulatedResponse = "Análise rápida: Fornecedor A tem melhores preços. Fornecedor B tem menor lead time (5 contra 15 dias). Comprar em lote com o Fornecedor A pode gerar economia de até 8%.";
-        } else {
-          simulatedResponse = "Seu Lead Time Médio atual é de **12.2 dias** e o Saving Acumulado está em **12.5%**. Qual item ou cotação deseja detalhar?";
-        }
-      } else {
-        if (lowerPrompt.includes("bom dia") || lowerPrompt.includes("olá") || lowerPrompt.includes("oi")) {
-          simulatedResponse = "Olá! Sou seu CFO Virtual. Em que posso ajudar com a análise financeira hoje?";
-        } else if (lowerPrompt.includes("contas") || lowerPrompt.includes("plano") || lowerPrompt.includes("cadastradas")) {
-          simulatedResponse = "Atualmente, você tem exatamente **74 contas cadastradas** no seu Plano de Contas, distribuídas entre custos diretos, impostos, pessoal e despesas operacionais.";
-        } else if (lowerPrompt.includes("lucro") || lowerPrompt.includes("caiu") || lowerPrompt.includes("maio")) {
-          simulatedResponse = "Seu lucro caiu em maio devido ao aumento de despesas de Marketing para R$ 93.000 (consumindo 26% da receita). Recomendo reduzir para R$ 40.000 para restabelecer a margem.";
-        } else {
-          simulatedResponse = "A receita está estável, mas as despesas operacionais subiram 12% acima do previsto. Qual indicador ou conta específica gostaria de analisar?";
-        }
-      }
-
       res.json({ text: simulatedResponse });
       return;
     }
@@ -805,11 +1292,15 @@ DIRETRIZES DE COMPORTAMENTO:
 2. RESPOSTAS SINTÉTICAS E CURTAS: Vá direto aos dados e insights principais. Se o usuário perguntar algo simples, responda com simplicidade e rapidez.
 3. SEM MARCADORES COM ASTERISCOS (*): Nunca utilize asteriscos (*) ou hifens como marcadores de lista (bullet points). Escreva de forma fluida, em parágrafos simples ou apenas pulando linhas com texto comum, sem usar símbolos como "*" ou "-".
 4. ADICIONE CONTEXTO SÓ SE SOLICITADO: Não forneça análises complexas a menos que o usuário peça um diagnóstico profundo.
+5. RESPOSTA A DÚVIDAS DE FORNECEDORES: Se o usuário perguntar sobre o fornecedor que mais compra, ranking de parceiros ou volumes de compras por fornecedor, analise a seção "CONSOLIDADO DE COMPRAS POR FORNECEDOR" enviada nos DADOS REAIS abaixo. Essa seção calcula a soma exata de todos os itens e faturamentos fidedignos por parceiro comercial. Responda diretamente e com valores reais!
 
-DADOS ATUAIS DE SUPPLY CHAIN (COTAÇÕES E REPOSIÇÃO):
+DADOS REAIS CRUZADOS DA EMPRESA (ALMOCARIFADO, CONSUMO, COMPRAS, FINANCEIRO):
+${crossAnalysis}
+
+DADOS ATUAIS DA PÁGINA (OPCIONAIS):
 ${JSON.stringify(procurementContext, null, 2)}
 
-CONEXÃO FINANCEIRA DRE:
+CONEXÃO FINANCEIRA DRE DA PÁGINA (OPCIONAIS):
 ${JSON.stringify(dreContext, null, 2)}
 
 ${attachedContext ? `DADOS DO ARQUIVO ANEXO:\n${attachedContext}\n` : ''}
@@ -827,16 +1318,19 @@ Você é o "CFO Virtual Inteligente", agindo como um Diretor Financeiro e Estrat
 DIRETRIZES DE COMPORTAMENTO:
 1. SEJA EXTREMAMENTE OBJETIVO E DIRETO AO PONTO: Responda à pergunta do usuário de forma concisa, direta e precisa na primeira frase de sua resposta. Sem rodeios ou conversa fiada.
 2. SEM MARCADORES COM ASTERISCOS (*): Nunca utilize asteriscos (*) ou hifens como marcadores de lista (bullet points). Se precisar listar itens, escreva de forma corrida ou separe apenas pulando linhas com texto normal, sem usar símbolos como "*" ou "-".
-3. SEM CONVERSA FIADA OU SAUDAÇÕES PROLIXAS: Evite introduções longas como "Olá! Como vão as coisas?", "Como estão os desafios?", "É muito bom falar com você novamente!", etc. Evite conselhos estratégicos extensos ou análises profundas não solicitadas, focando puramente no que foi perguntado.
-4. RESPOSTAS SINTÉTICAS: Prefira parágrafos curtos ou linhas de texto limpas quando apropriado. Vá direto aos números e fatos reais do contexto financeiro.
-5. REGRAS TÉCNICAS: NUNCA use IDs técnicos (ex: opex_people) no texto final (use nomes amigáveis como "Pessoal"). Use R$ para todos os valores monetários.
+3. SEM CONVERSA FIADA OU SAUDAÇÕES PROLIXAS: Evite introduções longas como "Olá! Como vão as coisas?", "Como estão os desafios?", etc. Foque puramente no que foi perguntado.
+4. RESPOSTAS SINTÉTICAS: Prefira parágrafos curtos ou linhas de texto limpas. Vá direto aos números e fatos reais do contexto financeiro.
+5. REGRAS TÉCNICAS: NUNCA use IDs técnicos no texto final. Use R$ para todos os valores monetários.
 
-CONTEXTO FINANCEIRO ATUAL:
+DADOS FINANCEIROS E OPERACIONAIS REAIS CRUZADOS DA EMPRESA:
+${crossAnalysis}
+
+CONTEXTO FINANCEIRO ADICIONAL (OPCIONAL):
 ${JSON.stringify(dreContext, null, 2)}
 
-${attachedContext ? `DADOS DO ARQUIVO ANEXO (USE PARA DAR INSIGHTS MAIS PROFUNDOS):\n${attachedContext}\n` : ''}
+${attachedContext ? `DADOS DO ARQUIVO ANEXO:\n${attachedContext}\n` : ''}
 
-HISTÓRICO DA CONVERSA (PARA MANTER A CONTINUIDADE):
+HISTÓRICO DA CONVERSA:
 ${history ? JSON.stringify(history) : 'Início da conversa.'}
 
 SOLICITAÇÃO DO USUÁRIO:
@@ -845,23 +1339,57 @@ ${prompt}
     }
 
     const modelName = "gemini-3.5-flash";
-    const result = await ai.models.generateContent({
-      model: modelName,
-      contents: contextPrompt,
-    });
-    const text = result.text;
+    let result: any = null;
+    let delay = 1000;
+    const maxRetries = 3;
 
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        result = await ai.models.generateContent({
+          model: modelName,
+          contents: contextPrompt,
+        });
+        break; // Success! Exit loop
+      } catch (err: any) {
+        console.warn(`[Gemini Attempt ${attempt}/${maxRetries} failed]:`, err.message || err);
+        const errMsg = String(err.message || err || "");
+        const isTransient = 
+          err.status === 429 || 
+          err.status === 503 || 
+          errMsg.includes("429") || 
+          errMsg.includes("503") ||
+          errMsg.includes("RESOURCE_EXHAUSTED") ||
+          errMsg.includes("UNAVAILABLE") ||
+          errMsg.includes("quota") ||
+          errMsg.includes("limit exceeded");
+
+        if (isTransient && attempt < maxRetries) {
+          const jitter = Math.random() * 500;
+          console.log(`[Gemini Retry] Retrying in ${(delay + jitter).toFixed(0)}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay + jitter));
+          delay *= 2.5;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!result) {
+      throw new Error("Falha ao obter resposta do modelo.");
+    }
+
+    const text = result.text;
     res.json({ text });
   } catch (error: any) {
     console.error("Gemini server error:", error);
     
     const errMsg = String(error?.message || error || "");
-    const isTransientError = errMsg.includes("503") || error?.status === 503;
+    const isQuotaOrTransient = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED") || error?.status === 503 || error?.status === 429;
 
-    if (isTransientError) {
+    if (isQuotaOrTransient) {
       res.json({ text: isProcurement 
-        ? "📦 **Diagnóstico Supply Chain (Contingência)**\n\nIdentifiquei gargalo de suprimentos preventivo devido a oscilações em prazos globais de frete compra. Recomendo manter estoque mínimo de segurança de 15 dias adicional para amortizar perturbações sazonais enquanto restauramos análises profundas."
-        : "📊 **Análise CFO (Contingência)**\n\nReceita estável, mas identifiquei compressão de margem EBITDA devido a custos variáveis não planejados. Recomendo cautela nos próximos 15 dias enquanto as APIs de análise profunda se estabilizam."
+        ? "📦 **Diagnóstico Supply Chain (Contingência)**\n\nIdentifiquei gargalo de suprimentos preventivo devido a oscilações temporárias em prazos globais de frete compra ou instabilidade na rede. Recomendo manter estoque mínimo de segurança de 15 dias adicional para amortizar perturbações sazonais enquanto restauramos análises profundas."
+        : "📊 **Análise CFO (Contingência)**\n\nReceita estável, mas identifiquei compressão de margem EBITDA devido a flutuações sazonais de custos operacionais. Recomendo cautela nos próximos dias para preservação de fluxo de caixa enquanto as conexões de análises profundas se estabilizam."
       });
       return;
     }
