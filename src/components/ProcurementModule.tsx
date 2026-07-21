@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { 
   Plus, 
   Trash, 
@@ -35,7 +37,19 @@ import {
   Server,
   Link2,
   Play,
-  Terminal
+  Terminal,
+  Maximize2,
+  X,
+  Printer,
+  ExternalLink,
+  Clock,
+  AlertCircle,
+  Calculator,
+  PackageMinus,
+  Coins,
+  ShieldAlert,
+  ArrowDownRight,
+  SlidersHorizontal
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -120,6 +134,18 @@ interface VendaHistoricoItem {
   data_venda: string;
   custo_unitario: number;
   preco_venda: number;
+}
+
+interface SolicitacaoItem {
+  id: string;
+  codigo?: string;
+  item: string;
+  solicitante?: string;
+  data_solicitacao: string;
+  quantidade_pedida: number;
+  vezes_procurado: number;
+  motivo_ruptura?: string;
+  status: 'PENDENTE' | 'EM_COMPRA' | 'ATENDIDO';
 }
 
 interface SalesAnalysisItem {
@@ -357,12 +383,12 @@ interface ProcurementModuleProps {
 }
 
 export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab = 'indicators' }: ProcurementModuleProps) {
-  // Aba de dados selecionada na Gestão de Compras ('estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas')
-  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas'>('estoque');
+  // Aba de dados selecionada na Gestão de Compras
+  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes'>('estoque');
 
   // Controle de Mapeador de Colunas Personalizado e Pré-visualização Interativa
   const [pendingUpload, setPendingUpload] = useState<{
-    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas';
+    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes';
     fileName: string;
     fileSize: string;
     detectedHeaders: string[];
@@ -373,6 +399,37 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
   // Controle de sobrescrever banco ativo ao importar novas planilhas
   const [overwriteOnImport, setOverwriteOnImport] = useState<boolean>(true);
+
+  // Modal expandido de Ruptura / Itens em Atenção e pesquisa do modal
+  const [isRupturaExpanded, setIsRupturaExpanded] = useState<boolean>(false);
+  const [isAttentionModalExpanded, setIsAttentionModalExpanded] = useState<boolean>(false);
+  const [rupturaSearchQuery, setRupturaSearchQuery] = useState<string>('');
+
+  // Expandir painel de Curva ABC no Card "VALOR DE ESTOQUE"
+  const [isAbcExpanded, setIsAbcExpanded] = useState<boolean>(false);
+
+  // Seleções customizadas de sugestão de compra (meses e valores manuais digitados)
+  const [userCustomSuggestions, setUserCustomSuggestions] = useState<Record<string, { sugestaoUser?: number; mesesDesejados?: number }>>({});
+  const [selectedAttentionItems, setSelectedAttentionItems] = useState<Record<string, boolean>>({});
+  const [globalMonthsSelection, setGlobalMonthsSelection] = useState<number>(2);
+
+  // Configuração de colunas visíveis para exportação do PDF no Painel de Atenção
+  const [pdfColumnsConfig, setPdfColumnsConfig] = useState<Record<string, boolean>>({
+    codigo: true,
+    item: true,
+    estoqueAtual: true,
+    consumoMensal: true,
+    motivos: true,
+    mesesDesejados: true,
+    sugestaoUser: true,
+    valorEstimado: true,
+  });
+
+  // Estados para Análise Estratégica de Estoque, Inatividade, Risco de Validade e Ciclo Operacional
+  const [semConsumoMesesFiltro, setSemConsumoMesesFiltro] = useState<number>(3); // 3, 6, 9 ou 12 meses
+  const [pmpfDias, setPmpfDias] = useState<number>(45); // Prazo Médio de Pagamento Fornecedores (informado pelo DRE)
+  const [pmrDias, setPmrDias] = useState<number>(30); // Prazo Médio de Recebimento de Vendas
+  const [activeAnalysisTab, setActiveAnalysisTab] = useState<'semConsumo' | 'riscoValidade' | 'ruptura' | 'curvaAbc'>('semConsumo');
 
   // Ordenação e limite de exibição para o painel de estoque
   const [estoqueSort, setEstoqueSort] = useState<string>('quantidade_desc');
@@ -427,18 +484,62 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [historicoPrecosData, setHistoricoPrecosData] = useState<PrecoHistoricoItem[]>([]);
   const [validadeLotesData, setValidadeLotesData] = useState<ValidadeLoteItem[]>([]);
   const [historicoVendasData, setHistoricoVendasData] = useState<VendaHistoricoItem[]>([]);
+  const [relatorioSolicitacoesData, setRelatorioSolicitacoesData] = useState<SolicitacaoItem[]>(() => {
+    try {
+      const cached = localStorage.getItem(`gestao_solicitacoes_data_${companyId}`);
+      if (cached) return JSON.parse(cached);
+    } catch (e) {
+      console.warn("Error reading solicitacoes from storage:", e);
+    }
+    return [
+      {
+        id: 'sol-1',
+        codigo: 'INS-001',
+        item: 'Óleo Mineral MP-20',
+        solicitante: 'Produção / Manutenção',
+        data_solicitacao: '2026-07-15',
+        quantidade_pedida: 150,
+        vezes_procurado: 5,
+        motivo_ruptura: 'Demanda emergencial na fábrica',
+        status: 'PENDENTE'
+      },
+      {
+        id: 'sol-2',
+        codigo: 'INS-004',
+        item: 'Filtro Industrial 500 Micras',
+        solicitante: 'Cliente VIP - TechCorp',
+        data_solicitacao: '2026-07-18',
+        quantidade_pedida: 80,
+        vezes_procurado: 3,
+        motivo_ruptura: 'Item com saldo zerado no estoque',
+        status: 'PENDENTE'
+      },
+      {
+        id: 'sol-3',
+        codigo: 'INS-008',
+        item: 'Embalagem Reciclável 5L',
+        solicitante: 'Logística & Expedição',
+        data_solicitacao: '2026-07-20',
+        quantidade_pedida: 500,
+        vezes_procurado: 4,
+        motivo_ruptura: 'Aumento na fila de pedidos de venda',
+        status: 'EM_COMPRA'
+      }
+    ];
+  });
   const [salesSortFilter, setSalesSortFilter] = useState<'frequencia' | 'quantidade' | 'valor_venda'>('frequencia');
   const [salesViewType, setSalesViewType] = useState<'analise' | 'registros'>('analise');
   const [curvaAbcFiltro, setCurvaAbcFiltro] = useState<'frequencia' | 'consumo' | 'lucro'>('frequencia');
   const [loadingDb, setLoadingDb] = useState(true);
   const [loadedCompanyId, setLoadedCompanyId] = useState<string | null>(null);
 
-  // Filtros de período individuais e separados para cada um dos 5 painéis
+  // Filtros de período individuais e separados para cada um dos painéis
   const [estoquePeriodo, setEstoquePeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [consumoPeriodo, setConsumoPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [precosPeriodo, setPrecosPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [validadePeriodo, setValidadePeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [vendasPeriodo, setVendasPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [solicitacoesPeriodo, setSolicitacoesPeriodo] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
   // Controle de grupos expandidos na tabela de Compras Realizadas
   const [expandedPrecosGroups, setExpandedPrecosGroups] = useState<Record<string, boolean>>({});
@@ -1817,6 +1918,39 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     return list.filter(v => v && v.item && (String(v.item).toLowerCase().includes(searchQuery.toLowerCase()) || (v.codigo && String(v.codigo).toLowerCase().includes(searchQuery.toLowerCase()))));
   };
 
+  const getFilteredSolicitacoesRegisters = (): SolicitacaoItem[] => {
+    let list = relatorioSolicitacoesData || [];
+    if (solicitacoesPeriodo.start) {
+      list = list.filter(s => s.data_solicitacao >= solicitacoesPeriodo.start);
+    }
+    if (solicitacoesPeriodo.end) {
+      list = list.filter(s => s.data_solicitacao <= solicitacoesPeriodo.end);
+    }
+    return list.filter(s => 
+      s && s.item && (
+        String(s.item).toLowerCase().includes(searchQuery.toLowerCase()) || 
+        (s.codigo && String(s.codigo).toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (s.solicitante && String(s.solicitante).toLowerCase().includes(searchQuery.toLowerCase()))
+      )
+    );
+  };
+
+  const handleDeleteSolicitacao = (id: string) => {
+    setRelatorioSolicitacoesData(prev => prev.filter(s => s.id !== id));
+    triggerToast("Solicitação de compra removida.");
+  };
+
+  const handleToggleStatusSolicitacao = (id: string) => {
+    setRelatorioSolicitacoesData(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const nextStatus: SolicitacaoItem['status'] = 
+        s.status === 'PENDENTE' ? 'EM_COMPRA' :
+        s.status === 'EM_COMPRA' ? 'ATENDIDO' : 'PENDENTE';
+      return { ...s, status: nextStatus };
+    }));
+    triggerToast("Status da solicitação atualizado.");
+  };
+
   const getFilteredPrecosData = (): PrecoHistoricoItem[] => {
     let list = historicoPrecosData || [];
     if (precosPeriodo.start) {
@@ -1907,24 +2041,32 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     document.body.removeChild(link);
     triggerToast(`Exportação concluída. Download iniciado para "base_registrada_${tipo}.csv"!`);
   };
-  const valorEstoqueTotal = estoqueData.reduce((acc, current) => acc + (current.quantidade * current.custo_unitario), 0);
+  // Valor do Estoque Atual: Multiplica o custo unitário e pela quantidade de cada item na base de estoque e soma o valor total
+  const valorEstoqueTotal = useMemo(() => {
+    return estoqueData.reduce((acc, current) => {
+      const qty = Number(current.quantidade) || 0;
+      const unitCost = Number(current.custo_unitario) || Number((current as any).preco_custo) || Number((current as any).preco_unitario) || 0;
+      return acc + (qty * unitCost);
+    }, 0);
+  }, [estoqueData]);
 
-  // Cruzando o histórico de vendas/consumo com saldo de estoque e buscando os dados de última venda, última compra e fornecedor
+  // Cruzando o histórico de vendas/consumo com saldo de estoque e buscando os dados de vendas e histórico de fornecedores
   const itensRuptura = useMemo(() => {
-    // Obter lista única de itens com atividade
+    const zeroStockNames = estoqueData.filter(e => (Number(e.quantidade) || 0) === 0).map(e => e.item.trim());
     const allItemsWithActivity = Array.from(new Set([
+      ...zeroStockNames,
       ...consumoData.map(c => c.item.trim()),
       ...historicoVendasData.map(v => v.item.trim())
     ])).filter(Boolean);
 
     return allItemsWithActivity.map(itemName => {
       const stockItem = estoqueData.find(e => e.item.toLowerCase().trim() === itemName.toLowerCase().trim());
-      const qtdEstoque = stockItem ? stockItem.quantidade : 0;
+      const qtdEstoque = stockItem ? (Number(stockItem.quantidade) || 0) : 0;
       
       // Apenas itens com saldo zerado ou ausente no estoque ativo
       if (qtdEstoque > 0) return null;
 
-      // 1. MÉDIA DE CONSUMO MÊS
+      // 1. DADOS DE CONSUMO
       const matchingConsumo = consumoData.filter(c => c.item.toLowerCase().trim() === itemName.toLowerCase().trim());
       let mediaConsumo = 0;
       if (matchingConsumo.length > 0) {
@@ -1935,48 +2077,511 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         const matchingSales = historicoVendasData.filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim());
         if (matchingSales.length > 0) {
           const totalSales = matchingSales.reduce((acc, cur) => acc + (Number(cur.quantidade) || 0), 0);
-          const uniqueMonths = Array.from(new Set(matchingSales.map(v => v.data_venda.substring(0, 7)))).length || 1;
+          const uniqueMonths = Array.from(new Set(matchingSales.map(v => (v.data_venda || '').substring(0, 7)))).length || 1;
           mediaConsumo = totalSales / uniqueMonths;
         }
       }
 
-      // Se não há consumo real, não é uma ruptura crítica
-      if (mediaConsumo === 0) return null;
-
-      // 2. ULTIMA VENDA
+      // 2. CRUZAMENTO DE VENDAS (Quantas vezes já foi vendido, quantidade total e receita)
       const matchingSalesForLast = historicoVendasData
         .filter(v => v.item.toLowerCase().trim() === itemName.toLowerCase().trim())
-        .sort((a, b) => b.data_venda.localeCompare(a.data_venda));
+        .sort((a, b) => (b.data_venda || '').localeCompare(a.data_venda || ''));
+
+      const totalTimesSold = matchingSalesForLast.length;
+      const totalQtySold = matchingSalesForLast.reduce((acc, cur) => acc + (Number(cur.quantidade) || 0), 0);
+      const totalRevenueSold = matchingSalesForLast.reduce((acc, cur) => acc + ((Number(cur.preco_venda) || Number(cur.preco_unitario) || 0) * (Number(cur.quantidade) || 0)), 0);
       const ultimaVenda = matchingSalesForLast.length > 0 ? matchingSalesForLast[0].data_venda : '—';
 
-      // 3. ULTIMA COMPRA
+      // 3. CRUZAMENTO DE COMPRAS E FORNECEDORES (Onde já foi comprado)
       const matchingPurchases = (historicoPrecosData || [])
         .filter(p => p.item.toLowerCase().trim() === itemName.toLowerCase().trim())
-        .sort((a, b) => b.data_compra.localeCompare(a.data_compra));
-      const ultimaCompra = matchingPurchases.length > 0 ? matchingPurchases[0].data_compra : '—';
+        .sort((a, b) => (b.data_compra || '').localeCompare(a.data_compra || ''));
 
-      // 4. ULTIMO FORNECEDOR
-      const ultimoFornecedor = matchingPurchases.length > 0 ? (matchingPurchases[0].fornecedor || '—') : '—';
+      const suppliersList = Array.from(new Set(matchingPurchases.map(p => (p.fornecedor || '').trim()).filter(Boolean)));
+      const totalPurchasesCount = matchingPurchases.length;
+      const totalQtyPurchased = matchingPurchases.reduce((acc, cur) => acc + (Number(cur.quantidade) || 0), 0);
+      const lastPurchase = matchingPurchases.length > 0 ? matchingPurchases[0] : null;
+      const ultimaCompra = lastPurchase ? lastPurchase.data_compra : '—';
+      const ultimoFornecedor = lastPurchase ? (lastPurchase.fornecedor || '—') : '—';
+      const ultimoPrecoCusto = lastPurchase ? (Number(lastPurchase.preco_unitario) || 0) : (Number(stockItem?.custo_unitario) || 0);
+
+      // Se não há consumo, venda, compra ou item cadastrado, ignora
+      if (mediaConsumo === 0 && totalTimesSold === 0 && totalPurchasesCount === 0 && !stockItem) return null;
 
       return {
         id: stockItem?.id || `ruptura-${itemName}`,
+        codigo: stockItem?.codigo || lastPurchase?.codigo_item || '—',
         item: itemName,
         mediaConsumo,
+        unidade: stockItem?.unidade || lastPurchase?.unidade || 'un',
+        quantidade: 0,
+        min_stock: stockItem?.min_stock || 0,
+        custo_unitario: ultimoPrecoCusto,
+        
+        // Vendas cruzadas
+        totalTimesSold,
+        totalQtySold,
+        totalRevenueSold,
         ultimaVenda,
+
+        // Compras cruzadas
+        suppliersList,
+        totalPurchasesCount,
+        totalQtyPurchased,
         ultimaCompra,
         ultimoFornecedor,
-        unidade: stockItem?.unidade || 'un',
-        quantidade: 0,
-        custo_unitario: stockItem?.custo_unitario || (matchingPurchases.length > 0 ? matchingPurchases[0].preco_unitario : 0)
+        lastPurchaseOrder: lastPurchase?.codigo_pedido || '—'
       };
     }).filter(Boolean) as any[];
   }, [estoqueData, consumoData, historicoVendasData, historicoPrecosData]);
+
+  // Função para Gerar Relatório em PDF de Ruptura cruzando histórico de vendas e fornecedores
+  const handleGenerateRupturaPdfReport = () => {
+    if (!itensRuptura || itensRuptura.length === 0) {
+      triggerToast('Nenhum item em ruptura (saldo zerado) encontrado para geração de relatório.');
+      return;
+    }
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const currentDate = new Date().toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      // Banner Superior
+      doc.setFillColor(15, 23, 42); // Slate 900
+      doc.rect(0, 0, 297, 24, 'F');
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RELATÓRIO DE DIAGNÓSTICO DE RUPTURA DE ESTOQUE (SALDO ZERADO)', 14, 11);
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Cruzamento do Histórico de Vendas Realizadas e Compras de Fornecedores', 14, 18);
+
+      doc.text(`Data de Emissão: ${currentDate}`, 283, 18, { align: 'right' });
+
+      // Caixa de Resumo Executivo
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 28, 269, 16, 2, 2, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(14, 28, 269, 16, 2, 2, 'S');
+
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RESUMO EXECUTIVO:', 18, 35);
+
+      doc.setFont('helvetica', 'normal');
+      doc.text('Total de Insumos Críticos com Saldo Zerado: ', 60, 35);
+      doc.setTextColor(225, 29, 72); // Rose 600
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${itensRuptura.length} produtos em ruptura`, 128, 35);
+
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'normal');
+      doc.text('|  Fontes Cruzadas: Vendas do Sistema & Compras de Fornecedores', 170, 35);
+
+      // Tabela Principal com Cruzamento
+      const tableColumns = [
+        'Código / Item Insumo',
+        'Consumo Mês',
+        'Vendas Realizadas (Quantas x Vendido)',
+        'Receita Vendas',
+        'Onde Já Foi Comprado (Fornecedores & Compras)',
+        'Último Custo / Data'
+      ];
+
+      const tableRows = itensRuptura.map(row => {
+        const salesInfo = row.totalTimesSold > 0
+          ? `${row.totalTimesSold}x vendido (${row.totalQtySold.toLocaleString('pt-BR')} ${row.unidade})\nÚltima venda: ${row.ultimaVenda !== '—' ? formatIsoDateToPtBr(row.ultimaVenda) : '—'}`
+          : 'Sem vendas diretas registradas';
+
+        const salesRevenue = row.totalRevenueSold > 0
+          ? `R$ ${row.totalRevenueSold.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '—';
+
+        const suppliersInfo = row.suppliersList && row.suppliersList.length > 0
+          ? `Fornecedor(es):\n• ${row.suppliersList.join('\n• ')}\n(${row.totalPurchasesCount} pedido(s) / ${row.totalQtyPurchased.toLocaleString('pt-BR')} un)`
+          : `Último: ${row.ultimoFornecedor} (${row.totalPurchasesCount || 0} compras)`;
+
+        const purchaseCost = row.custo_unitario > 0
+          ? `R$ ${row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n${row.ultimaCompra !== '—' ? formatIsoDateToPtBr(row.ultimaCompra) : '—'}`
+          : '—';
+
+        return [
+          `[${row.codigo}] ${row.item}`,
+          `${row.mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${row.unidade}/mês`,
+          salesInfo,
+          salesRevenue,
+          suppliersInfo,
+          purchaseCost
+        ];
+      });
+
+      autoTable(doc, {
+        head: [tableColumns],
+        body: tableRows,
+        startY: 48,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [15, 23, 42],
+          textColor: [255, 255, 255],
+          fontSize: 8.5,
+          fontStyle: 'bold',
+          cellPadding: 3
+        },
+        bodyStyles: {
+          fontSize: 8,
+          textColor: [51, 65, 85],
+          cellPadding: 3,
+          valign: 'middle'
+        },
+        columnStyles: {
+          0: { cellWidth: 55, fontStyle: 'bold' },
+          1: { cellWidth: 28, halign: 'center' },
+          2: { cellWidth: 58 },
+          3: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+          4: { cellWidth: 65 },
+          5: { cellWidth: 33, halign: 'center' }
+        },
+        didDrawPage: (data) => {
+          const pageCount = (doc as any).internal.getNumberOfPages();
+          doc.setFontSize(7);
+          doc.setTextColor(148, 163, 184);
+          doc.text(`Página ${data.pageNumber} de ${pageCount} - Módulo Compra Inteligente (Gestão Supply Chain)`, 14, 202);
+        }
+      });
+
+      doc.save(`relatorio_ruptura_saldo_zerado_${new Date().toISOString().substring(0, 10)}.pdf`);
+      triggerToast('Relatório PDF de Ruptura exportado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao gerar PDF de ruptura:', err);
+      triggerToast('Ocorreu um erro ao gerar o PDF de ruptura.');
+    }
+  };
+
+  const handleGenerateAttentionPdfReport = () => {
+    try {
+      const ALL_PDF_COLUMNS = [
+        { key: 'codigo', label: 'Código', align: 'left' as const, getVal: (i: any) => i.codigo || '—' },
+        { key: 'item', label: 'Descrição do Item', align: 'left' as const, getVal: (i: any) => i.item },
+        { key: 'estoqueAtual', label: 'Estoque', align: 'center' as const, getVal: (i: any) => `${i.estoqueAtual} ${i.unidade}` },
+        { key: 'consumoMensal', label: 'Consumo Mês', align: 'center' as const, getVal: (i: any) => `${i.consumoMensal.toFixed(1)} ${i.unidade}/mês` },
+        { key: 'motivos', label: 'Motivos da Atenção', align: 'left' as const, getVal: (i: any) => i.motivos.join(', ') },
+        { key: 'mesesDesejados', label: 'Período', align: 'center' as const, getVal: (i: any, m: number) => `${m} Mês(es)` },
+        { key: 'sugestaoUser', label: 'Sugestão Compra', align: 'center' as const, fontStyle: 'bold' as const, getVal: (i: any, m: number, qty: number) => `${qty} ${i.unidade}` },
+        { key: 'valorEstimado', label: 'Valor Estimado', align: 'right' as const, fontStyle: 'bold' as const, getVal: (i: any, m: number, qty: number, val: number) => `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+      ];
+
+      const activePdfCols = ALL_PDF_COLUMNS.filter(col => pdfColumnsConfig[col.key]);
+
+      if (activePdfCols.length === 0) {
+        triggerToast("Selecione ao menos uma coluna para gerar o PDF.");
+        return;
+      }
+
+      const doc = new jsPDF('landscape');
+      
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.rect(0, 0, 297, 28, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text("RELATÓRIO DE ITENS EM ATENÇÃO & SUGESTÃO DE COMPRA", 14, 15);
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')} | Módulo Compra Inteligente | ${activePdfCols.length} colunas selecionadas`, 14, 22);
+      
+      const tableHead = activePdfCols.map(c => c.label);
+
+      const tableRows = dadosItensEmAtencao.list.map(i => {
+        const custom = userCustomSuggestions[i.id] || {};
+        const m = custom.mesesDesejados !== undefined ? custom.mesesDesejados : globalMonthsSelection;
+        const finalQty = custom.sugestaoUser !== undefined ? custom.sugestaoUser : i.sugestaoUser;
+        const valEst = finalQty * i.custoUnitario;
+        
+        return activePdfCols.map(c => c.getVal(i, m, finalQty, valEst));
+      });
+
+      const colStylesMap: Record<number, any> = {};
+      activePdfCols.forEach((col, idx) => {
+        colStylesMap[idx] = {
+          ...(col.align ? { halign: col.align } : {}),
+          ...(col.fontStyle ? { fontStyle: col.fontStyle } : {}),
+        };
+      });
+
+      autoTable(doc, {
+        startY: 32,
+        head: [tableHead],
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [225, 29, 72], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        columnStyles: colStylesMap
+      });
+
+      doc.save(`Relatorio_Itens_Atencao_Sugestao_Compra_${new Date().toISOString().slice(0, 10)}.pdf`);
+      triggerToast("PDF de Sugestões de Compra exportado com sucesso!");
+    } catch (err) {
+      console.error("Erro ao gerar PDF:", err);
+      triggerToast("Erro ao exportar o relatório PDF.");
+    }
+  };
 
   // GIRO DE ESTOQUE: Consumo Anualizado / Estoque Médio
   // Estoque Médio = ValorTotalEstoque (Para simulação ou real)
   // Consumo Mensal Totalizado em Custo
   const custoConsumoMensalTotal = consumoData.reduce((acc, cur) => acc + cur.custo_total, 0);
   const giroEstoque = valorEstoqueTotal > 0 ? (custoConsumoMensalTotal * 12) / valorEstoqueTotal : 0;
+
+  // 1. CÁLCULO DE ITENS EM ESTOQUE SEM CONSUMO (FILTRO DInâmico: 3, 6, 9 e 12 Meses)
+  const dadosInatividadeEstoque = useMemo(() => {
+    if (!estoqueData || estoqueData.length === 0) {
+      return {
+        itensSemConsumoList: [],
+        countSemConsumo: 0,
+        valorTotalSemConsumo: 0,
+        percentualDoEstoque: 0
+      };
+    }
+
+    const now = new Date();
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(now.getMonth() - semConsumoMesesFiltro);
+    const cutoffIso = cutoffDate.toISOString().substring(0, 10);
+
+    // Itens em estoque com saldo positivo
+    const itensComSaldo = estoqueData.filter(e => (Number(e.quantidade) || 0) > 0);
+
+    const semConsumoList = itensComSaldo.map(stockItem => {
+      const itemName = stockItem.item.toLowerCase().trim();
+
+      // Verificar vendas recentes nos últimos X meses
+      const salesRecent = historicoVendasData.filter(v => 
+        v.item.toLowerCase().trim() === itemName &&
+        v.data_venda && v.data_venda >= cutoffIso
+      );
+
+      // Verificar consumo recente nos últimos X meses
+      const consumoRecent = consumoData.filter(c =>
+        c.item.toLowerCase().trim() === itemName &&
+        c.mes_ano && c.mes_ano >= cutoffIso.substring(0, 7)
+      );
+
+      // Se teve movimentação no período, o item não está inativo
+      if (salesRecent.length > 0 || consumoRecent.length > 0) return null;
+
+      // Buscar data da última venda/movimentação conhecida
+      const allSales = historicoVendasData
+        .filter(v => v.item.toLowerCase().trim() === itemName)
+        .sort((a, b) => (b.data_venda || '').localeCompare(a.data_venda || ''));
+      
+      const lastSaleDate = allSales.length > 0 ? allSales[0].data_venda : '—';
+      const qty = Number(stockItem.quantidade) || 0;
+      const unitCost = Number(stockItem.custo_unitario) || Number((stockItem as any).preco_custo) || 0;
+      const totalValue = qty * unitCost;
+
+      return {
+        id: stockItem.id,
+        codigo: stockItem.codigo || '—',
+        item: stockItem.item,
+        quantidade: qty,
+        unidade: stockItem.unidade || 'un',
+        custoUnitario: unitCost,
+        valorTotal: totalValue,
+        ultimaMovimentacao: lastSaleDate,
+        local: stockItem.local || 'Almoxarifado'
+      };
+    }).filter(Boolean) as any[];
+
+    const countSemConsumo = semConsumoList.length;
+    const valorTotalSemConsumo = semConsumoList.reduce((acc, item) => acc + item.valorTotal, 0);
+    const percentualDoEstoque = valorEstoqueTotal > 0 ? (valorTotalSemConsumo / valorEstoqueTotal) * 100 : 0;
+
+    return {
+      itensSemConsumoList: semConsumoList,
+      countSemConsumo,
+      valorTotalSemConsumo,
+      percentualDoEstoque
+    };
+  }, [estoqueData, historicoVendasData, consumoData, semConsumoMesesFiltro, valorEstoqueTotal]);
+
+  // 2. CÁLCULO DE ITENS COM RISCO DE DESCARTE POR VALIDADE (CONSIDERANDO SALDO REMANESCENTE)
+  const dadosRiscoValidade = useMemo(() => {
+    const today = new Date();
+    
+    // Mapear consumo médio mensal por item
+    const consumoMap: Record<string, number> = {};
+    consumoData.forEach(c => {
+      const key = c.item.toLowerCase().trim();
+      consumoMap[key] = (consumoMap[key] || 0) + (Number(c.quantidade_consumida) || 0);
+    });
+
+    const vendasMap: Record<string, { total: number; months: number }> = {};
+    historicoVendasData.forEach(v => {
+      const key = v.item.toLowerCase().trim();
+      if (!vendasMap[key]) vendasMap[key] = { total: 0, months: 1 };
+      vendasMap[key].total += (Number(v.quantidade) || 0);
+    });
+
+    const itemsWithValidity: any[] = [];
+
+    // Lotes de validade
+    validadeLotesData.forEach(lote => {
+      const stockItem = estoqueData.find(e => e.item.toLowerCase().trim() === lote.item.toLowerCase().trim());
+      const qty = Number(lote.quantidade) || Number(stockItem?.quantidade) || 0;
+      if (qty <= 0) return;
+
+      const unitCost = Number(lote.custo_unitario) || Number(stockItem?.custo_unitario) || 0;
+      const itemNameKey = lote.item.toLowerCase().trim();
+
+      let mediaConsumoMensal = consumoMap[itemNameKey] || 0;
+      if (mediaConsumoMensal === 0 && vendasMap[itemNameKey]) {
+        mediaConsumoMensal = vendasMap[itemNameKey].total / Math.max(1, vendasMap[itemNameKey].months);
+      }
+
+      const valDate = new Date(lote.validade);
+      const diffTime = valDate.getTime() - today.getTime();
+      const diasAteVencimento = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      let saldoRemanescenteEmRisco = 0;
+      let valorEmRisco = 0;
+
+      if (diasAteVencimento <= 0) {
+        // Já vencido
+        saldoRemanescenteEmRisco = qty;
+        valorEmRisco = qty * unitCost;
+      } else {
+        // A vencer: calcula a capacidade de consumo até o vencimento
+        const mesesAteVencimento = diasAteVencimento / 30;
+        const consumoProjetadoAteValidade = mediaConsumoMensal * mesesAteVencimento;
+        saldoRemanescenteEmRisco = Math.max(0, qty - consumoProjetadoAteValidade);
+        valorEmRisco = saldoRemanescenteEmRisco * unitCost;
+      }
+
+      if (saldoRemanescenteEmRisco > 0) {
+        itemsWithValidity.push({
+          id: lote.id || `val-${lote.item}-${lote.numero_lote}`,
+          item: lote.item,
+          codigo: stockItem?.codigo || '—',
+          lote: lote.numero_lote || '—',
+          validade: lote.validade,
+          diasAteVencimento,
+          mediaConsumoMensal,
+          quantidadeEstoque: qty,
+          unidade: stockItem?.unidade || 'un',
+          custoUnitario: unitCost,
+          saldoRemanescenteEmRisco,
+          valorEmRisco,
+          isExpired: diasAteVencimento <= 0
+        });
+      }
+    });
+
+    // Validar também itens no estoque com data de validade direta
+    estoqueData.forEach(e => {
+      const qty = Number(e.quantidade) || 0;
+      if (qty <= 0) return;
+      
+      const valStr = (e as any).validade || (e as any).data_validade || (e as any).data_vencimento;
+      if (!valStr) return;
+
+      const exists = itemsWithValidity.some(i => i.item.toLowerCase().trim() === e.item.toLowerCase().trim());
+      if (exists) return;
+
+      const unitCost = Number(e.custo_unitario) || 0;
+      const itemNameKey = e.item.toLowerCase().trim();
+
+      let mediaConsumoMensal = consumoMap[itemNameKey] || 0;
+      if (mediaConsumoMensal === 0 && vendasMap[itemNameKey]) {
+        mediaConsumoMensal = vendasMap[itemNameKey].total / Math.max(1, vendasMap[itemNameKey].months);
+      }
+
+      const valDate = new Date(valStr);
+      const diffTime = valDate.getTime() - today.getTime();
+      const diasAteVencimento = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      let saldoRemanescenteEmRisco = 0;
+      let valorEmRisco = 0;
+
+      if (diasAteVencimento <= 0) {
+        saldoRemanescenteEmRisco = qty;
+        valorEmRisco = qty * unitCost;
+      } else {
+        const mesesAteVencimento = diasAteVencimento / 30;
+        const consumoProjetadoAteValidade = mediaConsumoMensal * mesesAteVencimento;
+        saldoRemanescenteEmRisco = Math.max(0, qty - consumoProjetadoAteValidade);
+        valorEmRisco = saldoRemanescenteEmRisco * unitCost;
+      }
+
+      if (saldoRemanescenteEmRisco > 0) {
+        itemsWithValidity.push({
+          id: e.id,
+          item: e.item,
+          codigo: e.codigo || '—',
+          lote: (e as any).lote || '—',
+          validade: valStr,
+          diasAteVencimento,
+          mediaConsumoMensal,
+          quantidadeEstoque: qty,
+          unidade: e.unidade || 'un',
+          custoUnitario: unitCost,
+          saldoRemanescenteEmRisco,
+          valorEmRisco,
+          isExpired: diasAteVencimento <= 0
+        });
+      }
+    });
+
+    const countRiscoValidade = itemsWithValidity.length;
+    const qtdUnidadesRiscoValidade = itemsWithValidity.reduce((acc, item) => acc + item.saldoRemanescenteEmRisco, 0);
+    const valorTotalRiscoValidade = itemsWithValidity.reduce((acc, item) => acc + item.valorEmRisco, 0);
+
+    return {
+      itemsWithValidity,
+      countRiscoValidade,
+      qtdUnidadesRiscoValidade,
+      valorTotalRiscoValidade
+    };
+  }, [validadeLotesData, estoqueData, consumoData, historicoVendasData]);
+
+  // 3. ESTRUTURAÇÃO DO CÁLCULO OPERACIONAL E CICLO FINANCEIRO
+  const calculoCicloOperacional = useMemo(() => {
+    // PME = (Valor do Estoque / Custo Consumo Mensal Total) * 30
+    const pme = custoConsumoMensalTotal > 0 
+      ? (valorEstoqueTotal / custoConsumoMensalTotal) * 30 
+      : (365 / Math.max(1, giroEstoque));
+
+    const pmr = Math.max(0, pmrDias || 30);
+    const pmpf = Math.max(0, pmpfDias || 45);
+
+    const cicloOperacional = pme + pmr;
+    const cicloFinanceiro = cicloOperacional - pmpf; // NCG em Dias
+
+    return {
+      pme: Math.round(pme),
+      pmr: Math.round(pmr),
+      pmpf: Math.round(pmpf),
+      cicloOperacional: Math.round(cicloOperacional),
+      cicloFinanceiro: Math.round(cicloFinanceiro),
+      custoConsumoMensalTotal
+    };
+  }, [valorEstoqueTotal, consumoData, giroEstoque, pmrDias, pmpfDias]);
 
   // CURVA ABC: Classificação Dinâmica baseada nos filtros de Frequência, Consumo e Lucratividade
   const itemsABCClassification = useMemo(() => {
@@ -2068,6 +2673,189 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     }
     return `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
+
+  // CALCULO DA CURVA ABC POR VALOR DE ESTOQUE (VALOR IMOBILIZADO)
+  const curvaAbcEstoque = useMemo(() => {
+    const itemsWithValue = estoqueData.map(e => {
+      const qty = Number(e.quantidade) || 0;
+      const unitCost = Number(e.custo_unitario) || Number((e as any).preco_custo) || 0;
+      const totalVal = qty * unitCost;
+      return {
+        id: e.id,
+        codigo: e.codigo || '—',
+        item: e.item,
+        quantidade: qty,
+        unidade: e.unidade || 'un',
+        custoUnitario: unitCost,
+        valorTotal: totalVal
+      };
+    }).filter(i => i.valorTotal > 0);
+
+    const grandTotalEstoque = itemsWithValue.reduce((acc, i) => acc + i.valorTotal, 0) || 1;
+    const sorted = [...itemsWithValue].sort((a, b) => b.valorTotal - a.valorTotal);
+
+    let cumulative = 0;
+    const classified = sorted.map(i => {
+      cumulative += i.valorTotal;
+      const pctAcc = (cumulative / grandTotalEstoque) * 100;
+      let classification: 'A' | 'B' | 'C' = 'A';
+      if (pctAcc <= 80) classification = 'A';
+      else if (pctAcc <= 95) classification = 'B';
+      else classification = 'C';
+
+      return {
+        ...i,
+        pctOfTotal: (i.valorTotal / grandTotalEstoque) * 100,
+        classification
+      };
+    });
+
+    const itemsA = classified.filter(i => i.classification === 'A');
+    const itemsB = classified.filter(i => i.classification === 'B');
+    const itemsC = classified.filter(i => i.classification === 'C');
+
+    const valorA = itemsA.reduce((acc, i) => acc + i.valorTotal, 0);
+    const valorB = itemsB.reduce((acc, i) => acc + i.valorTotal, 0);
+    const valorC = itemsC.reduce((acc, i) => acc + i.valorTotal, 0);
+
+    return {
+      classified,
+      itemsA,
+      itemsB,
+      itemsC,
+      countA: itemsA.length,
+      countB: itemsB.length,
+      countC: itemsC.length,
+      valorA,
+      valorB,
+      valorC,
+      pctA: (valorA / grandTotalEstoque) * 100,
+      pctB: (valorB / grandTotalEstoque) * 100,
+      pctC: (valorC / grandTotalEstoque) * 100,
+      grandTotalEstoque
+    };
+  }, [estoqueData]);
+
+  // ITENS EM ATENÇÃO: Cruzamento de estoque, consumo, vendas, validade e relatório de solicitações
+  const dadosItensEmAtencao = useMemo(() => {
+    const consumoMap: Record<string, { totalQty: number; count: number }> = {};
+    consumoData.forEach(c => {
+      const key = c.item.toLowerCase().trim();
+      if (!consumoMap[key]) consumoMap[key] = { totalQty: 0, count: 0 };
+      consumoMap[key].totalQty += (Number(c.quantidade_consumida) || 0);
+      consumoMap[key].count += 1;
+    });
+
+    const vendasMap: Record<string, { totalQty: number; count: number }> = {};
+    historicoVendasData.forEach(v => {
+      const key = v.item.toLowerCase().trim();
+      if (!vendasMap[key]) vendasMap[key] = { totalQty: 0, count: 0 };
+      vendasMap[key].totalQty += (Number(v.quantidade) || 0);
+      vendasMap[key].count += 1;
+    });
+
+    const solicitacoesMap: Record<string, { totalQty: number; timesRequested: number }> = {};
+    relatorioSolicitacoesData.forEach(s => {
+      if (s.status !== 'ATENDIDO') {
+        const key = s.item.toLowerCase().trim();
+        if (!solicitacoesMap[key]) solicitacoesMap[key] = { totalQty: 0, timesRequested: 0 };
+        solicitacoesMap[key].totalQty += (Number(s.quantidade_pedida) || 0);
+        solicitacoesMap[key].timesRequested += (Number(s.vezes_procurado) || 1);
+      }
+    });
+
+    const today = new Date();
+    const validade30dMap: Record<string, boolean> = {};
+    validadeLotesData.forEach(l => {
+      const parsedVal = new Date(parseValidadeDate(l.validade));
+      const diffDays = Math.ceil((parsedVal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays <= 30) {
+        const key = l.item.toLowerCase().trim();
+        validade30dMap[key] = true;
+      }
+    });
+
+    const allNames = Array.from(new Set([
+      ...estoqueData.map(e => e.item.trim()),
+      ...historicoVendasData.map(v => v.item.trim()),
+      ...consumoData.map(c => c.item.trim()),
+      ...relatorioSolicitacoesData.map(s => s.item.trim())
+    ])).filter(Boolean);
+
+    const list: any[] = [];
+    let countFalta60d = 0;
+    let countVenc30d = 0;
+    let countSolicitadas = 0;
+
+    allNames.forEach(itemName => {
+      const key = itemName.toLowerCase().trim();
+      const stockItem = estoqueData.find(e => e.item.toLowerCase().trim() === key);
+
+      const estoqueAtual = Number(stockItem?.quantidade) || 0;
+      const codigo = stockItem?.codigo || '—';
+      const unidade = stockItem?.unidade || 'un';
+      const custoUnitario = Number(stockItem?.custo_unitario) || Number((stockItem as any)?.preco_custo) || 0;
+
+      let consumoMensal = 0;
+      if (consumoMap[key]) {
+        consumoMensal = consumoMap[key].totalQty / Math.max(1, consumoMap[key].count);
+      } else if (vendasMap[key]) {
+        consumoMensal = vendasMap[key].totalQty / Math.max(1, Math.ceil(vendasMap[key].count / 2));
+      }
+
+      const motivos: string[] = [];
+      let isAtenção = false;
+
+      if (consumoMensal > 0 && estoqueAtual < (consumoMensal * 2)) {
+        isAtenção = true;
+        motivos.push('Risco de Falta < 60d');
+        countFalta60d++;
+      }
+
+      if (validade30dMap[key] && (consumoMensal > 0 || (vendasMap[key]?.count || 0) > 0)) {
+        isAtenção = true;
+        motivos.push('Vencimento < 30d c/ Recorrência');
+        countVenc30d++;
+      }
+
+      if (solicitacoesMap[key] && (solicitacoesMap[key].timesRequested >= 1 || solicitacoesMap[key].totalQty > estoqueAtual)) {
+        isAtenção = true;
+        motivos.push(`Alta Procura (${solicitacoesMap[key].timesRequested}x)`);
+        countSolicitadas++;
+      }
+
+      if (isAtenção) {
+        const itemId = stockItem?.id || `atencao-${key}`;
+        const customObj = userCustomSuggestions[itemId];
+
+        const mesesDesejados = customObj?.mesesDesejados !== undefined ? customObj.mesesDesejados : globalMonthsSelection;
+        const sugestaoCalc = Math.max(0, Math.ceil((mesesDesejados * consumoMensal) - estoqueAtual));
+        const sugestaoFinal = customObj?.sugestaoUser !== undefined ? customObj.sugestaoUser : sugestaoCalc;
+
+        list.push({
+          id: itemId,
+          codigo,
+          item: itemName,
+          estoqueAtual,
+          unidade,
+          consumoMensal,
+          custoUnitario,
+          motivos,
+          mesesDesejados,
+          sugestaoCalc,
+          sugestaoUser: sugestaoFinal,
+          valorEstimado: sugestaoFinal * custoUnitario
+        });
+      }
+    });
+
+    return {
+      list,
+      countFalta60d,
+      countVenc30d,
+      countSolicitadas
+    };
+  }, [estoqueData, consumoData, historicoVendasData, validadeLotesData, relatorioSolicitacoesData, userCustomSuggestions, globalMonthsSelection]);
 
   // ROTINA DO ASSISTENTE IA (Livre acesso para cruzamento de dados, cumprindo o critério fidedigno)
   const handleSendChatMessage = async (alternativeQuery?: string) => {
@@ -3323,8 +4111,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             {activeSubTab === 'indicators' && (
               <div className="space-y-6">
                 
-                {/* 5 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
+                {/* 6 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3.5">
                   <button
                     onClick={() => setActiveSubData('estoque')}
                     className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
@@ -3413,6 +4201,24 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     </div>
                     <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">5. Histórico de Vendas</h3>
                     {activeSubData === 'historico_vendas' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveSubData('solicitacoes' as any)}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      (activeSubData as string) === 'solicitacoes' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${(activeSubData as string) === 'solicitacoes' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <FileText className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {relatorioSolicitacoesData.length} solicitações
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">6. Relatório de Solicitações</h3>
+                    {(activeSubData as string) === 'solicitacoes' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
                   </button>
                 </div>
 
@@ -4045,6 +4851,22 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                             </tbody>
                           </table>
                         </div>
+
+                        {/* Rodapé Consolidado do Estoque Atual */}
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col sm:flex-row justify-between items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <Package className="h-4 w-4 text-indigo-600 shrink-0" />
+                            <span className="text-xs font-bold text-slate-700">
+                              Base: Saldo de Estoque Atual (<strong className="text-slate-900 font-mono">{estoqueData.length}</strong> insumos cadastrados)
+                            </span>
+                          </div>
+                          <div className="bg-white border border-slate-200 px-3.5 py-1.5 rounded-xl shadow-2xs flex items-center gap-2">
+                            <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Valor do Estoque Atual (Soma Custo Unit. × Qtd):</span>
+                            <span className="font-mono font-black text-indigo-700 text-sm">
+                              R$ {valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                      )}
 
@@ -4603,6 +5425,100 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </div>
                     )}
 
+                    {/* BASE 6: RELATÓRIO DE SOLICITAÇÕES DE COMPRA */}
+                    {(activeSubData as string) === 'solicitacoes' && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div>
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-emerald-600" />
+                              Relatório de Solicitações e Demandas de Clientes / Departamentos
+                            </h3>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Consolidado de itens solicitados por clientes ou setores que geraram procura frequente para apontar risco de ruptura ou compra.
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400">Total:</span>
+                            <span className="bg-emerald-50 text-emerald-800 font-mono font-black text-xs px-2.5 py-1 rounded-lg border border-emerald-100">
+                              {getFilteredSolicitacoesRegisters().length} solicitações
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Tabela de Solicitações */}
+                        <div className="overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
+                          <table className="min-w-[900px] w-full text-left bg-white rounded-xl table-fixed">
+                            <thead>
+                              <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 text-left bg-slate-50/50">
+                                <th className="pb-2 pt-3 px-3 w-[15%]">Código</th>
+                                <th className="pb-2 pt-3 w-[30%]">Insumo / Descrição</th>
+                                <th className="pb-2 pt-3 w-[20%]">Solicitante</th>
+                                <th className="pb-2 pt-3 text-center w-[10%]">Qtd Pedida</th>
+                                <th className="pb-2 pt-3 text-center w-[10%]">Vezes Procurado</th>
+                                <th className="pb-2 pt-3 text-center w-[10%]">Status</th>
+                                <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                              {getFilteredSolicitacoesRegisters().map((sol) => (
+                                <tr key={sol.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-2.5 px-3">
+                                    <span className="font-mono font-bold text-indigo-700 bg-indigo-50/60 px-2 py-1 rounded-lg border border-indigo-100/40 text-[10px] inline-block">
+                                      {sol.codigo || '—'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 font-bold text-slate-900 truncate" title={sol.item}>
+                                    {sol.item}
+                                    <span className="block text-[9px] font-normal text-slate-400">{sol.motivo_ruptura || 'Demanda recorrente'}</span>
+                                  </td>
+                                  <td className="py-2.5 text-slate-600 font-medium truncate">
+                                    {sol.solicitante || 'Atendimento / Clientes'}
+                                  </td>
+                                  <td className="py-2.5 text-center font-mono font-extrabold text-slate-800">
+                                    {sol.quantidade_pedida} un
+                                  </td>
+                                  <td className="py-2.5 text-center font-mono">
+                                    <span className="bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-200/60 text-[10px]">
+                                      {sol.vezes_procurado}x
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 text-center">
+                                    <button
+                                      onClick={() => handleToggleStatusSolicitacao(sol.id)}
+                                      className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold border cursor-pointer transition-all ${
+                                        sol.status === 'PENDENTE' ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' :
+                                        sol.status === 'EM_COMPRA' ? 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100' :
+                                        'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                      }`}
+                                      title="Clique para alternar o status"
+                                    >
+                                      {sol.status === 'PENDENTE' && '⌛ Pendente'}
+                                      {sol.status === 'EM_COMPRA' && '🛒 Em Compra'}
+                                      {sol.status === 'ATENDIDO' && '✅ Atendido'}
+                                    </button>
+                                  </td>
+                                  <td className="py-2.5 text-center">
+                                    <button onClick={() => handleDeleteSolicitacao(sol.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                      <Trash className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {getFilteredSolicitacoesRegisters().length === 0 && (
+                                <tr>
+                                  <td colSpan={7} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                    Nenhuma solicitação de compra registrada.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
 
                 </div>
@@ -4681,212 +5597,569 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             )}
 
             {/* ========================================================= */}
-            {/* TAB OUTCOME 2: GESTÃO DE ESTOQUE (QUOTES / INDICATORS)     */}
+            {/* TAB OUTCOME 2: GESTÃO DE ESTOQUE (ANÁLISE E CICLO OPERACIONAL) */}
             {/* ========================================================= */}
             {activeSubTab === 'quotes' && (
-              <div className="space-y-6">
+              <div className="space-y-6 font-sans">
                 
-                {/* 1. Bento Grid superior de Indicadores Chave de Estoque */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  
-                  {/* Card A: VALOR DO ESTOQUE ATUAL */}
-                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2">
-                    <div className="flex justify-between items-start">
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Valor do Estoque Atual</span>
-                      <Package className="h-4.5 w-4.5 text-indigo-505" />
+                {/* BANNER / CABEÇALHO DO PAINEL DE ANÁLISE ESTRATÉGICA */}
+                <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-widest">
+                        Gestão Estratégica de Supply Chain
+                      </span>
+                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-widest flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" /> Integração DRE
+                      </span>
                     </div>
-                    <div className="text-2xl font-black text-slate-800 font-mono">
-                      R$ {valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </div>
-                    <div className="text-[10px] text-slate-500 leading-normal">
-                      Custo total consolidado de capital imobiliário parado em almoxarifados para **{estoqueData.length}** produtos cadastrados.
-                    </div>
-                  </div>
-
-                  {/* Card B: GIRO DE ESTOQUE (Rotatividade anual) */}
-                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2 relative">
-                    <div className="flex justify-between items-start">
-                      <span className="text-[10px] text-slate-405 font-extrabold uppercase tracking-widest block">Giro Médio Anual</span>
-                      <RefreshCw className="h-4.5 w-4.5 text-emerald-500" />
-                    </div>
-                    <div className="text-2xl font-black text-emerald-650 font-mono">
-                      {giroEstoque.toFixed(1)}x <span className="text-xs font-bold text-slate-450">rotatividades</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500">
-                      Indica que seus insumos renovam-se em média **{(365 / Math.max(1, giroEstoque)).toFixed(0)} dias** antes do escoamento.
+                    <h3 className="text-xl font-black tracking-tight text-white mt-1.5 flex items-center gap-2">
+                      <Package className="h-6 w-6 text-indigo-400" />
+                      Painel Analítico de Estoque & Ciclo Operacional
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                      Diagnóstico consolidado do capital imobilizado em estoque, insumos sem giro, análise preditiva de descarte por validade, e estruturação do Ciclo Financeiro alinhado ao PMPF do DRE Inteligente.
                     </p>
                   </div>
 
-                  {/* Card C: PRODUTOS EM RUPTURA COM CONSUMO ATIVO */}
-                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-2 relative">
+                  <div className="flex items-center gap-3 bg-slate-800/80 p-3 rounded-2xl border border-slate-700 shrink-0">
+                    <div className="text-right">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Capital do Estoque Total</span>
+                      <span className="text-lg font-black font-mono text-emerald-400">
+                        R$ {valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1. PAINÉIS SUPERIORES ESTRUTURADOS (VALOR DE ESTOQUE, GIRO DE ESTOQUE, ITENS EM ATENÇÃO) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  
+                  {/* CARD 1: VALOR DE ESTOQUE (EXPANSÍVEL PARA SABER POR CURVA ABC) */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between">
                     <div className="flex justify-between items-start">
-                      <span className="text-[10px] text-slate-405 font-extrabold uppercase tracking-widest block">Ruptura (Saldo Zerado)</span>
-                      <AlertTriangle className="h-4.5 w-4.5 text-rose-500" />
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
+                          VALOR DE ESTOQUE
+                        </span>
+                        <div className="text-2xl font-black text-slate-900 font-mono mt-1">
+                          R$ {valorEstoqueTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                        <Package className="h-5 w-5" />
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-rose-650 font-mono">
-                      {itensRuptura.length} itens <span className="text-xs font-bold text-slate-450">críticos</span>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between text-[11px] font-medium text-slate-600">
+                        <span>{estoqueData.filter(i => (Number(i.quantidade) || 0) > 0).length} itens cadastrados</span>
+                        <button
+                          onClick={() => setIsAbcExpanded(!isAbcExpanded)}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{isAbcExpanded ? 'Ocultar Curva ABC' : 'Expandir Curva ABC'}</span>
+                          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isAbcExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+                      </div>
+
+                      {/* Visão Rápida / Expansão da Curva ABC */}
+                      {isAbcExpanded && (
+                        <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 space-y-2 text-xs animate-in fade-in duration-200">
+                          <div className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Classificação ABC por Valor Total:</div>
+                          <div className="grid grid-cols-3 gap-2 text-center font-mono text-[10px]">
+                            <div className="bg-rose-50 border border-rose-100 p-2 rounded-xl">
+                              <span className="block font-black text-rose-700">CURVA A (80%)</span>
+                              <strong className="text-slate-900 block mt-0.5">{curvaAbcEstoque.countA} itens</strong>
+                              <span className="text-[9px] text-slate-500">R$ {curvaAbcEstoque.valueA.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                            </div>
+                            <div className="bg-amber-50 border border-amber-100 p-2 rounded-xl">
+                              <span className="block font-black text-amber-700">CURVA B (15%)</span>
+                              <strong className="text-slate-900 block mt-0.5">{curvaAbcEstoque.countB} itens</strong>
+                              <span className="text-[9px] text-slate-500">R$ {curvaAbcEstoque.valueB.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                            </div>
+                            <div className="bg-blue-50 border border-blue-100 p-2 rounded-xl">
+                              <span className="block font-black text-blue-700">CURVA C (5%)</span>
+                              <strong className="text-slate-900 block mt-0.5">{curvaAbcEstoque.countC} itens</strong>
+                              <span className="text-[9px] text-slate-500">R$ {curvaAbcEstoque.valueC.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="text-[10px] text-rose-700 bg-rose-50/70 p-1.5 rounded-lg font-bold flex items-center gap-1.5 leading-tight">
-                      <span>⚠️ {itensRuptura.map(i => i.item.substring(0, 15)).join(', ') || 'Nenhum insumo crítico'}</span>
+                  </div>
+
+                  {/* CARD 2: GIRO DE ESTOQUE (VALOR SIMPLES) */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
+                          GIRO DE ESTOQUE
+                        </span>
+                        <div className="text-2xl font-black text-indigo-900 font-mono mt-1">
+                          {giroEstoque.toFixed(1)}x <span className="text-xs font-bold text-slate-400">/ ano</span>
+                        </div>
+                      </div>
+                      <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                        <TrendingUp className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
+                      <span>Prazo Médio de Estoque (PME):</span>
+                      <span className="bg-emerald-50 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-100">
+                        {calculoCicloOperacional.pme} dias
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* CARD 3: ITENS EM ATENÇÃO (REGRAS DE VENDAS, VALIDADE, RUPTURA E SOLICITAÇÕES) */}
+                  <div className="bg-white border border-rose-200 rounded-3xl p-5 shadow-2xs space-y-3 relative flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[10px] text-rose-600 font-extrabold uppercase tracking-widest block">
+                          ITENS EM ATENÇÃO
+                        </span>
+                        <div className="text-2xl font-black text-rose-650 font-mono mt-1">
+                          {dadosItensEmAtencao.list.length} <span className="text-xs font-bold text-slate-400">itens requerem reposição</span>
+                        </div>
+                      </div>
+                      <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Cruzamento automatizado: histórico de vendas, estoque zerado/baixo (&lt;60d), validade (&lt;30d) e alta procura em solicitações.
+                    </p>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-500 font-medium">Possível Ruptura ou Descarte</span>
+                      <button
+                        onClick={() => setIsAttentionModalExpanded(true)}
+                        className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Maximize2 className="h-3.5 w-3.5" />
+                        <span>Expandir Sugestões de Compra</span>
+                      </button>
                     </div>
                   </div>
 
                 </div>
 
-                {/* 2. Visualizadores de Alerta de Ruptura & ABC em Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* 3. SELETOR DE ABAS ANALÍTICAS DAS TABELAS DETALHADAS */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-2xs space-y-4">
                   
-                  {/* ESQUERDA / TOPO: PAINEL RUPTURA (SALDO ZERADO) */}
-                  <div className="lg:col-span-12 bg-white border border-slate-200 rounded-3xl p-6 shadow-2xs space-y-4">
-                    <div>
-                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                        <AlertTriangle className="h-4.5 w-4.5 text-rose-500 shrink-0" />
-                        Ruptura (Saldo Zerado)
-                      </h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Cruzamento de histórico de vendas e consumo com saldo de estoque ativo. Identifica insumos zerados que contêm consumo registrado.
-                      </p>
+                  {/* BARRA DE NAVEGAÇÃO DE VISÕES */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => setActiveAnalysisTab('semConsumo')}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                          activeAnalysisTab === 'semConsumo'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <Clock className="h-4 w-4" />
+                        <span>Insumos Sem Consumo ({dadosInatividadeEstoque.countSemConsumo})</span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveAnalysisTab('riscoValidade')}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                          activeAnalysisTab === 'riscoValidade'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <AlertCircle className="h-4 w-4" />
+                        <span>Risco de Validade ({dadosRiscoValidade.countRiscoValidade})</span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveAnalysisTab('ruptura')}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                          activeAnalysisTab === 'ruptura'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <AlertTriangle className="h-4 w-4" />
+                        <span>Insumos em Ruptura ({itensRuptura.length})</span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveAnalysisTab('curvaAbc')}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                          activeAnalysisTab === 'curvaAbc'
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <Layers className="h-4 w-4" />
+                        <span>Curva ABC ({countA + countB + countC})</span>
+                      </button>
                     </div>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left bg-white font-sans text-[11px] min-w-[700px]">
-                        <thead>
-                          <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-2">
-                            <th className="pb-2">ITEM</th>
-                            <th className="pb-2 text-center">MÉDIA DE CONSUMO MÊS</th>
-                            <th className="pb-2 text-center">ÚLTIMA VENDA</th>
-                            <th className="pb-2 text-center">ÚLTIMA COMPRA</th>
-                            <th className="pb-2">ÚLTIMO FORNECEDOR</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50 text-slate-700">
-                          {itensRuptura.length > 0 ? (
-                            itensRuptura.map(row => {
-                              return (
-                                <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                                  <td className="py-3 font-bold text-slate-900">{row.item}</td>
-                                  <td className="py-3 text-center font-mono font-semibold text-rose-600 bg-rose-50/40 px-2.5 rounded-lg inline-block my-1">
-                                    {row.mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}/mês
-                                  </td>
-                                  <td className="py-3 text-center font-mono text-slate-500">
-                                    {row.ultimaVenda !== '—' ? formatIsoDateToPtBr(row.ultimaVenda) : '—'}
-                                  </td>
-                                  <td className="py-3 text-center font-mono text-slate-500">
-                                    {row.ultimaCompra !== '—' ? formatIsoDateToPtBr(row.ultimaCompra) : '—'}
-                                  </td>
-                                  <td className="py-3 font-medium text-slate-800">{row.ultimoFornecedor}</td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan={5} className="text-center py-8 text-slate-400 text-xs font-semibold">
-                                Nenhuma ruptura (itens com saldo zerado e consumo ativo) detectada no sistema!
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                    {activeAnalysisTab === 'ruptura' && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsRupturaExpanded(true)}
+                          className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                        >
+                          <Maximize2 className="h-3.5 w-3.5" />
+                          <span>Expandir / PDF</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* DIREITA / INFERIOR: CLASSIFICADOS PELA CURVA ABC */}
-                  <div className="lg:col-span-12 bg-white border border-slate-200 rounded-3xl p-6 shadow-2xs space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+                  {/* SUB-ABA 1: DETALHAMENTO DE INSUMOS SEM CONSUMO */}
+                  {activeAnalysisTab === 'semConsumo' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                            Relação de Insumos Sem Giro nos Últimos {semConsumoMesesFiltro} Meses
+                          </h4>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Capital imobilizado total: <strong className="text-amber-700 font-mono">R$ {dadosInatividadeEstoque.valorTotalSemConsumo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({dadosInatividadeEstoque.percentualDoEstoque.toFixed(1)}% do estoque total).
+                          </p>
+                        </div>
+
+                        {/* Botões do filtro direto na tabela */}
+                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                          <span className="text-[10px] font-extrabold text-slate-500 px-2">Período:</span>
+                          {[3, 6, 9, 12].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setSemConsumoMesesFiltro(m)}
+                              className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg cursor-pointer ${
+                                semConsumoMesesFiltro === m ? 'bg-white text-amber-800 shadow-2xs font-black' : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {m} Meses
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                        <table className="w-full text-left bg-white font-sans text-xs">
+                          <thead>
+                            <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                              <th className="p-3">Código & Item</th>
+                              <th className="p-3 text-center">Saldo em Estoque</th>
+                              <th className="p-3 text-right">Custo Unitário</th>
+                              <th className="p-3 text-right">Valor Total Parado</th>
+                              <th className="p-3 text-center">Última Movimentação</th>
+                              <th className="p-3 text-center">Localização</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                            {dadosInatividadeEstoque.itensSemConsumoList.length > 0 ? (
+                              dadosInatividadeEstoque.itensSemConsumoList.map(row => (
+                                <tr key={row.id} className="hover:bg-amber-50/40 transition-colors">
+                                  <td className="p-3">
+                                    <div className="font-bold text-slate-900">{row.item}</div>
+                                    <div className="text-[10px] text-slate-400 font-mono">Cód: {row.codigo}</div>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">
+                                      {row.quantidade.toLocaleString('pt-BR')} {row.unidade}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right font-mono text-slate-600">
+                                    R$ {row.custoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-black text-amber-800">
+                                    R$ {row.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-3 text-center font-mono text-slate-500 text-[11px]">
+                                    {row.ultimaMovimentacao !== '—' ? formatIsoDateToPtBr(row.ultimaMovimentacao) : 'Sem registro prévio'}
+                                  </td>
+                                  <td className="p-3 text-center text-slate-500 font-medium text-[11px]">
+                                    {row.local}
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                  Nenhum insumo inativo (sem consumo) encontrado nos últimos {semConsumoMesesFiltro} meses.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SUB-ABA 2: DETALHAMENTO DE RISCO DE VALIDADE (SALDO REMANESCENTE) */}
+                  {activeAnalysisTab === 'riscoValidade' && (
+                    <div className="space-y-4">
                       <div>
-                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
-                          <Layers className="h-4.5 w-4.5 text-indigo-650" />
-                          Gráfico da Curva ABC
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                          Análise Preditiva de Descarte por Vencimento (Cruzamento de Consumo Mês x Data de Validade)
                         </h4>
                         <p className="text-[10px] text-slate-400 mt-0.5">
-                          Metodologia ABC (Classificação: Curva A 70%, Curva B 20%, Curva C 10%). Analise de relevância dos insumos.
+                          Insumos onde a velocidade de consumo projetada não é suficiente para escoar o saldo total antes do vencimento.
                         </p>
                       </div>
-                      
-                      <div className="flex bg-slate-100 p-0.5 rounded-xl self-start sm:self-center border border-slate-200">
-                        <button
-                          onClick={() => setCurvaAbcFiltro('frequencia')}
-                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
-                            curvaAbcFiltro === 'frequencia' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          Frequência
-                        </button>
-                        <button
-                          onClick={() => setCurvaAbcFiltro('consumo')}
-                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
-                            curvaAbcFiltro === 'consumo' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          Consumo
-                        </button>
-                        <button
-                          onClick={() => setCurvaAbcFiltro('lucro')}
-                          className={`px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-wide rounded-lg transition-all ${
-                            curvaAbcFiltro === 'lucro' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          Lucratividade
-                        </button>
+
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                        <table className="w-full text-left bg-white font-sans text-xs">
+                          <thead>
+                            <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                              <th className="p-3">Insumo & Lote</th>
+                              <th className="p-3 text-center">Data Validade</th>
+                              <th className="p-3 text-center">Dias Restantes</th>
+                              <th className="p-3 text-center">Consumo Mês</th>
+                              <th className="p-3 text-center">Estoque Atual</th>
+                              <th className="p-3 text-center bg-rose-950 text-rose-300">Saldo Remanescente em Risco</th>
+                              <th className="p-3 text-right bg-rose-950 text-rose-300">Valor em Risco (R$)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                            {dadosRiscoValidade.itemsWithValidity.length > 0 ? (
+                              dadosRiscoValidade.itemsWithValidity.map(row => (
+                                <tr key={row.id} className="hover:bg-rose-50/40 transition-colors">
+                                  <td className="p-3">
+                                    <div className="font-bold text-slate-900">{row.item}</div>
+                                    <div className="text-[10px] text-slate-400 font-mono">Lote: {row.lote} • Cód: {row.codigo}</div>
+                                  </td>
+                                  <td className="p-3 text-center font-mono font-bold text-slate-800">
+                                    {formatIsoDateToPtBr(row.validade)}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    {row.isExpired ? (
+                                      <span className="bg-rose-600 text-white font-black px-2 py-0.5 rounded text-[10px]">VENCIDO</span>
+                                    ) : (
+                                      <span className="bg-amber-100 text-amber-900 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                                        {row.diasAteVencimento} dias
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center font-mono text-slate-600">
+                                    {row.mediaConsumoMensal.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}/mês
+                                  </td>
+                                  <td className="p-3 text-center font-mono font-bold text-slate-800">
+                                    {row.quantidadeEstoque.toLocaleString('pt-BR')} {row.unidade}
+                                  </td>
+                                  <td className="p-3 text-center font-mono font-extrabold text-rose-700 bg-rose-50/50">
+                                    {row.saldoRemanescenteEmRisco.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-black text-rose-700 bg-rose-50/50">
+                                    R$ {row.valorEmRisco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={7} className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                  Nenhum lote com risco de descarte ou saldo excedente identificado.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
+                  )}
 
-                    {/* bento de Curvas ABC */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center text-xs pt-2">
-                      <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl space-y-1.5">
-                        <strong className="text-rose-800 block text-[10px] font-black uppercase tracking-widest">CURVA A (70%)</strong>
-                        <span className="font-mono font-black text-rose-700 block text-lg">{countA} {countA === 1 ? 'item' : 'itens'}</span>
-                        <span className="text-[10px] text-slate-500 font-bold block bg-rose-100/55 px-2 py-0.5 rounded-lg inline-block">
-                          Total: {formatAbcValue(valueA)}
-                        </span>
+                  {/* SUB-ABA 3: PAINEL DE RUPTURA (SALDO ZERADO) */}
+                  {activeAnalysisTab === 'ruptura' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 text-rose-500" />
+                            Insumos em Ruptura (Saldo Zerado com Histórico)
+                          </h4>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Cruzamento automatizado de vendas e compras de fornecedores para itens zerados.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleGenerateRupturaPdfReport}
+                          className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>Gerar Relatório PDF</span>
+                        </button>
                       </div>
-                      
-                      <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl space-y-1.5">
-                        <strong className="text-amber-800 block text-[10px] font-black uppercase tracking-widest">CURVA B (20%)</strong>
-                        <span className="font-mono font-black text-amber-700 block text-lg">{countB} {countB === 1 ? 'item' : 'itens'}</span>
-                        <span className="text-[10px] text-slate-500 font-bold block bg-amber-100/55 px-2 py-0.5 rounded-lg inline-block">
-                          Total: {formatAbcValue(valueB)}
-                        </span>
-                      </div>
-                      
-                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl space-y-1.5">
-                        <strong className="text-blue-800 block text-[10px] font-black uppercase tracking-widest">CURVA C (10%)</strong>
-                        <span className="font-mono font-black text-blue-700 block text-lg">{countC} {countC === 1 ? 'item' : 'itens'}</span>
-                        <span className="text-[10px] text-slate-500 font-bold block bg-blue-100/55 px-2 py-0.5 rounded-lg inline-block">
-                          Total: {formatAbcValue(valueC)}
-                        </span>
+
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                        <table className="w-full text-left bg-white font-sans text-xs">
+                          <thead>
+                            <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                              <th className="p-3">ITEM / CÓDIGO</th>
+                              <th className="p-3 text-center">MÉDIA CONSUMO MÊS</th>
+                              <th className="p-3 text-center">QUANTAS VEZES VENDIDO</th>
+                              <th className="p-3">ONDE JÁ FOI COMPRADO (FORNECEDORES)</th>
+                              <th className="p-3 text-center">ÚLTIMA COMPRA / CUSTO</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                            {itensRuptura.length > 0 ? (
+                              itensRuptura.map(row => (
+                                <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
+                                  <td className="p-3">
+                                    <div className="font-bold text-slate-900">{row.item}</div>
+                                    <div className="text-[10px] text-slate-400 font-mono">Cód: {row.codigo}</div>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className="font-mono font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-lg inline-block text-[10px] border border-rose-100">
+                                      {row.mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}/mês
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    {row.totalTimesSold > 0 ? (
+                                      <div>
+                                        <span className="font-mono font-bold text-slate-800 text-[11px]">{row.totalTimesSold}x vendido</span>
+                                        <div className="text-[9px] text-slate-400">({row.totalQtySold.toLocaleString('pt-BR')} {row.unidade} escoadas)</div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-[10px]">—</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3">
+                                    {row.suppliersList && row.suppliersList.length > 0 ? (
+                                      <div className="space-y-0.5">
+                                        {row.suppliersList.slice(0, 3).map((sup: string, idx: number) => (
+                                          <span key={idx} className="inline-block bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded text-[10px] mr-1 mb-0.5">
+                                            🏢 {sup}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="font-medium text-slate-700">🏢 {row.ultimoFornecedor}</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center font-mono">
+                                    {row.custo_unitario > 0 ? (
+                                      <div>
+                                        <span className="font-bold text-slate-800 text-[10px]">R$ {row.custo_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        <div className="text-[9px] text-slate-400">{row.ultimaCompra !== '—' ? formatIsoDateToPtBr(row.ultimaCompra) : '—'}</div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-[10px]">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={5} className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                  Nenhuma ruptura (itens com saldo zerado e consumo ativo) detectada no sistema!
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
+                  )}
 
-                    {/* Recharts Pie Chart da Curva ABC */}
-                    <div className="h-56 flex justify-center items-center mt-4">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={[
-                              { name: 'Curva A', value: valueA || 1, color: '#f43f5e' },
-                              { name: 'Curva B', value: valueB || 0.1, color: '#f59e0b' },
-                              { name: 'Curva C', value: valueC || 0.1, color: '#3b82f6' }
-                            ]}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={30}
-                            outerRadius={65}
-                            paddingAngle={4}
-                            dataKey="value"
+                  {/* SUB-ABA 4: CURVA ABC DE INSUMOS */}
+                  {activeAnalysisTab === 'curvaAbc' && (
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                        <div>
+                          <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
+                            <Layers className="h-4.5 w-4.5 text-indigo-600" />
+                            Classificação do Estoque via Curva ABC
+                          </h4>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Metodologia ABC (Curva A: 70%, Curva B: 20%, Curva C: 10%). Analise de relevância estratégica dos seus insumos.
+                          </p>
+                        </div>
+                        
+                        <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                          <button
+                            onClick={() => setCurvaAbcFiltro('frequencia')}
+                            className={`px-3 py-1 text-[9px] font-extrabold uppercase rounded-lg transition-all ${
+                              curvaAbcFiltro === 'frequencia' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
                           >
-                            <Cell fill="#f43f5e" />
-                            <Cell fill="#f59e0b" />
-                            <Cell fill="#3b82f6" />
-                          </Pie>
-                          <Tooltip 
-                            formatter={(val) => [formatAbcValue(Number(val)), 'Total']}
-                            contentStyle={{ fontSize: '11px', borderRadius: '12px' }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
+                            Frequência
+                          </button>
+                          <button
+                            onClick={() => setCurvaAbcFiltro('consumo')}
+                            className={`px-3 py-1 text-[9px] font-extrabold uppercase rounded-lg transition-all ${
+                              curvaAbcFiltro === 'consumo' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            Consumo
+                          </button>
+                          <button
+                            onClick={() => setCurvaAbcFiltro('lucro')}
+                            className={`px-3 py-1 text-[9px] font-extrabold uppercase rounded-lg transition-all ${
+                              curvaAbcFiltro === 'lucro' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            Lucratividade
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center text-xs pt-2">
+                        <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl space-y-1.5">
+                          <strong className="text-rose-800 block text-[10px] font-black uppercase tracking-widest">CURVA A (70%)</strong>
+                          <span className="font-mono font-black text-rose-700 block text-lg">{countA} {countA === 1 ? 'item' : 'itens'}</span>
+                          <span className="text-[10px] text-slate-500 font-bold block bg-rose-100/55 px-2 py-0.5 rounded-lg inline-block">
+                            Total: {formatAbcValue(valueA)}
+                          </span>
+                        </div>
+                        
+                        <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl space-y-1.5">
+                          <strong className="text-amber-800 block text-[10px] font-black uppercase tracking-widest">CURVA B (20%)</strong>
+                          <span className="font-mono font-black text-amber-700 block text-lg">{countB} {countB === 1 ? 'item' : 'itens'}</span>
+                          <span className="text-[10px] text-slate-500 font-bold block bg-amber-100/55 px-2 py-0.5 rounded-lg inline-block">
+                            Total: {formatAbcValue(valueB)}
+                          </span>
+                        </div>
+                        
+                        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl space-y-1.5">
+                          <strong className="text-blue-800 block text-[10px] font-black uppercase tracking-widest">CURVA C (10%)</strong>
+                          <span className="font-mono font-black text-blue-700 block text-lg">{countC} {countC === 1 ? 'item' : 'itens'}</span>
+                          <span className="text-[10px] text-slate-500 font-bold block bg-blue-100/55 px-2 py-0.5 rounded-lg inline-block">
+                            Total: {formatAbcValue(valueC)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="h-56 flex justify-center items-center mt-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={[
+                                { name: 'Curva A', value: valueA || 1, color: '#f43f5e' },
+                                { name: 'Curva B', value: valueB || 0.1, color: '#f59e0b' },
+                                { name: 'Curva C', value: valueC || 0.1, color: '#3b82f6' }
+                              ]}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={35}
+                              outerRadius={70}
+                              paddingAngle={4}
+                              dataKey="value"
+                            >
+                              <Cell fill="#f43f5e" />
+                              <Cell fill="#f59e0b" />
+                              <Cell fill="#3b82f6" />
+                            </Pie>
+                            <Tooltip 
+                              formatter={(val) => [formatAbcValue(Number(val)), 'Total']}
+                              contentStyle={{ fontSize: '11px', borderRadius: '12px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                 </div>
 
@@ -5016,6 +6289,459 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
 
         </div>
       </div>
+
+      {/* MODAL EXPANDIDO DE INSUMOS EM RUPTURA (SALDO ZERADO) */}
+      {isRupturaExpanded && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Header do Modal */}
+            <div className="bg-slate-900 text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shrink-0">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-rose-500 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">Análise Crítica</span>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-rose-400" />
+                    Insumos em Ruptura (Saldo Zerado)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300 mt-1">
+                  Cruzamento automatizado de quantas vezes o item já foi vendido e todos os fornecedores onde já foi comprado.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  onClick={handleGenerateRupturaPdfReport}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer transition-all shadow-md"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Exportar Relatório PDF</span>
+                </button>
+
+                <button
+                  onClick={() => setIsRupturaExpanded(false)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
+                  title="Fechar modal"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Filtro e Busca interna */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar por item, código ou fornecedor..."
+                  value={rupturaSearchQuery}
+                  onChange={(e) => setRupturaSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 shadow-2xs"
+                />
+              </div>
+
+              <div className="text-xs font-bold text-slate-600 flex items-center gap-2">
+                <span>Exibindo:</span>
+                <span className="bg-rose-100 text-rose-700 font-mono font-black px-2.5 py-0.5 rounded-lg">
+                  {itensRuptura.filter(i => 
+                    i.item.toLowerCase().includes(rupturaSearchQuery.toLowerCase()) || 
+                    i.codigo.toLowerCase().includes(rupturaSearchQuery.toLowerCase()) ||
+                    i.ultimoFornecedor.toLowerCase().includes(rupturaSearchQuery.toLowerCase())
+                  ).length} itens zerados
+                </span>
+              </div>
+            </div>
+
+            {/* Conteúdo da Tabela Detalhada no Modal */}
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
+                <table className="w-full text-left bg-white font-sans text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="p-3">Código & Item</th>
+                      <th className="p-3 text-center">Consumo Mês</th>
+                      <th className="p-3">Cruzamento de Vendas (Quantas Vezes Vendido)</th>
+                      <th className="p-3">Cruzamento de Compras (Onde Foi Comprado)</th>
+                      <th className="p-3 text-center">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {itensRuptura
+                      .filter(i => 
+                        i.item.toLowerCase().includes(rupturaSearchQuery.toLowerCase()) || 
+                        i.codigo.toLowerCase().includes(rupturaSearchQuery.toLowerCase()) ||
+                        i.ultimoFornecedor.toLowerCase().includes(rupturaSearchQuery.toLowerCase())
+                      )
+                      .map(row => (
+                        <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="p-3">
+                            <div className="font-black text-slate-900 text-xs">{row.item}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Cód. Sistema: {row.codigo}</div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className="font-mono font-extrabold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg inline-block text-xs">
+                              {row.mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} {row.unidade}/mês
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            {row.totalTimesSold > 0 ? (
+                              <div className="space-y-1">
+                                <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                                  <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-mono text-[10px] border border-indigo-100">
+                                    {row.totalTimesSold}x vendido
+                                  </span>
+                                  <span className="text-slate-500 text-[11px] font-normal">
+                                    ({row.totalQtySold.toLocaleString('pt-BR')} {row.unidade} total)
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500">
+                                  Receita Acumulada: <strong className="text-emerald-700 font-mono">R$ {row.totalRevenueSold.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  Última Venda: {row.ultimaVenda !== '—' ? formatIsoDateToPtBr(row.ultimaVenda) : '—'}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-slate-400 text-[11px] italic">Sem registros diretos de vendas</div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <div className="space-y-1">
+                              <div className="text-xs font-bold text-slate-800">
+                                {row.suppliersList && row.suppliersList.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {row.suppliersList.map((sup: string, idx: number) => (
+                                      <span key={idx} className="bg-slate-100 text-slate-800 font-medium px-2 py-0.5 rounded text-[10px]">
+                                        🏢 {sup}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span>🏢 {row.ultimoFornecedor}</span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                Histórico: {row.totalPurchasesCount || 0} compras efetuadas ({row.totalQtyPurchased ? row.totalQtyPurchased.toLocaleString('pt-BR') : 0} {row.unidade})
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                Último Custo: <strong className="text-slate-700">R$ {(row.custo_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> | Data: {row.ultimaCompra !== '—' ? formatIsoDateToPtBr(row.ultimaCompra) : '—'}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={handleGenerateRupturaPdfReport}
+                              className="p-2 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1 text-[10px] font-bold"
+                              title="Gerar PDF para este relatório"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              <span>PDF</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer do Modal */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0 text-xs">
+              <span className="text-slate-500 font-medium">
+                Módulo Compra Inteligente • Diagnóstico e Reposição Estratégica de Estoque
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsRupturaExpanded(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold cursor-pointer transition-colors"
+                >
+                  Fechar
+                </button>
+                <button
+                  onClick={handleGenerateRupturaPdfReport}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition-all shadow-xs"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Gerar PDF Completo</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EXPANSÍVEL: PAINEL DE ITENS EM ATENÇÃO & SUGESTÃO DE COMPRA INTERATIVA */}
+      {isAttentionModalExpanded && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-rose-200 w-full max-w-7xl max-h-[92vh] flex flex-col overflow-hidden">
+            
+            {/* Header do Modal */}
+            <div className="p-5 bg-gradient-to-r from-rose-900 via-rose-800 to-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 bg-rose-500/30 text-rose-200 text-[10px] font-black uppercase rounded-md border border-rose-400/30">
+                    Compra Inteligente • Gestão de Reposição
+                  </span>
+                  <span className="text-xs font-mono font-bold text-rose-300">
+                    {dadosItensEmAtencao.list.length} itens requerem atenção
+                  </span>
+                </div>
+                <h3 className="text-xl font-black mt-1 flex items-center gap-2 text-white">
+                  <AlertTriangle className="h-6 w-6 text-rose-400 shrink-0" />
+                  Painel de Itens em Atenção & Sugestão de Compra
+                </h3>
+                <p className="text-xs text-rose-100/80 mt-0.5">
+                  Cruzamento automatizado: Vendas Recorrentes, Ruptura/Risco de Falta (&lt;60d), Vencimento (&lt;30d) e Solicitações de Alta Procura.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  onClick={handleGenerateAttentionPdfReport}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Gerar PDF ({Object.values(pdfColumnsConfig).filter(Boolean).length}/8 colunas)</span>
+                </button>
+                <button
+                  onClick={() => setIsAttentionModalExpanded(false)}
+                  className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors cursor-pointer"
+                  title="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra Superior de Ações Globais: Padrão para Todos os Itens */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4 shrink-0 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                  <SlidersHorizontal className="h-4 w-4 text-rose-600" />
+                  Aplicar Padrão para Todos os Itens:
+                </span>
+                <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                  {[1, 2, 3, 6, 12].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => setGlobalMonthsSelection(m)}
+                      className={`px-3 py-1.5 rounded-lg font-black text-xs transition-all cursor-pointer ${
+                        globalMonthsSelection === m 
+                          ? 'bg-rose-600 text-white shadow-xs' 
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {m} {m === 1 ? 'Mês' : 'Meses'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-slate-600 text-[11px]">
+                <div className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 font-mono font-bold text-slate-800">
+                  Total Estimado em Compras: <strong className="text-rose-600 text-xs">R$ {dadosItensEmAtencao.list.reduce((acc, i) => acc + i.valorEstimado, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Barra de Seleção de Colunas para Impressão no PDF */}
+            <div className="px-4 py-2.5 bg-rose-50/70 border-b border-rose-100 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-rose-950 uppercase tracking-wider text-[10px] flex items-center gap-1.5 shrink-0">
+                  <FileText className="h-4 w-4 text-rose-600" />
+                  Colunas no Relatório PDF:
+                </span>
+                <span className="text-[10px] text-rose-700 font-medium hidden sm:inline">
+                  (Marque ou desmarque quais colunas devem sair no arquivo PDF)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  { key: 'codigo', label: 'Código' },
+                  { key: 'item', label: 'Descrição' },
+                  { key: 'estoqueAtual', label: 'Estoque' },
+                  { key: 'consumoMensal', label: 'Consumo' },
+                  { key: 'motivos', label: 'Motivo Atenção' },
+                  { key: 'mesesDesejados', label: 'Prazo' },
+                  { key: 'sugestaoUser', label: 'Sugestão' },
+                  { key: 'valorEstimado', label: 'Valor' },
+                ].map((col) => {
+                  const active = pdfColumnsConfig[col.key];
+                  return (
+                    <button
+                      key={col.key}
+                      onClick={() => setPdfColumnsConfig(prev => ({ ...prev, [col.key]: !prev[col.key] }))}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                        active
+                          ? 'bg-rose-600 border-rose-700 text-white shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                      }`}
+                    >
+                      <div className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[9px] ${active ? 'bg-white text-rose-700 font-black' : 'border border-slate-300 bg-slate-50'}`}>
+                        {active ? <Check className="h-3 w-3 stroke-[3]" /> : null}
+                      </div>
+                      <span>{col.label}</span>
+                    </button>
+                  );
+                })}
+
+                <div className="flex items-center gap-1 ml-1 pl-2 border-l border-rose-200">
+                  <button
+                    onClick={() => setPdfColumnsConfig({
+                      codigo: true, item: true, estoqueAtual: true, consumoMensal: true,
+                      motivos: true, mesesDesejados: true, sugestaoUser: true, valorEstimado: true
+                    })}
+                    className="px-2 py-0.5 text-[9px] font-extrabold text-rose-800 hover:bg-rose-100 rounded-md transition-colors cursor-pointer"
+                    title="Marcar todas as colunas"
+                  >
+                    Todas
+                  </button>
+                  <button
+                    onClick={() => setPdfColumnsConfig({
+                      codigo: false, item: true, estoqueAtual: false, consumoMensal: false,
+                      motivos: false, mesesDesejados: false, sugestaoUser: true, valorEstimado: true
+                    })}
+                    className="px-2 py-0.5 text-[9px] font-bold text-slate-600 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer"
+                    title="Apenas Descrição, Sugestão de Compra e Valor"
+                  >
+                    Essenciais
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Tabela Interativa de Sugestões de Compra */}
+            <div className="flex-1 overflow-auto p-4">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-black text-[10px] uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
+                    <th className="p-3 rounded-tl-xl">Código</th>
+                    <th className="p-3">Descrição do Item</th>
+                    <th className="p-3 text-center">Estoque Atual</th>
+                    <th className="p-3 text-center">Consumo Mensal</th>
+                    <th className="p-3">Motivo da Atenção</th>
+                    <th className="p-3 text-center">Prazo Desejado</th>
+                    <th className="p-3 text-center">Sugestão de Compra</th>
+                    <th className="p-3 text-right rounded-tr-xl">Valor Estimado (R$)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                  {dadosItensEmAtencao.list.map((row) => (
+                    <tr key={row.id} className="hover:bg-rose-50/40 transition-colors">
+                      <td className="p-3 font-mono font-bold text-slate-800">
+                        {row.codigo}
+                      </td>
+                      <td className="p-3 font-bold text-slate-900">
+                        {row.item}
+                      </td>
+                      <td className="p-3 text-center font-mono font-bold text-slate-800">
+                        <span className={`px-2 py-1 rounded-lg text-xs ${row.estoqueAtual === 0 ? 'bg-rose-100 text-rose-800 font-black' : 'bg-slate-100 text-slate-800'}`}>
+                          {row.estoqueAtual.toLocaleString('pt-BR')} {row.unidade}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center font-mono font-bold text-indigo-700">
+                        {row.consumoMensal.toFixed(1)} {row.unidade}/mês
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-1">
+                          {row.motivos.map((m, idx) => (
+                            <span 
+                              key={idx} 
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                                m.includes('Falta') ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                                m.includes('Vencimento') ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                                'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                              }`}
+                            >
+                              {m}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-3 text-center">
+                        <select
+                          value={row.mesesDesejados}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 1;
+                            setUserCustomSuggestions(prev => ({
+                              ...prev,
+                              [row.id]: {
+                                ...(prev[row.id] || {}),
+                                mesesDesejados: val,
+                                sugestaoUser: Math.max(0, Math.ceil((val * row.consumoMensal) - row.estoqueAtual))
+                              }
+                            }));
+                          }}
+                          className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold font-mono text-slate-800 focus:outline-none focus:border-rose-500 cursor-pointer shadow-2xs"
+                        >
+                          <option value={1}>1 Mês</option>
+                          <option value={2}>2 Meses</option>
+                          <option value={3}>3 Meses</option>
+                          <option value={6}>6 Meses</option>
+                          <option value={12}>12 Meses</option>
+                        </select>
+                      </td>
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            value={row.sugestaoUser}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setUserCustomSuggestions(prev => ({
+                                ...prev,
+                                [row.id]: {
+                                  ...(prev[row.id] || {}),
+                                  sugestaoUser: val
+                                }
+                              }));
+                            }}
+                            className="w-24 px-2 py-1 bg-white border border-rose-300 rounded-lg text-center font-mono font-black text-xs text-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500 shadow-2xs"
+                          />
+                          <span className="text-[10px] font-bold text-slate-500">{row.unidade}</span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-right font-mono font-black text-rose-700">
+                        R$ {row.valorEstimado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer do Modal */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0 text-xs">
+              <div className="flex items-center gap-3 font-mono font-bold text-slate-700">
+                <span>Total de Itens: <strong className="text-slate-900">{dadosItensEmAtencao.list.length}</strong></span>
+                <span>•</span>
+                <span>Sugestão de Compra Acumulada: <strong className="text-indigo-700">{dadosItensEmAtencao.list.reduce((acc, i) => acc + i.sugestaoUser, 0).toLocaleString('pt-BR')} un</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsAttentionModalExpanded(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold cursor-pointer transition-colors"
+                >
+                  Fechar
+                </button>
+                <button
+                  onClick={handleGenerateAttentionPdfReport}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition-all shadow-xs"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Gerar Relatório PDF ({Object.values(pdfColumnsConfig).filter(Boolean).length}/8 Colunas)</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
