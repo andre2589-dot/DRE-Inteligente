@@ -919,6 +919,24 @@ function identifyNeededModules(prompt: string): string[] {
     modules.add("sales_history");
   }
 
+  // Fórmulas Fechadas
+  if (
+    norm.includes("formula") || norm.includes("fórmula") || norm.includes("fechada") ||
+    norm.includes("composicao") || norm.includes("composição") || norm.includes("item formula")
+  ) {
+    modules.add("formulas");
+  }
+
+  // Semi-Acabados e Equivalências
+  if (
+    norm.includes("semi-acabado") || norm.includes("semi acabado") || norm.includes("equivalencia") ||
+    norm.includes("equivalência") || norm.includes("diluicao") || norm.includes("diluição") ||
+    norm.includes("tratado") || norm.includes("tratatado") || norm.includes("materia prima") ||
+    norm.includes("matéria prima") || norm.includes("concentrado")
+  ) {
+    modules.add("semi_finished");
+  }
+
   // Se for vazio, carrega tudo para ter contexto operacional minimo
   if (modules.size === 0) {
     modules.add("inventory");
@@ -926,6 +944,8 @@ function identifyNeededModules(prompt: string): string[] {
     modules.add("batch_validity");
     modules.add("price_history");
     modules.add("transactions");
+    modules.add("formulas");
+    modules.add("semi_finished");
   }
 
   return Array.from(modules);
@@ -1072,6 +1092,32 @@ async function fetchCompanyGlobalContext(companyId: string, neededModules: strin
       } catch (err) { console.error("Error fetching quotes from Supabase:", err); }
       const fallback = ((db as any).quotes || []).filter((item: any) => item.company_id === cId);
       return { type: 'quotes', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('formulas')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_formulas').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'formulas', data };
+        }
+      } catch (err) { console.error("Error fetching formulas from Supabase:", err); }
+      const fallback = ((db as any).formulas || []).filter((item: any) => item.company_id === cId);
+      return { type: 'formulas', data: fallback };
+    })());
+  }
+
+  if (neededModules.includes('semi_finished')) {
+    promises.push((async () => {
+      try {
+        if (supabase && supabaseActive) {
+          const { data, error } = await supabase.from('procurement_semi_finished').select('*').eq('company_id', cId);
+          if (!error && data) return { type: 'semi_finished', data };
+        }
+      } catch (err) { console.error("Error fetching semi_finished from Supabase:", err); }
+      const fallback = ((db as any).semi_finished || []).filter((item: any) => item.company_id === cId);
+      return { type: 'semi_finished', data: fallback };
     })());
   }
 
@@ -1301,6 +1347,39 @@ function generateCrossAnalysis(prompt: string, contextData: any): string {
     });
   }
 
+  const formulas = contextData.formulas || [];
+  if (formulas && formulas.length > 0) {
+    report += `\nCOMPOSIÇÃO DAS FÓRMULAS FECHADAS (RELAÇÃO FÓRMULA -> ITENS):\n`;
+    const formulaGroups: Record<string, any[]> = {};
+    formulas.forEach((f: any) => {
+      const fKey = `${f.codigo_formula || ''} - ${f.descricao_formula || ''}`;
+      if (!formulaGroups[fKey]) formulaGroups[fKey] = [];
+      formulaGroups[fKey].push(f);
+    });
+
+    Object.entries(formulaGroups).forEach(([fName, items]) => {
+      report += `  - Formula Fechada: ${fName} (${items.length} componentes):\n`;
+      items.forEach((item: any) => {
+        report += `    * Componente: [${item.codigo_item || 'S/C'}] ${item.descricao_item} | Qtd: ${item.quantidade} ${item.unidade || 'g'}\n`;
+      });
+    });
+  }
+
+  const semiFinished = contextData.semi_finished || [];
+  if (semiFinished && semiFinished.length > 0) {
+    report += `\nEQUIVALÊNCIAS DE SEMI-ACABADOS E DILUIÇÕES (RELAÇÃO MATÉRIA-PRIMA ORIGINAL -> SEMI-ACABADO):\n`;
+    report += `Atenção: Ao analisar o consumo e vendas de itens semi-acabados (diluídos / tratados), você DEVE cruzar com a Matéria-Prima Original e aplicar o fator de conversão (Ex: se vendeu 1g de um item diluído 1:100, consome 0.01g da matéria-prima concentrada original do estoque).\n`;
+    semiFinished.forEach((sf: any) => {
+      const fator = Number(sf.fator_equivalencia) || 1;
+      const mpCod = sf.codigo_materia_prima || 'S/C';
+      const mpDesc = sf.descricao_materia_prima || sf.materia_prima || 'N/A';
+      const semiCod = sf.codigo_semi_acabado || 'S/C';
+      const semiDesc = sf.descricao_semi_acabado || sf.semi_acabado || 'N/A';
+      const prop = sf.proporcao_texto || `1:${fator}`;
+      report += `  - MP Original: [${mpCod}] ${mpDesc} <==> Semi-Acabado/Diluído: [${semiCod}] ${semiDesc} | Proporção: ${prop} (Fator: 1/${fator} = ${(1 / fator).toFixed(4)}g de MP por 1g de Semi-Acabado)\n`;
+    });
+  }
+
   return report;
 }
 
@@ -1351,6 +1430,12 @@ app.post("/api/gemini/chat", async (req, res) => {
       }
       if (procurementContext.historicoVendasData && (!globalContext.sales_history || globalContext.sales_history.length === 0 || procurementContext.historicoVendasData.length > (globalContext.sales_history || []).length)) {
         globalContext.sales_history = procurementContext.historicoVendasData;
+      }
+      if (procurementContext.formulasData && (!globalContext.formulas || globalContext.formulas.length === 0 || procurementContext.formulasData.length > (globalContext.formulas || []).length)) {
+        globalContext.formulas = procurementContext.formulasData;
+      }
+      if (procurementContext.equivalenciasData && (!globalContext.semi_finished || globalContext.semi_finished.length === 0 || procurementContext.equivalenciasData.length > (globalContext.semi_finished || []).length)) {
+        globalContext.semi_finished = procurementContext.equivalenciasData;
       }
     }
 
@@ -1909,6 +1994,154 @@ app.post("/api/procurement/sales_history", async (req, res) => {
   res.json({ success: true, count: cleanItems.length, data: cleanItems });
 });
 
+app.get("/api/procurement/formulas", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_formulas')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching formulas from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).formulas) (db as any).formulas = [];
+  const list = (db as any).formulas.filter((item: any) => item.company_id === String(company_id));
+  res.json(list);
+});
+
+app.post("/api/procurement/formulas", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, formula_items } = req.body;
+  if (!company_id || !Array.isArray(formula_items)) {
+    res.status(400).json({ error: "company_id ou array de itens de fórmulas fechadas inválido." });
+    return;
+  }
+
+  const cleanItems = formula_items.map((item: any) => {
+    let unit = String(item.unidade || 'g').trim().toLowerCase();
+    if (unit.includes('ml') || unit.includes('mili')) unit = 'ml';
+    else unit = 'g';
+
+    return {
+      id: item.id || `form_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      company_id: String(company_id),
+      codigo_formula: item.codigo_formula || '',
+      descricao_formula: item.descricao_formula || '',
+      codigo_item: item.codigo_item || '',
+      descricao_item: item.descricao_item || '',
+      quantidade: Number(item.quantidade) || 0,
+      unidade: unit,
+      created_at: item.created_at || new Date().toISOString()
+    };
+  });
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_formulas').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_formulas').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting formulas to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).formulas || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).formulas = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
+app.get("/api/procurement/semi_finished", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id } = req.query;
+  if (!company_id) {
+    res.status(400).json({ error: "O parâmetro company_id é obrigatório." });
+    return;
+  }
+
+  try {
+    if (supabase && supabaseActive) {
+      const { data, error } = await supabase
+        .from('procurement_semi_finished')
+        .select('*')
+        .eq('company_id', String(company_id));
+      if (!error && data) {
+        res.json(data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching semi_finished from Supabase:", err);
+  }
+
+  const db = getDb();
+  if (!(db as any).semi_finished) (db as any).semi_finished = [];
+  const list = (db as any).semi_finished.filter((item: any) => item.company_id === String(company_id));
+  res.json(list);
+});
+
+app.post("/api/procurement/semi_finished", async (req, res) => {
+  await dbReadyPromise;
+  const { company_id, equivalencia_items } = req.body;
+  if (!company_id || !Array.isArray(equivalencia_items)) {
+    res.status(400).json({ error: "company_id ou array de equivalências/semi-acabados inválido." });
+    return;
+  }
+
+  const cleanItems = equivalencia_items.map((item: any) => {
+    const fator = Number(item.fator_equivalencia) || 1;
+    return {
+      id: item.id || `semi_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      company_id: String(company_id),
+      codigo_materia_prima: item.codigo_materia_prima || '',
+      descricao_materia_prima: item.descricao_materia_prima || '',
+      codigo_semi_acabado: item.codigo_semi_acabado || '',
+      descricao_semi_acabado: item.descricao_semi_acabado || '',
+      fator_equivalencia: fator,
+      proporcao_texto: item.proporcao_texto || `1:${fator}`,
+      observacao: item.observacao || '',
+      created_at: item.created_at || new Date().toISOString()
+    };
+  });
+
+  try {
+    if (supabase && supabaseActive) {
+      await supabase.from('procurement_semi_finished').delete().eq('company_id', String(company_id));
+      const { error } = await supabase.from('procurement_semi_finished').insert(cleanItems);
+      if (!error) {
+        res.json({ success: true, count: cleanItems.length, data: cleanItems });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("Error posting semi_finished to Supabase:", err);
+  }
+
+  const db = getDb();
+  const filtered = ((db as any).semi_finished || []).filter((item: any) => item.company_id !== String(company_id));
+  (db as any).semi_finished = [...filtered, ...cleanItems];
+  saveDb(db);
+  res.json({ success: true, count: cleanItems.length, data: cleanItems });
+});
+
 app.post("/api/procurement/clear", async (req, res) => {
   await dbReadyPromise;
   const { company_id } = req.body;
@@ -1925,7 +2158,9 @@ app.post("/api/procurement/clear", async (req, res) => {
         supabase.from('procurement_price_history').delete().eq('company_id', String(company_id)),
         supabase.from('procurement_batch_validity').delete().eq('company_id', String(company_id)),
         supabase.from('procurement_sales_history').delete().eq('company_id', String(company_id)),
-        supabase.from('procurement_quotes').delete().eq('company_id', String(company_id))
+        supabase.from('procurement_quotes').delete().eq('company_id', String(company_id)),
+        supabase.from('procurement_formulas').delete().eq('company_id', String(company_id)),
+        supabase.from('procurement_semi_finished').delete().eq('company_id', String(company_id))
       ]);
     }
   } catch (err) {
@@ -1950,6 +2185,12 @@ app.post("/api/procurement/clear", async (req, res) => {
   }
   if ((db as any).quotes) {
     (db as any).quotes = (db as any).quotes.filter((item: any) => item.company_id !== String(company_id));
+  }
+  if ((db as any).formulas) {
+    (db as any).formulas = (db as any).formulas.filter((item: any) => item.company_id !== String(company_id));
+  }
+  if ((db as any).semi_finished) {
+    (db as any).semi_finished = (db as any).semi_finished.filter((item: any) => item.company_id !== String(company_id));
   }
   saveDb(db);
 

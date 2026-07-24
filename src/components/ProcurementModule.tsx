@@ -148,6 +148,27 @@ interface SolicitacaoItem {
   status: 'PENDENTE' | 'EM_COMPRA' | 'ATENDIDO';
 }
 
+interface FormulaFechadaItem {
+  id: string;
+  codigo_formula: string;
+  descricao_formula: string;
+  codigo_item: string;
+  descricao_item: string;
+  quantidade: number;
+  unidade: string; // Gramas ('g') ou Mililitros ('ml')
+}
+
+interface EquivalenciaSemiAcabadoItem {
+  id: string;
+  codigo_materia_prima?: string;
+  descricao_materia_prima: string;
+  codigo_semi_acabado?: string;
+  descricao_semi_acabado: string;
+  fator_equivalencia: number;
+  proporcao_texto?: string;
+  observacao?: string;
+}
+
 interface SalesAnalysisItem {
   codigo: string;
   item: string;
@@ -384,11 +405,11 @@ interface ProcurementModuleProps {
 
 export default function ProcurementModule({ companyId, userId, dreContext, activeSubTab = 'indicators' }: ProcurementModuleProps) {
   // Aba de dados selecionada na Gestão de Compras
-  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes'>('estoque');
+  const [activeSubData, setActiveSubData] = useState<'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes' | 'formulas' | 'equivalencias'>('estoque');
 
   // Controle de Mapeador de Colunas Personalizado e Pré-visualização Interativa
   const [pendingUpload, setPendingUpload] = useState<{
-    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes';
+    tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'solicitacoes' | 'formulas' | 'equivalencias';
     fileName: string;
     fileSize: string;
     detectedHeaders: string[];
@@ -527,6 +548,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       }
     ];
   });
+  const [formulasData, setFormulasData] = useState<FormulaFechadaItem[]>([]);
+  const [equivalenciasData, setEquivalenciasData] = useState<EquivalenciaSemiAcabadoItem[]>([]);
+  const [formulasViewMode, setFormulasViewMode] = useState<'composicao' | 'demanda'>('composicao');
   const [salesSortFilter, setSalesSortFilter] = useState<'frequencia' | 'quantidade' | 'valor_venda'>('frequencia');
   const [salesViewType, setSalesViewType] = useState<'analise' | 'registros'>('analise');
   const [curvaAbcFiltro, setCurvaAbcFiltro] = useState<'frequencia' | 'consumo' | 'lucro'>('frequencia');
@@ -656,6 +680,43 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           else setHistoricoVendasData([]);
         }
 
+        // 6. Fórmulas Fechadas
+        const resForm = await fetch(`/api/procurement/formulas?company_id=${companyId}`);
+        let mappedForm = [];
+        if (resForm.ok) {
+          const data = await resForm.json();
+          mappedForm = data.map((item: any) => ({
+            ...item,
+            quantidade: Number(item.quantidade) || 0,
+            unidade: item.unidade || 'g'
+          }));
+        }
+        if (mappedForm.length > 0) {
+          setFormulasData(mappedForm);
+        } else {
+          const cached = localStorage.getItem(`gestao_formulas_data_${companyId}`);
+          if (cached) setFormulasData(JSON.parse(cached));
+          else setFormulasData([]);
+        }
+
+        // 7. Equivalências de Semi-Acabados
+        const resSemi = await fetch(`/api/procurement/semi_finished?company_id=${companyId}`);
+        let mappedSemi = [];
+        if (resSemi.ok) {
+          const data = await resSemi.json();
+          mappedSemi = data.map((item: any) => ({
+            ...item,
+            fator_equivalencia: Number(item.fator_equivalencia) || 1
+          }));
+        }
+        if (mappedSemi.length > 0) {
+          setEquivalenciasData(mappedSemi);
+        } else {
+          const cached = localStorage.getItem(`gestao_equivalencias_data_${companyId}`);
+          if (cached) setEquivalenciasData(JSON.parse(cached));
+          else setEquivalenciasData([]);
+        }
+
         setLoadedCompanyId(companyId);
       } catch (err) {
         console.error("Error loading procurement data from API:", err);
@@ -774,6 +835,48 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     return () => clearTimeout(timer);
   }, [historicoVendasData, companyId, loadingDb, loadedCompanyId]);
 
+  useEffect(() => {
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    try {
+      localStorage.setItem(`gestao_formulas_data_${companyId}`, JSON.stringify(formulasData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/formulas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, formula_items: formulasData })
+        });
+      } catch (e) {
+        console.error("Error saving formulas:", e);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [formulasData, companyId, loadingDb, loadedCompanyId]);
+
+  useEffect(() => {
+    if (loadingDb || !loadedCompanyId || companyId !== loadedCompanyId) return;
+    try {
+      localStorage.setItem(`gestao_equivalencias_data_${companyId}`, JSON.stringify(equivalenciasData));
+    } catch (e) {
+      console.warn("Storage quota exceeded or unavailable:", e);
+    }
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/procurement/semi_finished', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, semi_finished_items: equivalenciasData })
+        });
+      } catch (e) {
+        console.error("Error saving equivalencias:", e);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [equivalenciasData, companyId, loadingDb, loadedCompanyId]);
+
   // Estados gerais
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadLoading, setUploadLoading] = useState<string | null>(null);
@@ -781,7 +884,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   const [isChatExpanded, setIsChatExpanded] = useState(true);
 
   const handleClearDatabase = async () => {
-    if (!window.confirm("Atenção: Isso irá apagar definitivamente todos os dados de estoque, consumo, preços históricos, controle de validades e cotações cadastrados para esta empresa para iniciar uma base limpa. Deseja prosseguir?")) {
+    if (!window.confirm("Atenção: Isso irá apagar definitivamente todos os dados de estoque, consumo, preços históricos, controle de validades, fórmulas, equivalências de semi-acabados e cotações cadastrados para esta empresa para iniciar uma base limpa. Deseja prosseguir?")) {
       return;
     }
     try {
@@ -797,6 +900,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         setHistoricoPrecosData([]);
         setValidadeLotesData([]);
         setHistoricoVendasData([]);
+        setFormulasData([]);
+        setEquivalenciasData([]);
         setArquivosRegistrados([]);
         localStorage.removeItem('gestao_arquivos_registrados');
         localStorage.removeItem(`gestao_estoque_data_${companyId}`);
@@ -804,6 +909,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         localStorage.removeItem(`gestao_precos_data_${companyId}`);
         localStorage.removeItem(`gestao_validade_data_${companyId}`);
         localStorage.removeItem(`gestao_sales_data_${companyId}`);
+        localStorage.removeItem(`gestao_formulas_data_${companyId}`);
+        localStorage.removeItem(`gestao_equivalencias_data_${companyId}`);
         setToastMessage("Módulo Compras Inteligentes zerado com sucesso! Pronto para inserção real.");
         setTimeout(() => setToastMessage(null), 4500);
       } else {
@@ -818,7 +925,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
   };
 
   // Inicia o processo de mapeamento e pré-visualização ao anexar arquivo
-  const initiateFileUpload = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas', fileOrName: File | string) => {
+  const initiateFileUpload = (tipo: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'formulas' | 'equivalencias', fileOrName: File | string) => {
     let fileName = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
     let fileSize = typeof fileOrName === 'string' ? '48 KB' : (fileOrName.size / 1024).toFixed(1) + ' KB';
 
@@ -905,6 +1012,36 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           dataVendaCol: 'Data da Venda',
           custoUnitarioCol: 'Custo Unitário R$',
           precoVendaCol: 'Preço de Venda R$'
+        };
+      } else if (tipo === 'formulas') {
+        detectedHeaders = ['Código Formulas Fechada', 'Descrição Fórmula Fechada', 'Códido Item', 'Descrição Item', 'Quantidade', 'unidade'];
+        previewRows = [
+          { 'Código Formulas Fechada': 'FORM-01', 'Descrição Fórmula Fechada': 'CREATINA MONOHIDRATADA 250G', 'Códido Item': 'MP-001', 'Descrição Item': 'Creatina Monohidratada Matéria Prima', 'Quantidade': '250', 'unidade': 'g' },
+          { 'Código Formulas Fechada': 'FORM-01', 'Descrição Fórmula Fechada': 'CREATINA MONOHIDRATADA 250G', 'Códido Item': 'EMB-002', 'Descrição Item': 'Pote Plástico 250g', 'Quantidade': '1', 'unidade': 'g' },
+          { 'Código Formulas Fechada': 'FORM-02', 'Descrição Fórmula Fechada': 'BCAA ULTRA PURE', 'Códido Item': 'MP-005', 'Descrição Item': 'L-Leucina', 'Quantidade': '150', 'unidade': 'g' }
+        ];
+        suggestedMapping = {
+          codigoFormulaCol: 'Código Formulas Fechada',
+          descricaoFormulaCol: 'Descrição Fórmula Fechada',
+          codigoItemCol: 'Códido Item',
+          descricaoItemCol: 'Descrição Item',
+          qtyCol: 'Quantidade',
+          unidadeCol: 'unidade'
+        };
+      } else if (tipo === 'equivalencias') {
+        detectedHeaders = ['Código Matéria-Prima', 'Descrição Matéria-Prima', 'Código Semi-Acabado', 'Descrição Semi-Acabado', 'Equivalência', 'Fator'];
+        previewRows = [
+          { 'Código Matéria-Prima': 'MP-0010', 'Descrição Matéria-Prima': 'METILCOBALAMINA PURA', 'Código Semi-Acabado': 'SA-100', 'Descrição Semi-Acabado': 'METILCOBALAMINA 1:100', 'Equivalência': '1:100', 'Fator': '0.01' },
+          { 'Código Matéria-Prima': 'MP-0022', 'Descrição Matéria-Prima': 'PIRIDOXAL 5 FOSFATO', 'Código Semi-Acabado': 'SA-010', 'Descrição Semi-Acabado': 'PIRIDOXAL 5 FOSFATO 1:10', 'Equivalência': '1:10', 'Fator': '0.1' },
+          { 'Código Matéria-Prima': 'MP-0045', 'Descrição Matéria-Prima': 'COENZIMA Q10 TRATADA', 'Código Semi-Acabado': 'SA-TRAT', 'Descrição Semi-Acabado': 'COENZIMA Q10 TRATADA 1:1', 'Equivalência': '1:1', 'Fator': '1.0' }
+        ];
+        suggestedMapping = {
+          codMpCol: 'Código Matéria-Prima',
+          descMpCol: 'Descrição Matéria-Prima',
+          codSemiCol: 'Código Semi-Acabado',
+          descSemiCol: 'Descrição Semi-Acabado',
+          proporcaoCol: 'Equivalência',
+          fatorCol: 'Fator'
         };
       }
 
@@ -996,13 +1133,15 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         }
 
         // Check if the uploaded headers match a different type better than the current type
-        const checkMatchCountForType = (testType: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas') => {
+        const checkMatchCountForType = (testType: 'estoque' | 'consumo' | 'historico_precos' | 'validade' | 'historico_vendas' | 'formulas' | 'equivalencias') => {
           let keys: string[] = [];
           if (testType === 'estoque') keys = ['saldo', 'estoque', 'físico', 'mínimo', 'segurança'];
           else if (testType === 'consumo') keys = ['consumido', 'saídas', 'mes_ano', 'mês', 'custo acumulado'];
           else if (testType === 'historico_precos') keys = ['fornecedor', 'entrada', 'qtd comprada', 'preço custo', 'pedido compra', 'condições pgto'];
           else if (testType === 'validade') keys = ['vencimento', 'validade', 'vence', 'dias para vencer'];
           else if (testType === 'historico_vendas') keys = ['quantidade vendida', 'data da venda', 'venda', 'preço de venda', 'custo unitário'];
+          else if (testType === 'formulas') keys = ['fórmula', 'formula', 'composição', 'composicao', 'códido item', 'código item', 'código formula', 'cód formula'];
+          else if (testType === 'equivalencias') keys = ['matéria-prima', 'materia-prima', 'semi-acabado', 'semi acabado', 'equivalência', 'equivalencia', 'fator'];
           
           let count = 0;
           for (const key of keys) {
@@ -1017,7 +1156,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           consumo: checkMatchCountForType('consumo'),
           historico_precos: checkMatchCountForType('historico_precos'),
           validade: checkMatchCountForType('validade'),
-          historico_vendas: checkMatchCountForType('historico_vendas')
+          historico_vendas: checkMatchCountForType('historico_vendas'),
+          formulas: checkMatchCountForType('formulas'),
+          equivalencias: checkMatchCountForType('equivalencias')
         };
         
         let bestType = tipo;
@@ -1034,7 +1175,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
         if (bestType !== tipo && maxCount >= 2) {
           finalTipo = bestType;
           setActiveSubData(bestType);
-          triggerToast(`Identificamos que este arquivo parece ser de "${bestType === 'estoque' ? 'Saldo de Estoque' : bestType === 'consumo' ? 'Consumo Mensal' : bestType === 'historico_precos' ? 'Compras Realizadas' : bestType === 'validade' ? 'Controle de Validade' : 'Histórico de Vendas'}". Mudamos automaticamente para a aba correspondente!`);
+          triggerToast(`Identificamos que este arquivo parece ser de "${bestType === 'estoque' ? 'Saldo de Estoque' : bestType === 'consumo' ? 'Consumo Mensal' : bestType === 'historico_precos' ? 'Compras Realizadas' : bestType === 'validade' ? 'Controle de Validade' : bestType === 'historico_vendas' ? 'Histórico de Vendas' : bestType === 'formulas' ? 'Fórmulas Fechadas' : 'Equivalência de Semi-Acabado'}". Mudamos automaticamente para a aba correspondente!`);
         }
 
         // Mapear automaticamente com base em semelhança de nomes de colunas
@@ -1095,6 +1236,25 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             dataVendaCol: findBestMatch(['data', 'data da venda', 'venda', 'emissão']),
             custoUnitarioCol: findBestMatch(['custo', 'custo unitário', 'unitario', 'valor custo', 'médio', 'custo medio']),
             precoVendaCol: findBestMatch(['preço', 'venda', 'preço venda', 'sugerido', 'valor venda', 'preco venda'])
+          };
+        } else if (finalTipo === 'formulas') {
+          suggestedMapping = {
+            codigoFormulaCol: findBestMatch(['código formulas fechada', 'codigo formula', 'cód formula', 'cod formula', 'código fórmula', 'codigo_formula']),
+            descricaoFormulaCol: findBestMatch(['descrição fórmula fechada', 'descricao formula', 'fórmula', 'formula', 'descrição fórmula']),
+            codigoItemCol: findBestMatch(['códido item', 'código item', 'codigo item', 'cod item', 'codigo_item']),
+            descricaoItemCol: findBestMatch(['descrição item', 'descricao item', 'item', 'materia prima', 'insumo', 'componente']),
+            qtyCol: findBestMatch(['quantidade', 'qtd', 'volume', 'dosagem', 'proporcao']),
+            unidadeCol: findBestMatch(['unidade', 'un', 'und', 'medida'])
+          };
+        } else if (finalTipo === 'equivalencias') {
+          suggestedMapping = {
+            codigoFormulaCol: findBestMatch(['código da fórmula', 'codigo da formula', 'código fórmula', 'codigo formula', 'cód formula', 'cod formula']),
+            descMpCol: findBestMatch(['descrição', 'descricao', 'descrição fórmula', 'descricao formula', 'descrição matéria prima', 'descricao materia prima']),
+            descSemiCol: findBestMatch(['descrição semi acabado', 'descricao semi acabado', 'semi acabado', 'semi-acabado']),
+            codMpCol: findBestMatch(['código da matéria-prima (original)', 'código da matéria prima', 'codigo da materia prima', 'matéria-prima (original)', 'materia-prima (original)', 'código mp', 'cod mp']),
+            codSemiCol: findBestMatch(['código do semi-acabado', 'codigo do semi acabado', 'código semi acabado', 'codigo semi acabado', 'código sa', 'cod sa']),
+            proporcaoCol: findBestMatch(['equivalência', 'equivalencia', 'proporção', 'proporcao', 'razão', 'razao']),
+            fatorCol: findBestMatch(['fator', 'fator equivalência', 'fator equivalencia'])
           };
         }
 
@@ -1375,6 +1535,110 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           }
         }
         return [...prev, ...baseMockData];
+      });
+    } else if (tipo === 'formulas') {
+      const mappedRows: FormulaFechadaItem[] = (allRows || []).map((row, idx) => {
+        const codigoFormula = String(row[suggestedMapping.codigoFormulaCol] || '').trim();
+        const descricaoFormula = String(row[suggestedMapping.descricaoFormulaCol] || '').trim();
+        const codigoItem = String(row[suggestedMapping.codigoItemCol] || '').trim();
+        const descricaoItem = String(row[suggestedMapping.descricaoItemCol] || '').trim();
+        const qty = parsePtBrFloat(row[suggestedMapping.qtyCol]);
+        let rawUnidade = String(row[suggestedMapping.unidadeCol] || 'g').trim().toLowerCase();
+        
+        let unidade = 'g';
+        if (rawUnidade.includes('ml') || rawUnidade.includes('milli') || rawUnidade === 'l') {
+          unidade = 'ml';
+        } else {
+          unidade = 'g';
+        }
+
+        return {
+          id: 'form_import_' + Date.now() + '_' + idx,
+          codigo_formula: codigoFormula || 'FORM-' + idx,
+          descricao_formula: descricaoFormula || 'Fórmula Sem Descrição',
+          codigo_item: codigoItem || 'ITEM-' + idx,
+          descricao_item: descricaoItem || 'Item Sem Descrição',
+          quantidade: qty,
+          unidade
+        };
+      }).filter(r => r.descricao_formula !== '' || r.descricao_item !== '');
+
+      setFormulasData(prev => {
+        if (mappedRows.length > 0) {
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m => String(m.codigo_formula || '').toLowerCase() === String(p.codigo_formula || '').toLowerCase() && String(m.codigo_item || '').toLowerCase() === String(p.codigo_item || '').toLowerCase()));
+            return [...filteredPrev, ...mappedRows];
+          }
+        }
+        return prev;
+      });
+    } else if (tipo === 'equivalencias') {
+      const mappedRows: EquivalenciaSemiAcabadoItem[] = (allRows || []).map((row, idx) => {
+        const codigoFormula = String(row[suggestedMapping.codigoFormulaCol] || '').trim();
+        const codMp = String(row[suggestedMapping.codMpCol] || '').trim();
+        const descMp = String(row[suggestedMapping.descMpCol] || row[suggestedMapping.descSemiCol] || '').trim();
+        const codSemi = String(row[suggestedMapping.codSemiCol] || '').trim();
+        const descSemi = String(row[suggestedMapping.descSemiCol] || descMp || '').trim();
+        const propVal = String(row[suggestedMapping.proporcaoCol] || '').trim();
+
+        let rawFator = row[suggestedMapping.fatorCol] !== undefined && row[suggestedMapping.fatorCol] !== ''
+          ? Number(row[suggestedMapping.fatorCol])
+          : parsePtBrFloat(propVal);
+
+        let fator = rawFator;
+        if (!fator && propVal) {
+          const numVal = parsePtBrFloat(propVal);
+          if (numVal > 0) {
+            fator = numVal;
+          } else if (propVal.includes('1:100')) fator = 100;
+          else if (propVal.includes('1:10')) fator = 10;
+          else if (propVal.includes('1:1000')) fator = 1000;
+          else if (propVal.includes('1:1')) fator = 1.0;
+          else {
+            const parts = propVal.split(':');
+            if (parts.length === 2) {
+              const p1 = Number(parts[0]);
+              const p2 = Number(parts[1]);
+              if (p1 && p2) fator = p2 / p1;
+            }
+          }
+        }
+        if (!fator) fator = 1.0;
+
+        let proporcaoTexto = propVal;
+        if (!proporcaoTexto) {
+          proporcaoTexto = fator !== 1 ? `1:${fator}` : '1:1';
+        } else if (!proporcaoTexto.includes(':') && Number(proporcaoTexto) > 0) {
+          proporcaoTexto = `1:${proporcaoTexto}`;
+        }
+
+        return {
+          id: 'eq_import_' + Date.now() + '_' + idx,
+          codigo_formula: codigoFormula,
+          codigo_materia_prima: codMp,
+          descricao_materia_prima: descMp || 'Semi-Acabado ' + (codigoFormula || codSemi),
+          codigo_semi_acabado: codSemi || codigoFormula,
+          descricao_semi_acabado: descSemi || descMp || 'Semi-Acabado',
+          fator_equivalencia: fator,
+          proporcao_texto: proporcaoTexto
+        };
+      }).filter(r => r.descricao_materia_prima !== '' || r.descricao_semi_acabado !== '' || r.codigo_semi_acabado !== '' || r.codigo_materia_prima !== '' || r.codigo_formula !== '');
+
+      setEquivalenciasData(prev => {
+        if (mappedRows.length > 0) {
+          if (overwriteOnImport) {
+            return mappedRows;
+          } else {
+            const filteredPrev = prev.filter(p => !mappedRows.some(m =>
+              (m.codigo_materia_prima && m.codigo_materia_prima.toLowerCase() === (p.codigo_materia_prima || '').toLowerCase()) ||
+              (m.codigo_semi_acabado && m.codigo_semi_acabado.toLowerCase() === (p.codigo_semi_acabado || '').toLowerCase())
+            ));
+            return [...filteredPrev, ...mappedRows];
+          }
+        }
+        return prev;
       });
     }
 
@@ -2000,6 +2264,16 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
     }
   };
 
+  const handleDeleteFormulaItem = (id: string) => {
+    setFormulasData(prev => prev.filter(f => f.id !== id));
+    triggerToast("Item da fórmula fechada removido.");
+  };
+
+  const handleDeleteEquivalenciaItem = (id: string) => {
+    setEquivalenciasData(prev => prev.filter(eq => eq.id !== id));
+    triggerToast("Equivalência de semi-acabado removida.");
+  };
+
   // Função auxiliar de download de relatório (Gera e exporta CSV fictício fidedigno)
   const handleDownloadRelatorioCSV = (tipo: string) => {
     let content = 'data:text/csv;charset=utf-8,';
@@ -2023,6 +2297,11 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
       (historicoVendasData || []).forEach(v => {
         const lucro = ((v.preco_venda || 0) - (v.custo_unitario || 0)) * (v.quantidade || 0);
         content += `"${v.id}";"${v.codigo || ''}";"${v.item}";${v.quantidade};"${v.data_venda}";${v.custo_unitario};${v.preco_venda};${lucro}\n`;
+      });
+    } else if (tipo === 'formulas') {
+      content += '"ID";"Código Fórmula";"Descrição Fórmula";"Código Item";"Descrição Item";"Quantidade";"Unidade"\n';
+      formulasData.forEach(f => {
+        content += `"${f.id}";"${f.codigo_formula}";"${f.descricao_formula}";"${f.codigo_item}";"${f.descricao_item}";${f.quantidade};"${f.unidade}"\n`;
       });
     } else {
       content += '"Codigo";"Descricao";"Numero do Lote";"Quantidade do Lote";"Validade";"Dias para Vencer";"Consumo Medio Mensal";"Status de Risco";"Sobra Projetada";"Perda Financeira Projetada";"Sugestao de Reposicao"\n';
@@ -3018,6 +3297,23 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
           lucro_total: sa.lucro_total,
           lucratividade: sa.lucratividade,
           curva_abc: sa.curva_abc
+        })),
+        formulasData: formulasData.map(f => ({
+          codigo_formula: f.codigo_formula,
+          descricao_formula: f.descricao_formula,
+          codigo_item: f.codigo_item,
+          descricao_item: f.descricao_item,
+          quantidade: f.quantidade,
+          unidade: f.unidade
+        })),
+        equivalenciasData: equivalenciasData.map(eq => ({
+          codigo_materia_prima: eq.codigo_materia_prima,
+          descricao_materia_prima: eq.descricao_materia_prima,
+          codigo_semi_acabado: eq.codigo_semi_acabado,
+          descricao_semi_acabado: eq.descricao_semi_acabado,
+          fator_equivalencia: eq.fator_equivalencia,
+          proporcao_texto: eq.proporcao_texto,
+          observacao: eq.observacao
         }))
       };
 
@@ -4056,6 +4352,170 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     </div>
                   </>
                 )}
+
+                {pendingUpload.tipo === 'formulas' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código Formulas Fechada *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoFormulaCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoFormulaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição Fórmula Fechada *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.descricaoFormulaCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, descricaoFormulaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Códido Item *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoItemCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoItemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição Item *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.descricaoItemCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, descricaoItemCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Quantidade *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.qtyCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, qtyCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Unidade (exclusivamente g ou ml) *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.unidadeCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, unidadeCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {pendingUpload.tipo === 'equivalencias' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código da Fórmula *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codigoFormulaCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codigoFormulaCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Descrição (Fórmula Fechada / Semi-Acabado) *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.descMpCol || pendingUpload.suggestedMapping.descSemiCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, descMpCol: e.target.value, descSemiCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código Matéria-Prima (Original)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codMpCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codMpCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Código do Semi-Acabado *</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.codSemiCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, codSemiCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Equivalência / Diluição (ex: 10, 100, 1000)</label>
+                      <select
+                        value={pendingUpload.suggestedMapping.proporcaoCol || ''}
+                        onChange={(e) => setPendingUpload({
+                          ...pendingUpload,
+                          suggestedMapping: { ...pendingUpload.suggestedMapping, proporcaoCol: e.target.value }
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Ignorar / Não Anexar --</option>
+                        {pendingUpload.detectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -4111,8 +4571,8 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
             {activeSubTab === 'indicators' && (
               <div className="space-y-6">
                 
-                {/* 6 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3.5">
+                {/* 8 Blocos Seletor das Bases Obrigatórias para Alimentação/Upload */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                   <button
                     onClick={() => setActiveSubData('estoque')}
                     className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
@@ -4220,6 +4680,42 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                     <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">6. Relatório de Solicitações</h3>
                     {(activeSubData as string) === 'solicitacoes' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
                   </button>
+
+                  <button
+                    onClick={() => setActiveSubData('formulas')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'formulas' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'formulas' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <Calculator className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {formulasData.length} itens
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">7. Fórmulas Fechadas</h3>
+                    {activeSubData === 'formulas' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveSubData('equivalencias')}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative select-none cursor-pointer ${
+                      activeSubData === 'equivalencias' ? 'bg-white border-emerald-500 shadow-sm ring-1 ring-emerald-500/10' : 'bg-white hover:bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-xl ${activeSubData === 'equivalencias' ? 'bg-emerald-50 text-emerald-650' : 'bg-slate-100 text-slate-500'}`}>
+                        <Layers className="h-4.5 w-4.5" />
+                      </div>
+                      <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {equivalenciasData.length} itens
+                      </span>
+                    </div>
+                    <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide">8. Semi-Acabados / Diluições</h3>
+                    {activeSubData === 'equivalencias' && <span className="absolute bottom-2 right-3 h-2 w-2 rounded-full bg-emerald-500" />}
+                  </button>
                 </div>
 
                 {/* Sub cockpit: Área de Uploads + Tabelas Dinâmicas de faturamento */}
@@ -4234,6 +4730,9 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                         {activeSubData === 'historico_precos' && 'Upload: Compras Realizadas'}
                         {activeSubData === 'validade' && 'Upload: Validades/Lotes'}
                         {activeSubData === 'historico_vendas' && 'Upload: Histórico de Vendas'}
+                        {activeSubData === 'solicitacoes' && 'Upload: Solicitações de Compras'}
+                        {activeSubData === 'formulas' && 'Upload: Fórmulas Fechadas'}
+                        {activeSubData === 'equivalencias' && 'Upload: Semi-Acabados / Diluições'}
                       </h4>
                       <p className="text-[10px] text-slate-400">Arraste seus relatórios do sistema em Excel, CSV ou PDF.</p>
                     </div>
@@ -5519,6 +6018,275 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                       </div>
                     )}
 
+                    {/* BASE 7: FÓRMULAS FECHADAS */}
+                    {activeSubData === 'formulas' && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div>
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                              <Calculator className="h-4 w-4 text-emerald-600" />
+                              Estrutura Oficial de Fórmulas Fechadas (Composição de Insumos)
+                            </h3>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Relação oficial de composição de fórmulas fechadas importadas. Unidade de controle restrita a Gramas (g) ou Mililitros (ml).
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-[10px] font-bold">
+                              <button
+                                onClick={() => setFormulasViewMode('formulas')}
+                                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${formulasViewMode === 'formulas' ? 'bg-white text-indigo-700 shadow-2xs font-extrabold' : 'text-slate-500 hover:text-slate-800'}`}
+                              >
+                                Agrupado por Fórmula
+                              </button>
+                              <button
+                                onClick={() => setFormulasViewMode('itens')}
+                                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${formulasViewMode === 'itens' ? 'bg-white text-indigo-700 shadow-2xs font-extrabold' : 'text-slate-500 hover:text-slate-800'}`}
+                              >
+                                Lista Todos os Itens
+                              </button>
+                            </div>
+                            <span className="bg-emerald-50 text-emerald-800 font-mono font-black text-xs px-2.5 py-1 rounded-lg border border-emerald-100">
+                              {formulasData.length} registros
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Tabela de Fórmulas Fechadas */}
+                        {formulasViewMode === 'formulas' ? (
+                          <div className="max-h-[520px] overflow-y-auto pr-1 space-y-3">
+                            {(() => {
+                              type GroupedFormula = { codigo_formula: string; descricao_formula: string; items: FormulaFechadaItem[] };
+                              const grouped = formulasData.reduce((acc, curr) => {
+                                const key = (curr.codigo_formula || 'FORM') + '___' + (curr.descricao_formula || 'Sem Descrição');
+                                if (!acc[key]) {
+                                  acc[key] = {
+                                    codigo_formula: curr.codigo_formula,
+                                    descricao_formula: curr.descricao_formula,
+                                    items: []
+                                  };
+                                }
+                                acc[key].items.push(curr);
+                                return acc;
+                              }, {} as Record<string, GroupedFormula>);
+
+                              const filteredGrouped: GroupedFormula[] = (Object.values(grouped) as GroupedFormula[]).filter((g: GroupedFormula) =>
+                                searchQuery === '' ||
+                                (g.codigo_formula && g.codigo_formula.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                (g.descricao_formula && g.descricao_formula.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                g.items.some(i => (i.codigo_item && i.codigo_item.toLowerCase().includes(searchQuery.toLowerCase())) || (i.descricao_item && i.descricao_item.toLowerCase().includes(searchQuery.toLowerCase())))
+                              );
+
+                              if (filteredGrouped.length === 0) {
+                                return (
+                                  <div className="py-8 text-center text-slate-400 font-medium bg-white rounded-xl border border-slate-100">
+                                    Nenhuma fórmula fechada cadastrada ou encontrada na busca.
+                                  </div>
+                                );
+                              }
+
+                              return filteredGrouped.map((g, idx) => (
+                                <div key={g.codigo_formula + '_' + idx} className="bg-white border border-slate-150 rounded-2xl overflow-hidden shadow-2xs">
+                                  <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-mono font-black text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-1 rounded-lg text-xs">
+                                        {g.codigo_formula || '—'}
+                                      </span>
+                                      <h4 className="font-extrabold text-slate-800 text-xs">
+                                        {g.descricao_formula}
+                                      </h4>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-500 bg-white px-2.5 py-1 rounded-full border border-slate-200">
+                                      {g.items.length} {g.items.length === 1 ? 'item componente' : 'itens componentes'}
+                                    </span>
+                                  </div>
+                                  <div className="p-3">
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-left text-[11px]">
+                                        <thead>
+                                          <tr className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider pb-1">
+                                            <th className="pb-1.5 px-2">Cód. Item</th>
+                                            <th className="pb-1.5 px-2">Descrição Item Componente</th>
+                                            <th className="pb-1.5 px-2 text-right">Quantidade</th>
+                                            <th className="pb-1.5 px-2 text-center">Unidade</th>
+                                            <th className="pb-1.5 px-2 text-center">Excluir</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                          {g.items.map((it) => (
+                                            <tr key={it.id} className="hover:bg-slate-50/50 transition-colors">
+                                              <td className="py-2 px-2 font-mono text-slate-600 font-bold">{it.codigo_item || '—'}</td>
+                                              <td className="py-2 px-2 font-bold text-slate-900">{it.descricao_item}</td>
+                                              <td className="py-2 px-2 text-right font-mono font-black text-slate-800">
+                                                {(Number(it.quantidade) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                                              </td>
+                                              <td className="py-2 px-2 text-center font-mono text-xs font-bold text-emerald-700">
+                                                <span className="bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                                                  {it.unidade}
+                                                </span>
+                                              </td>
+                                              <td className="py-2 px-2 text-center">
+                                                <button
+                                                  onClick={() => handleDeleteFormulaItem(it.id)}
+                                                  className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-100 cursor-pointer"
+                                                  title="Excluir item da fórmula"
+                                                >
+                                                  <Trash className="h-3.5 w-3.5" />
+                                                </button>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        ) : (
+                          <div className="max-h-[520px] overflow-y-auto overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
+                            <table className="min-w-[800px] w-full text-left bg-white rounded-xl table-fixed">
+                              <thead className="sticky top-0 bg-slate-50 z-10 shadow-2xs">
+                                <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 text-left">
+                                  <th className="pb-2 pt-3 px-3 w-[12%]">Cód. Fórmula</th>
+                                  <th className="pb-2 pt-3 w-[25%]">Descrição Fórmula</th>
+                                  <th className="pb-2 pt-3 w-[13%]">Cód. Item</th>
+                                  <th className="pb-2 pt-3 w-[30%]">Descrição Item</th>
+                                  <th className="pb-2 pt-3 text-right w-[10%] pr-3">Quantidade</th>
+                                  <th className="pb-2 pt-3 text-center w-[5%]">Un.</th>
+                                  <th className="pb-2 pt-3 text-center w-[5%]">Excluir</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                                {formulasData
+                                  .filter(f =>
+                                    searchQuery === '' ||
+                                    (f.codigo_formula && f.codigo_formula.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                    (f.descricao_formula && f.descricao_formula.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                    (f.codigo_item && f.codigo_item.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                    (f.descricao_item && f.descricao_item.toLowerCase().includes(searchQuery.toLowerCase()))
+                                  )
+                                  .map((f) => (
+                                    <tr key={f.id} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="py-2.5 px-3">
+                                        <span className="font-mono font-bold text-indigo-700 bg-indigo-50/60 px-2 py-0.5 rounded-lg border border-indigo-100/40 text-[10px] inline-block">
+                                          {f.codigo_formula || '—'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 font-extrabold text-slate-800 truncate" title={f.descricao_formula}>
+                                        {f.descricao_formula}
+                                      </td>
+                                      <td className="py-2.5 font-mono text-slate-600 font-bold">{f.codigo_item || '—'}</td>
+                                      <td className="py-2.5 font-bold text-slate-900 truncate" title={f.descricao_item}>{f.descricao_item}</td>
+                                      <td className="py-2.5 text-right font-mono font-black text-slate-800 pr-3">
+                                        {(Number(f.quantidade) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                                      </td>
+                                      <td className="py-2.5 text-center font-mono font-bold text-emerald-700">
+                                        <span className="bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full text-[10px]">
+                                          {f.unidade}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-center">
+                                        <button onClick={() => handleDeleteFormulaItem(f.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                          <Trash className="h-3.5 w-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                {formulasData.length === 0 && (
+                                  <tr>
+                                    <td colSpan={7} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                      Nenhum item de fórmula fechada cadastrado.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* BASE 8: EQUIVALÊNCIAS DE SEMI-ACABADOS / DILUIÇÕES */}
+                    {activeSubData === 'equivalencias' && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div>
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                              <Layers className="h-4 w-4 text-emerald-600" />
+                              Tabela de Equivalências e Diluições de Semi-Acabados
+                            </h3>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Mapeamento oficial para conversão entre código da fórmula, matéria-prima pura e semi-acabado (diluído/tratado).
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="bg-emerald-50 text-emerald-800 font-mono font-black text-xs px-2.5 py-1 rounded-lg border border-emerald-100">
+                              {equivalenciasData.length} mapeamentos
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="max-h-[520px] overflow-y-auto overflow-x-auto text-[11px] border border-slate-100 rounded-xl">
+                          <table className="min-w-[850px] w-full text-left bg-white rounded-xl table-fixed">
+                            <thead className="sticky top-0 bg-slate-50 z-10 shadow-2xs">
+                              <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 text-left">
+                                <th className="pb-2 pt-3 px-3 w-[12%]">Código da Fórmula</th>
+                                <th className="pb-2 pt-3 w-[28%]">Descrição</th>
+                                <th className="pb-2 pt-3 w-[15%]">Cód. MP (Original)</th>
+                                <th className="pb-2 pt-3 w-[15%]">Cód. Semi-Acabado</th>
+                                <th className="pb-2 pt-3 text-center w-[13%]">Equivalência</th>
+                                <th className="pb-2 pt-3 text-right w-[9%] pr-3">Fator</th>
+                                <th className="pb-2 pt-3 text-center w-[8%]">Excluir</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50 font-sans text-slate-700">
+                              {equivalenciasData
+                                .filter(eq =>
+                                  searchQuery === '' ||
+                                  (eq.codigo_formula && eq.codigo_formula.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                  (eq.codigo_materia_prima && eq.codigo_materia_prima.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                  (eq.descricao_materia_prima && eq.descricao_materia_prima.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                  (eq.codigo_semi_acabado && eq.codigo_semi_acabado.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                                  (eq.descricao_semi_acabado && eq.descricao_semi_acabado.toLowerCase().includes(searchQuery.toLowerCase()))
+                                )
+                                .map((eq) => (
+                                  <tr key={eq.id} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="py-2.5 px-3 font-mono font-bold text-indigo-700">{eq.codigo_formula || '—'}</td>
+                                    <td className="py-2.5 font-extrabold text-slate-900">{eq.descricao_materia_prima || eq.descricao_semi_acabado}</td>
+                                    <td className="py-2.5 font-mono font-bold text-slate-600">{eq.codigo_materia_prima || '—'}</td>
+                                    <td className="py-2.5 font-mono text-emerald-700 font-bold">{eq.codigo_semi_acabado || '—'}</td>
+                                    <td className="py-2.5 text-center font-mono text-xs font-bold text-indigo-800">
+                                      <span className="bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full text-[10px]">
+                                        {eq.proporcao_texto || (eq.fator_equivalencia !== 1 ? `1:${eq.fator_equivalencia}` : '1:1')}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 text-right font-mono font-black text-slate-900 pr-3">
+                                      {eq.fator_equivalencia}
+                                    </td>
+                                    <td className="py-2.5 text-center">
+                                      <button onClick={() => handleDeleteEquivalenciaItem(eq.id)} className="text-slate-400 hover:text-red-550 p-1 rounded hover:bg-slate-50 cursor-pointer">
+                                        <Trash className="h-3.5 w-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              {equivalenciasData.length === 0 && (
+                                <tr>
+                                  <td colSpan={7} className="py-8 text-center text-slate-400 font-medium bg-white">
+                                    Nenhuma equivalência de semi-acabado cadastrada.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
 
                 </div>
@@ -5561,6 +6329,7 @@ export default function ProcurementModule({ companyId, userId, dreContext, activ
                                 {file.tipo === 'historico_precos' && 'Valores Fornecedor'}
                                 {file.tipo === 'validade' && 'Validade Lote'}
                                 {file.tipo === 'historico_vendas' && 'Histórico de Vendas'}
+                                {file.tipo === 'formulas' && 'Fórmulas Fechadas'}
                               </span>
                             </td>
                             <td className="py-3 font-mono text-slate-450">{file.enviado_em}</td>

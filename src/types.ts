@@ -90,3 +90,29 @@ export interface MonthConfig {
   totalWorkingDays: number;
   elapsedWorkingDays: number;
 }
+
+export interface FormulaFechadaItem {
+  id: string;
+  company_id?: string;
+  codigo_formula: string;    // Código Formulas Fechada
+  descricao_formula: string; // Descrição Fórmula Fechada
+  codigo_item: string;       // Códido Item
+  descricao_item: string;    // Descrição Item
+  quantidade: number;        // Quantidade
+  unidade: string;           // unidade (strictly g or ml)
+  created_at?: string;
+}
+
+export interface EquivalenciaSemiAcabadoItem {
+  id: string;
+  company_id?: string;
+  codigo_materia_prima: string;    // Código da Matéria-Prima Original (Fornecedor)
+  descricao_materia_prima: string; // Descrição da Matéria-Prima Original
+  codigo_semi_acabado: string;     // Código do Semi-Acabado (Processo de transformação / diluição)
+  descricao_semi_acabado: string;  // Descrição do Semi-Acabado
+  fator_equivalencia: number;      // Fator de Diluição/Proporção (ex: 100 para 1:100, onde 1g semi-acabado = 0.01g do concentrado)
+  proporcao_texto: string;         // Ex: "1:100", "1:10", "1:1", "Tratado"
+  observacao?: string;
+  created_at?: string;
+}
+
